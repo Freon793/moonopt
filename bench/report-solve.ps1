@@ -62,7 +62,7 @@ foreach ($line in $lines) {
       $current.Objective = $Matches[1]
       $current.Iterations = $Matches[2]
     }
-    if ($line -match '\(([^)]*)\)\s*$') {
+    if ($line -match '\((.*)\)\s*$') {
       $current.Note = $Matches[1]
     }
   }

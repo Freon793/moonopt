@@ -25,8 +25,11 @@ You can browse and install extra skills here:
     position reporting. Implemented.
   - `oracle/`: dense two-phase tableau simplex used as the *reference* for
     differential tests. Deliberately simple; it is not the shipped solver.
-  - `simplex/`, `presolve/`, `verify/`, `mip/`: added milestone by milestone,
-    see `docs/roadmap.md`.
+  - `simplex/`: the sparse revised simplex kernel. Sparse CSC columns, dense
+    basis inverse with product-form updates and periodic refactorization, Phase I
+    and II, Harris ratio test with a Bland fallback, and a residual self-check
+    before it will report `Optimal`. `presolve/`, `verify/`, `mip/`: added
+    milestone by milestone, see `docs/roadmap.md`.
   - `cmd/main/`: demo CLI. `cmd/parse/`: model file inspection CLI. `examples/`:
     runnable examples. `bench/`: data policy, fetch and report scripts, reports.
     `docs/`: design notes, technical roadmap and the ecosystem survey that

@@ -5,6 +5,45 @@
 
 ## [Unreleased]
 
+### Added — M3 (sparse revised simplex kernel)
+
+- `simplex`：**稀疏修正单纯形内核**，公开入口 `solve_standard` / `solve_model`
+  （以及带显式选项的 `_with` 版本），状态区分 `Optimal` / `Infeasible` / `Unbounded` /
+  `IterationLimit` / `NumericalFailure`；
+- 数据结构：问题以 CSC 列存储，定价按列非零元走；基逆为稠密 `m×m`，
+  用乘积形式行变换更新，并每 `refactorize_every` 次枢轴重新用部分主元 Gauss-Jordan 分解，
+  奇异时上报 `NumericalFailure` 而不是继续跑；
+- 单纯形过程：Phase I 最小化人工变量和，Phase II 优化真实目标并禁止人工变量入基；
+  Dantzig 定价（停滞时自动切到 Bland 规则以保终止）、**Harris 两遍比值检验**、
+  对偶值与检验数、比值检验忽略负的基本值以免反向迈步；
+- **人工变量驱逐**：Phase I 结束后仍留在基里的零值人工变量会被换出，
+  否则 Phase II 的枢轴会把它推成正数从而悄悄破坏对应行的可行性（此问题由差分测试发现）；
+- **自检**：声明最优前用内核自己的矩阵重算行残差（不计人工列）与非负性，
+  超容差即返回 `NumericalFailure` 并附测得数值；
+- 模型侧变换：非零下界通过平移、自由变量拆成正负两部分、有限上界转为显式行，
+  目标常数随平移一起记录；`SimplexOptions::relaxed()` 把整数变量当作连续变量，
+  用于求 MILP 的 LP 松弛；
+- 根包 `moonopt::solve` 不再使用稠密参考实现，改为调用内核；旧的适配层删除。
+- `cmd/parse` 新增 `--solve` / `--relax` / `--max-rows`，可对解析出的模型直接求解。
+
+### Differential testing — 2026-09-14
+
+- 新增随机 LP 差分测试：确定性 LCG 生成 **200 个随机 LP**（2–5 变量、2–5 行、
+  混合 `≤`/`≥`/`=`、含负右端项与负成本系数），内核与 `oracle` 在**状态、目标值与
+  解的可行性**三方面必须一致；另有 41 个非整数系数（0.5 缩放 + 偏移）实例，
+  用于覆盖符号正规化与比值检验的非整数路径。
+- 测试总数 58 → **72**，`moon check --deny-warn` / `moon test --deny-warn` 与
+  wasm-gc、js、native 三目标全绿。
+
+### Benchmark — 2026-09-14 (kernel)
+
+- 在 MIPLIB 2017 的 33 个实例上运行求解报告（LP 松弛模式，行数 ≤ 200）：
+  **9 个求到最优**、23 个因行数超过当前稠密基逆的规模上限而跳过、
+  1 个由内核自检判定为数值失败并如实记录残差与负值。完整表格见
+  [`bench/solve-report.md`](bench/solve-report.md)。
+- 规模上限是当前实现（稠密基逆）的真实边界，已写入 README 的能力表；
+  稀疏 LU 基分解与更快的定价属于 M3 剩余工作。
+
 ### Added — M2 (standard model input)
 
 - `format`：**MPS 读取器**（free 与 fixed 布局、`NAME` / `ROWS` / `COLUMNS` / `RHS` /
