@@ -18,12 +18,12 @@
 core     数值与稀疏基础设施。不依赖本模块其它包。
 model    LP/MILP 模型层（变量、表达式、约束、目标、校验）。依赖 core。
 oracle   稠密两阶段单纯形，仅作为差分测试对照基准。依赖 core、model。
-format   MPS/LP 读写（D2）。依赖 core、model。
-simplex  稀疏修正单纯形与对偶单纯形（D3）。依赖 core、model(标准化表示)。
-presolve presolve/postsolve（D5）。依赖 core、model。
-verify   证书校验（D6）。依赖 core、model。
-mip      分支定界与割平面（D7–D9）。依赖 simplex、verify。
-moonopt  根包：对外的 Model::solve 与结果类型；只做编排，不含算法细节。
+format   MPS/LP 读写（M2）。依赖 core、model。
+simplex  稀疏修正单纯形与对偶单纯形（M3）。依赖 core、model（标准化表示）。
+presolve presolve/postsolve（M3）。依赖 core、model。
+verify   证书校验（M4）。依赖 core、model。
+mip      分支定界与割平面（M5，受范围闸门约束）。依赖 simplex、verify。
+moonopt  根包：对外的 solve / solve_with 与结果类型；只做编排，不含算法细节。
 ```
 
 规则：**算法细节只能出现在被它服务的包里**，根包保持薄；包之间只经由 `.mbti` 公开接口通信。
@@ -33,8 +33,10 @@ moonopt  根包：对外的 Model::solve 与结果类型；只做编排，不含
 - 稀疏矩阵用 **CSC**（compressed sparse column）：`col_ptr` / `row_idx` / `values`，
   列内行号升序、不存结构零。理由：修正单纯形以列为主进行定价与基更新。
 - 累加一律走 `core` 的 Neumaier 补偿求和，禁止裸 `+=` 累加大规模求和。
-- 变量界在 v0.1 由 `Var.lb` / `Var.ub` 表示，用 `±1e30` 表示数值意义上的无界；
+- 变量界由 `Var.lb` / `Var.ub` 表示，用 `±1e30` 表示数值意义上的无界；
   若将来需要严格区分“自由变量”，引入 `Option[Double]` 属于破坏性变更，需走版本升级。
+- 系数以 `(变量下标, 系数)` 对存列，排序、合并同类项、丢精确零，保证同一模型的不同写法
+  归一到同一表示。
 
 ## 数值策略
 
@@ -60,4 +62,12 @@ moonopt  根包：对外的 Model::solve 与结果类型；只做编排，不含
 
 `oracle` 的存在只有一个目的：给未经优化的、易读的参考实现，供 `simplex` 做差分测试。
 它是**参考实现，而不是交付求解器**，且它的能力边界（稠密、规模小）写进文档。
-随机 LP 生成器 + oracle + simplex 三方对拍是 D3–D4 的主要正确性手段。
+随机 LP 生成器 + oracle + simplex 三方对拍是 M3 的主要正确性手段。
+
+## 能力边界如何对外呈现
+
+- README 用表格列出“当前支持 / 暂不支持”，暂不支持的每一行都对应一个返回 `NotSolved`
+  并带原因的代码路径；
+- 任何新增能力必须同时更新该表与 `CHANGELOG.md`；
+- 示例中保留一个“当前不支持”的诚实用例（`moon run cmd/main` 会打印），
+  让边界对使用者可见而不是靠读源码发现。

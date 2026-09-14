@@ -23,10 +23,11 @@ You can browse and install extra skills here:
   - `model/`: variables, linear expressions, constraints, objective, validation.
   - `oracle/`: dense two-phase tableau simplex used as the *reference* for
     differential tests. Deliberately simple; it is not the shipped solver.
-  - `simplex/`, `format/`, `presolve/`, `mip/`, `verify/`: added day by day, see
-    `docs/roadmap.md`.
+  - `simplex/`, `format/`, `presolve/`, `mip/`, `verify/`: added milestone by
+    milestone, see `docs/roadmap.md`.
   - `cmd/main/`: CLI. `examples/`: runnable examples. `bench/`: benchmark data
-    policy and reports. `docs/`: design, roadmap, comparison evidence.
+    policy and reports. `docs/`: design notes, technical roadmap and the
+    ecosystem survey that defines the design boundary.
 
 ## Coding convention
 

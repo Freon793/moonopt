@@ -1,10 +1,10 @@
 ///|
 /// `moonopt` command line interface.
 ///
-/// D1 keeps the surface deliberately small: it runs the built-in demos and
-/// prints a report, so that the project has a runnable entry point from day one.
-/// Argument parsing for `solve` / `verify` / `fmt` / `bench` lands on D9 — see
-/// `docs/roadmap.md`.
+/// The first milestone keeps the surface deliberately small: it runs the built-in
+/// demos and prints a report, so that the project has a runnable entry point from
+/// day one. Argument parsing for `solve` / `verify` / `fmt` / `bench` arrives
+/// with the report layer — see `docs/roadmap.md`.
 ///
 /// Run with: `moon run cmd/main`
 

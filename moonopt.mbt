@@ -5,7 +5,7 @@
 /// into the form a kernel accepts, calls the kernel, and reports the outcome.
 /// Algorithm details live in the kernel packages — see `docs/design.md`.
 ///
-/// Current capability (D1): the only kernel wired up is `oracle`, the dense
+/// Current capability: the only kernel wired up is `oracle`, the dense
 /// reference implementation. It handles continuous variables with `x >= 0`,
 /// finite upper bounds (added as explicit rows) and any mix of `≤`, `≥`, `=`
 /// rows. Anything outside that class returns `NotSolved` together with the

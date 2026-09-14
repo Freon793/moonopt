@@ -8,11 +8,11 @@
 presolve/postsolve、可复用的分支切割框架，以及**可被第三方独立校验**的最优性（对偶可行解）、
 不可行性（Farkas）与无界（射线）证书。纯 MoonBit 实现，无 FFI 依赖。
 
-> 状态：**v0.1.0-dev（D1 已完成）**。每日交付、必达/加分边界、以及明确**不做**的内容见
-> [`docs/roadmap.md`](docs/roadmap.md)。当前可运行、可测试、CI 全绿，但求解内核仍处于
-> D1 阶段（见下文“当前能力”），尚未发布到 mooncakes.io。
+> 状态：**v0.1.0-dev**，`M1`（基础层与模型层）已落地：可构建、可测试、CI 全绿，
+> 但求解内核仍是稠密参考实现（见下文“当前能力”），尚未发布到 mooncakes.io。
+> 里程碑划分、范围闸门与明确**不做**的内容见 [`docs/roadmap.md`](docs/roadmap.md)。
 
-## 当前能力（v0.1.0-dev / D1）
+## 当前能力（M1）
 
 已经可用并且有测试覆盖的部分：
 
@@ -30,10 +30,10 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 
 | 支持 | 暂不支持（返回 `NotSolved` + 原因，绝不返回可疑解） |
 | --- | --- |
-| 连续变量、`x ≥ 0` | 非零下界（D3 起由内核直接支持） |
-| 有限上界（自动转成显式行） | 整数 / 0-1 变量（D7–D9 薄 MILP 层） |
-| `≤`、`≥`、`=` 任意混合 | MPS / LP 文件输入（D2） |
-| min / max（内部统一为 max） | 证书与 `verify` 校验器（D6） |
+| 连续变量、`x ≥ 0` | 非零下界（M3 起由内核直接支持） |
+| 有限上界（自动转成显式行） | 整数 / 0-1 变量（M5） |
+| `≤`、`≥`、`=` 任意混合 | MPS / LP 文件输入（M2） |
+| min / max（内部统一为 max） | 证书与 `verify` 校验器（M4） |
 
 ## 为什么需要它
 
@@ -48,20 +48,20 @@ MoonBit 生态已经有一批排产、排班、路由、装箱、约束模型库
 - **能给出保证**：对偶解 / Farkas 证书 / 无界射线，并附带独立校验器 —— 解错时校验会失败；
 - **能被复用**：`presolve` / 对偶单纯形热启动 / 分支切割框架对外开放，供上层模型库调用。
 
-## 与生态中既有实现的关系
+## 与生态内既有实现的能力边界差异
 
-我们核对了 mooncakes.io 上全部已发布模块（2 470 个，2026-09-14 核对）与 GitHub `topic:moonbit`
-的全部仓库（304 个），结论是：**不存在通用 LP/MILP 求解器与标准模型格式支持**。
-当前存在两个相关实现，差异见下表（事实性对照，不含评价；逐条证据见
-[`docs/comparison.md`](docs/comparison.md)）：
+选型阶段对 MoonBit 生态做过一次全量现状调研（mooncakes.io 已发布模块全集与 GitHub
+`topic:moonbit` 全部仓库，方法与原始证据见 [`docs/related-work.md`](docs/related-work.md)）。
+结论：**通用 LP/MILP 求解器与标准模型格式支持在该生态中不存在**。两个相关实现的差异如下
+（事实性对照，不含评价）：
 
 | 维度 | `Juwan-Hwang/moon-certified` 的 `math/simplex`、`math/ilp` | `Luna-Flow/linear-program` | **moonopt** |
 | --- | --- | --- | --- |
-| 可表达模型 | 仅 `max cᵀx, Ax ≤ b, x ≥ 0`（561 / 527 行，文件头原文） | 建模 + 标准化，稠密矩阵 | min/max、`≤`/`≥`/`=`、变量上下界、整数/0-1（分阶段落地） |
-| 模型文件输入 | 无（仅内存数组） | 无 | **MPS / LP 读写**（D2） |
-| 单纯形 | 稠密 tableau + Bland | 稠密 tableau 两阶段 | **稀疏 CSC + 修正单纯形**（D3）、对偶单纯形（D6） |
-| 对偶 / presolve | 无 / 无 | 无 / 无 | 对偶热启动（D6）/ presolve + postsolve（D5） |
-| 证书与校验 | 无 | 无 | **最优性、Farkas、无界射线 + 独立 `verify`**（D6） |
+| 可表达模型 | 仅 `max cᵀx, Ax ≤ b, x ≥ 0`（561 / 527 行，文件头原文） | 建模 + 标准化，稠密矩阵 | min/max、`≤`/`≥`/`=`、变量上下界、整数/0-1（分里程碑落地） |
+| 模型文件输入 | 无（仅内存数组） | 无 | **MPS / LP 读写**（M2） |
+| 单纯形 | 稠密 tableau + Bland | 稠密 tableau 两阶段 | **稀疏 CSC + 修正单纯形**（M3）、对偶单纯形（M3） |
+| 对偶 / presolve | 无 / 无 | 无 / 无 | 对偶热启动（M3）/ presolve + postsolve（M3） |
+| 证书与校验 | 无 | 无 | **最优性、Farkas、无界射线 + 独立 `verify`**（M4） |
 | 交付形态 | 30+ 领域合集仓库中的一个模块 | 未发布到 mooncakes.io | 专注单库：CLI + CI + 基准报告 + 文档 + 发布 |
 | 生态检索命中 | —— | —— | `MPS` / `revised simplex` / `dual simplex` / `presolve` / `Farkas` / `certificate` 在生态中命中数均为 **0** |
 
@@ -115,9 +115,9 @@ objective  : 21
 ```
 
 > `1.4999999999999998` 是浮点表示的真实值（在 `1e-9` 相对容差内等于 1.5）。
-> 面向人读的定点格式化属于 D9 的报表层，当前示例直接打印原始值，不做美化。
+> 面向人读的定点格式化属于报表层（M6），当前示例直接打印原始值，不做美化。
 
-`solve` / `verify` / `fmt` / `bench` 等子命令随 D2–D9 落地，见 [`docs/roadmap.md`](docs/roadmap.md)。
+`solve` / `verify` / `fmt` / `bench` 等子命令随 M2–M6 落地，见 [`docs/roadmap.md`](docs/roadmap.md)。
 
 ## 项目结构
 
@@ -126,15 +126,15 @@ moonopt.mbt       公开入口：solve / solve_with、SolveStatus、Solution、S
 core/             数值与稀疏基础设施（容差比较、补偿求和、CSC 稀疏矩阵）
 model/            模型层（变量、线性表达式、约束、目标、模型校验）
 oracle/           参考实现：稠密两阶段单纯形（差分测试对照基准，非交付求解器）
-simplex/          稀疏修正单纯形与对偶单纯形（D3 起）
-format/           MPS / LP 读写（D2 起）
-presolve/         presolve 与 postsolve（D5 起）
-mip/              分支定界与割平面（D7–D9，受 D7 硬开关约束）
-verify/           证书校验器（D6 起）
+simplex/          稀疏修正单纯形与对偶单纯形（M3）
+format/           MPS / LP 读写（M2）
+presolve/         presolve 与 postsolve（M3）
+verify/           证书校验器（M4）
+mip/              分支定界与割平面（M5，受范围闸门约束）
 cmd/main/         CLI
 examples/         可运行示例
 bench/            基准数据集政策与结果报告
-docs/             设计说明、路线图、查重对照证据
+docs/             设计说明、技术路线图、生态现状调研
 ```
 
 ## 开发
@@ -155,7 +155,7 @@ CI（[`.github/workflows/check.yml`](.github/workflows/check.yml)）在 Linux / 
 
 - 统一使用**相对容差**比较（`core`），所有“零”判定都显式带容差；
 - 求和走 Neumaier 补偿求和，避免规模上去后误差累积；
-- 单纯形用 **Bland 规则**保证退化情形终止（D3 起叠加 Harris 两遍比值检验提升稳健性）；
+- 单纯形用 **Bland 规则**保证退化情形终止（M3 起叠加 Harris 两遍比值检验提升稳健性）；
 - 求解结果一律如实报告状态：超出能力边界、迭代上限、不可行、无界都各自可区分，
   `NotSolved` 一定带原因，绝不静默返回错解。
 

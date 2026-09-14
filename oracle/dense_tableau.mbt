@@ -2,8 +2,8 @@
 /// Reference implementation: dense two-phase tableau simplex.
 ///
 /// THIS IS NOT THE SHIPPED SOLVER. It exists so that the sparse revised simplex
-/// (package `simplex`, landing on D3) has an independent, deliberately naive
-/// implementation to be tested against 鈥?a differential oracle. Keeping it dense
+/// (package `simplex`, a later milestone) has an independent, deliberately naive
+/// implementation to be tested against — a differential oracle. Keeping it dense
 /// and simple is the point: it is short enough to audit by reading, and it is
 /// obviously correct in the cases it supports.
 ///
