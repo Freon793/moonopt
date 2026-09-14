@@ -144,6 +144,34 @@ pub fn Model::get_var(self : Model, index : Int) -> Var {
 }
 
 ///|
+/// Replaces the bounds of a variable.
+///
+/// Model file readers need this: a file states bounds in a section that comes
+/// after the columns, so the variable exists before its final bounds are known.
+pub fn Model::set_var_bounds(
+  self : Model,
+  index : Int,
+  lb : Double,
+  ub : Double,
+) -> Unit {
+  let variable = self.vars[index]
+  self.vars[index] = { name: variable.name, lb, ub, is_int: variable.is_int, }
+}
+
+///|
+/// Marks a variable as integer. Kept separate from `set_var_bounds` because
+/// model files express integrality through markers or sections of their own.
+pub fn Model::set_var_integer(self : Model, index : Int) -> Unit {
+  let variable = self.vars[index]
+  self.vars[index] = {
+    name: variable.name,
+    lb: variable.lb,
+    ub: variable.ub,
+    is_int: true,
+  }
+}
+
+///|
 /// Replaces the objective, merging duplicates and dropping zeros.
 pub fn Model::set_objective(self : Model, terms : Array[(Int, Double)]) -> Unit {
   self.objective_terms = normalize_terms(terms)

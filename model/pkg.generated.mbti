@@ -39,6 +39,8 @@ pub fn Model::objective(Self) -> Array[(Int, Double)]
 pub fn Model::sense(Self) -> Sense
 pub fn Model::set_objective(Self, Array[(Int, Double)]) -> Unit
 pub fn Model::set_sense(Self, Sense) -> Unit
+pub fn Model::set_var_bounds(Self, Int, Double, Double) -> Unit
+pub fn Model::set_var_integer(Self, Int) -> Unit
 pub fn Model::validate(Self) -> Array[String]
 
 pub(all) enum Rel {
