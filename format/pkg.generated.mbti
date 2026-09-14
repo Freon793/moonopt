@@ -1,0 +1,40 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Freon793/moonopt/format"
+
+import {
+  "Freon793/moonopt/model",
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn format_number(Double) -> String
+
+pub fn parse_index(String) -> Int?
+
+pub fn parse_mps(String) -> Result[@model.Model, ParseIssue]
+
+pub fn parse_number(String) -> Double?
+
+pub fn read_lp(String) -> Result[@model.Model, ParseIssue]
+
+pub fn split_tokens(String) -> Array[(String, Int)]
+
+pub fn write_lp(@model.Model) -> String
+
+pub fn write_mps(@model.Model) -> String
+
+// Errors
+
+// Types and methods
+pub(all) struct ParseIssue {
+  line : Int
+  column : Int
+  token : String
+  message : String
+} derive(Eq, @debug.Debug)
+pub fn ParseIssue::new(Int, Int, String, String) -> Self
+pub fn ParseIssue::to_text(Self) -> String
+
+// Type aliases
+
+// Traits
