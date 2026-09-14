@@ -1,0 +1,15 @@
+# Normalise line endings inside the repository.
+#
+# The CI gate runs `moon fmt` followed by `git diff --exit-code`, so the bytes
+# MoonBit sees must not depend on the platform that checked the repo out.
+# Storing LF and checking LF out everywhere keeps that gate meaningful on
+# Linux, macOS and Windows alike.
+* text=auto eol=lf
+
+# Binary artefacts that must never be line-ending converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.wasm binary

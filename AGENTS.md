@@ -1,0 +1,89 @@
+# Project Agents.md Guide
+
+This is a [MoonBit](https://docs.moonbitlang.com) project.
+
+You can browse and install extra skills here:
+<https://github.com/moonbitlang/skills>
+
+## Project Structure
+
+- MoonBit packages are organized per directory; each directory contains a
+  `moon.pkg` file listing its dependencies. Each package has its files and
+  blackbox test files (ending in `_test.mbt`) and whitebox test files (ending in
+  `_wbtest.mbt`).
+
+- In the toplevel directory, there is a `moon.mod` file listing module
+  metadata.
+
+- Package layout of this project:
+  - `moonopt.mbt` (module root package): public entry points — `Model::solve`,
+    `SolveStatus`, `Solution`, `SolveOptions`. Keep it thin: orchestration only.
+  - `core/`: numeric and sparse infrastructure (tolerances, compensated
+    summation, CSC sparse matrix). Must not depend on other packages here.
+  - `model/`: variables, linear expressions, constraints, objective, validation.
+  - `oracle/`: dense two-phase tableau simplex used as the *reference* for
+    differential tests. Deliberately simple; it is not the shipped solver.
+  - `simplex/`, `format/`, `presolve/`, `mip/`, `verify/`: added day by day, see
+    `docs/roadmap.md`.
+  - `cmd/main/`: CLI. `examples/`: runnable examples. `bench/`: benchmark data
+    policy and reports. `docs/`: design, roadmap, comparison evidence.
+
+## Coding convention
+
+- MoonBit code is organized in block style, each block is separated by `///|`,
+  the order of each block is irrelevant. In some refactorings, you can process
+  block by block independently.
+
+- Try to keep deprecated blocks in file called `deprecated.mbt` in each
+  directory.
+
+- Numeric code rules for this project:
+  - never compare floats with `==` unless the values are integers by
+    construction; use the `core` tolerance helpers;
+  - every "is this zero / is this positive" decision must be tolerance-aware;
+  - use compensated summation when accumulating many terms;
+  - any routine that can fail numerically must report that explicitly instead of
+    silently returning a wrong answer.
+
+- Keep the public surface small. Anything that appears in a `.mbti` is a
+  contract.
+
+## Tooling
+
+- `moon fmt` is used to format your code properly.
+
+- `moon ide` provides project navigation helpers like `peek-def`, `outline`, and
+  `find-references`. See $moonbit-agent-guide for details.
+
+- `moon info` is used to update the generated interface of the package, each
+  package has a generated interface file `.mbti`, it is a brief formal
+  description of the package. If nothing in `.mbti` changes, this means your
+  change does not bring the visible changes to the external package users, it is
+  typically a safe refactoring.
+
+- In the last step, run `moon info && moon fmt` to update the interface and
+  format the code. Check the diffs of `.mbti` file to see if the changes are
+  expected.
+
+- Run `moon test` to check tests pass. MoonBit supports snapshot testing; when
+  changes affect outputs, run `moon test --update` to refresh snapshots.
+
+- Prefer `assert_eq` or `assert_true(pattern is Pattern(...))` for results that
+  are stable or very unlikely to change. For snapshot tests that record
+  structured debugging output, derive `Debug` and use `debug_inspect`, rather
+  than deriving `Show` for debugging. For solid, well-defined results (e.g.
+  scientific computations), prefer assertion tests. You can use
+  `moon coverage analyze > uncovered.log` to see which parts of your code are
+  not covered by tests.
+
+## Solver invariants (must hold in every change)
+
+- The sparse matrix never stores structural zeros, and row indices stay sorted
+  ascending inside each column.
+- `verify` must reject a wrong solution produced by an intentionally broken
+  solver; there are tests for exactly that case.
+- Adding an algorithm requires a unit test, an invariant test, and — when it
+  overlaps the oracle — a differential test against `oracle/`.
+- Never enlarge the promised model class silently. If support for a construct is
+  missing, the call must return `NotSolved` with a reason, not a plausible
+  answer.

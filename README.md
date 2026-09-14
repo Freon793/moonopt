@@ -1,0 +1,176 @@
+# Freon793/moonopt
+
+[![check](https://github.com/Freon793/moonopt/actions/workflows/check.yml/badge.svg)](https://github.com/Freon793/moonopt/actions/workflows/check.yml)
+
+**把 MoonBit 的线性/整数优化从教学级稠密实现，推进到能与工业数据与公开基准对拍的工程内核。**
+
+`moonopt` 的目标能力：标准模型互操作（MPS / LP）、稀疏修正单纯形与对偶单纯形、
+presolve/postsolve、可复用的分支切割框架，以及**可被第三方独立校验**的最优性（对偶可行解）、
+不可行性（Farkas）与无界（射线）证书。纯 MoonBit 实现，无 FFI 依赖。
+
+> 状态：**v0.1.0-dev（D1 已完成）**。每日交付、必达/加分边界、以及明确**不做**的内容见
+> [`docs/roadmap.md`](docs/roadmap.md)。当前可运行、可测试、CI 全绿，但求解内核仍处于
+> D1 阶段（见下文“当前能力”），尚未发布到 mooncakes.io。
+
+## 当前能力（v0.1.0-dev / D1）
+
+已经可用并且有测试覆盖的部分：
+
+- `core`：容差感知的数值比较（`approx_eq` / `approx_zero` / `approx_positive`）、
+  Neumaier 补偿求和、**CSC 稀疏矩阵**（构造时排序/合并/丢结构零、按列访问、转置、稠密化、矩阵向量乘）；
+- `model`：LP/MILP 模型层 —— 变量（上下界、整数标记）、线性表达式、约束（`≤` / `≥` / `=`）、
+  目标（min/max）、模型校验（返回人类可读的问题列表）；
+- `oracle`：**稠密两阶段单纯形参考实现**（含人工变量 Phase I、Bland 防循环、正规化负右端项），
+  作为后续稀疏实现的差分测试对照基准；
+- `moonopt`：公开入口 `solve` / `solve_with`，返回 `SolveStatus` + `Solution`
+  （状态、变量取值、目标值、迭代数、失败原因）；
+- CLI 与两个可运行示例（见下文），`moon test` 38 个测试全绿，CI 覆盖 Linux/macOS/Windows 与 wasm-gc/js 目标。
+
+**当前内核的能力边界（明确写出来，不夸大）**：
+
+| 支持 | 暂不支持（返回 `NotSolved` + 原因，绝不返回可疑解） |
+| --- | --- |
+| 连续变量、`x ≥ 0` | 非零下界（D3 起由内核直接支持） |
+| 有限上界（自动转成显式行） | 整数 / 0-1 变量（D7–D9 薄 MILP 层） |
+| `≤`、`≥`、`=` 任意混合 | MPS / LP 文件输入（D2） |
+| min / max（内部统一为 max） | 证书与 `verify` 校验器（D6） |
+
+## 为什么需要它
+
+MoonBit 生态已经有一批排产、排班、路由、装箱、约束模型库，但它们几乎全部是启发式或专用实现：
+能给出“一个可行解”，给不出“离最优还有多远”，也读不进行业标准的模型文件。
+精确组合优化的公共地基是 **LP 松弛 + 对偶界 + 分支定界**，而这块在 MoonBit 里是空的。
+
+`moonopt` 要补的是这个地基：
+
+- **能吃真实模型**：MPS（free / fixed）与 LP 格式读写，可以直接跑 Netlib / MIPLIB 数据集；
+- **能解真实规模**：稀疏存储 + 修正单纯形（不是 `O(m·n)` 的整张 tableau）；
+- **能给出保证**：对偶解 / Farkas 证书 / 无界射线，并附带独立校验器 —— 解错时校验会失败；
+- **能被复用**：`presolve` / 对偶单纯形热启动 / 分支切割框架对外开放，供上层模型库调用。
+
+## 与生态中既有实现的关系
+
+我们核对了 mooncakes.io 上全部已发布模块（2 470 个，2026-09-14 核对）与 GitHub `topic:moonbit`
+的全部仓库（304 个），结论是：**不存在通用 LP/MILP 求解器与标准模型格式支持**。
+当前存在两个相关实现，差异见下表（事实性对照，不含评价；逐条证据见
+[`docs/comparison.md`](docs/comparison.md)）：
+
+| 维度 | `Juwan-Hwang/moon-certified` 的 `math/simplex`、`math/ilp` | `Luna-Flow/linear-program` | **moonopt** |
+| --- | --- | --- | --- |
+| 可表达模型 | 仅 `max cᵀx, Ax ≤ b, x ≥ 0`（561 / 527 行，文件头原文） | 建模 + 标准化，稠密矩阵 | min/max、`≤`/`≥`/`=`、变量上下界、整数/0-1（分阶段落地） |
+| 模型文件输入 | 无（仅内存数组） | 无 | **MPS / LP 读写**（D2） |
+| 单纯形 | 稠密 tableau + Bland | 稠密 tableau 两阶段 | **稀疏 CSC + 修正单纯形**（D3）、对偶单纯形（D6） |
+| 对偶 / presolve | 无 / 无 | 无 / 无 | 对偶热启动（D6）/ presolve + postsolve（D5） |
+| 证书与校验 | 无 | 无 | **最优性、Farkas、无界射线 + 独立 `verify`**（D6） |
+| 交付形态 | 30+ 领域合集仓库中的一个模块 | 未发布到 mooncakes.io | 专注单库：CLI + CI + 基准报告 + 文档 + 发布 |
+| 生态检索命中 | —— | —— | `MPS` / `revised simplex` / `dual simplex` / `presolve` / `Farkas` / `certificate` 在生态中命中数均为 **0** |
+
+我们不追求广度，只做**窄而深 + 可验证**。与上述实现是互补与可对接关系，而非替换。
+
+## 快速开始
+
+```bash
+moon add Freon793/moonopt   # 发布到 mooncakes.io 后可用
+```
+
+```moonbit
+///|
+/// max 5x + 4y  s.t.  6x + 4y <= 24,  x + 2y <= 6,  x, y >= 0   ->  21 at (3, 1.5)
+fn demo() -> Unit {
+  let m = @model.Model::new(@model.Sense::Maximize)
+  let x = m.add_var("x")
+  let y = m.add_var("y")
+  m.set_objective([(x, 5.0), (y, 4.0)])
+  m.add_named_constraint([(x, 6.0), (y, 4.0)], @model.Rel::LessEqual, 24.0, "machine_hours")
+  m.add_named_constraint([(x, 1.0), (y, 2.0)], @model.Rel::LessEqual, 6.0, "labour_hours")
+  let sol = @moonopt.solve(m)
+  match sol.status {
+    @moonopt.SolveStatus::Optimal => println("objective = " + sol.objective.to_string())
+    _ => println("not solved: " + sol.message)
+  }
+}
+```
+
+引入需要两个包：`Freon793/moonopt`（求解入口）与 `Freon793/moonopt/model`（模型构造）。
+
+## 可运行示例与 CLI
+
+```bash
+moon run examples/production_plan    # 两产品生产计划，最优 21 at (3, 1.5)
+moon run examples/transportation     # 产销平衡运输问题（全等式约束，走 Phase I），最优 11
+moon run cmd/main                    # 打印两个示例 + 一个“当前不支持”的诚实示例
+```
+
+`moon run cmd/main` 的实际输出（节选）：
+
+```
+moonopt 0.1.0-dev
+
+== production plan
+status     : Optimal
+iterations : 2
+objective  : 21
+  x = 3
+  y = 1.4999999999999998
+```
+
+> `1.4999999999999998` 是浮点表示的真实值（在 `1e-9` 相对容差内等于 1.5）。
+> 面向人读的定点格式化属于 D9 的报表层，当前示例直接打印原始值，不做美化。
+
+`solve` / `verify` / `fmt` / `bench` 等子命令随 D2–D9 落地，见 [`docs/roadmap.md`](docs/roadmap.md)。
+
+## 项目结构
+
+```
+moonopt.mbt       公开入口：solve / solve_with、SolveStatus、Solution、SolveOptions
+core/             数值与稀疏基础设施（容差比较、补偿求和、CSC 稀疏矩阵）
+model/            模型层（变量、线性表达式、约束、目标、模型校验）
+oracle/           参考实现：稠密两阶段单纯形（差分测试对照基准，非交付求解器）
+simplex/          稀疏修正单纯形与对偶单纯形（D3 起）
+format/           MPS / LP 读写（D2 起）
+presolve/         presolve 与 postsolve（D5 起）
+mip/              分支定界与割平面（D7–D9，受 D7 硬开关约束）
+verify/           证书校验器（D6 起）
+cmd/main/         CLI
+examples/         可运行示例
+bench/            基准数据集政策与结果报告
+docs/             设计说明、路线图、查重对照证据
+```
+
+## 开发
+
+```bash
+moon check --deny-warn
+moon test --deny-warn
+moon fmt && git diff --exit-code
+moon info && git diff --exit-code
+git config core.hooksPath .githooks   # 启用官方模板自带的 pre-commit（moon check）
+```
+
+CI（[`.github/workflows/check.yml`](.github/workflows/check.yml)）在 Linux / macOS / Windows 上执行
+`moon check --deny-warn`、`moon fmt` + `git diff --exit-code`、`moon info` + `git diff --exit-code`、
+`moon test --deny-warn`，另有两个 wasm-gc / js 目标的测试任务。`.mbti` 是接口合同，必须随代码提交。
+
+## 数值策略（摘要）
+
+- 统一使用**相对容差**比较（`core`），所有“零”判定都显式带容差；
+- 求和走 Neumaier 补偿求和，避免规模上去后误差累积；
+- 单纯形用 **Bland 规则**保证退化情形终止（D3 起叠加 Harris 两遍比值检验提升稳健性）；
+- 求解结果一律如实报告状态：超出能力边界、迭代上限、不可行、无界都各自可区分，
+  `NotSolved` 一定带原因，绝不静默返回错解。
+
+## 参考文献（算法来源，代码为原创实现）
+
+- G. B. Dantzig, *Linear Programming and Extensions*, 1963（单纯形法）
+- P. M. J. Harris, *Pivot selection methods of the Devex LP code*, 1973（比值检验）
+- R. G. Bland, *New finite pivoting rules for the simplex method*, 1977（防循环）
+- I. Maros & G. Mitra, *Presolve reductions for LP*, 1996（presolve）
+- R. E. Gomory, 1958；H. Marchand & L. A. Wolsey, *Aggregation and mixed integer rounding cuts*, 2001（割平面）
+- J. Forrest & J. Tomlin, *Updated triangular factors of the basis*, 1972（基更新）
+
+## 数据与许可
+
+- 本项目以 **Apache-2.0** 发布（见 [`LICENSE`](LICENSE)）。
+- 基准数据（Netlib LP、MIPLIB）**不由本仓库再分发**：仓库只提供下载/校验脚本与来源说明，
+  具体来源、许可证与引用方式见 [`bench/README.md`](bench/README.md)。
+- 算法实现基于公开文献，代码为本项目原创，未移植任何第三方实现。
