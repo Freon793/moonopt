@@ -65,19 +65,32 @@ test "infeasible model reports Infeasible, not a wrong answer" {
   let sol = @moonopt.solve(m)
   assert_eq(sol.status, @moonopt.SolveStatus::Infeasible)
   assert_eq(sol.values.length(), 0)
-  assert_eq(sol.message, "no feasible point exists")
+  assert_true(sol.message.contains("no feasible point"))
 }
 
 ///|
-test "unsupported constructs are reported with a reason" {
-  // Non-zero lower bound: outside the current kernel's model class.
-  let m = @model.Model::new(@model.Sense::Maximize)
-  let _ = m.add_var("x", lb=1.0)
-  m.set_objective([(0, 1.0)])
+test "non-zero lower bounds are supported by the kernel" {
+  // min x  s.t.  x >= 0,  x >= 1 (from the bound)  ->  1
+  let m = @model.Model::new(@model.Sense::Minimize)
+  let x = m.add_var("x", lb=1.0)
+  m.set_objective([(x, 1.0)])
   let sol = @moonopt.solve(m)
-  assert_eq(sol.status, @moonopt.SolveStatus::NotSolved)
-  assert_eq(sol.values.length(), 0)
-  assert_true(sol.message.length() > 0)
+  assert_eq(sol.status, @moonopt.SolveStatus::Optimal)
+  assert_true(@core.approx_eq(sol.objective, 1.0))
+  assert_true(@core.approx_eq(sol.values[0], 1.0))
+}
+
+///|
+test "free variables are supported by the kernel" {
+  // max x  s.t.  x <= -2,  x free  ->  -2
+  let m = @model.Model::new(@model.Sense::Maximize)
+  let x = m.add_var("x", lb=-@model.infinite_bound, ub=@model.infinite_bound)
+  m.set_objective([(x, 1.0)])
+  m.add_constraint([(x, 1.0)], @model.Rel::LessEqual, -2.0)
+  let sol = @moonopt.solve(m)
+  assert_eq(sol.status, @moonopt.SolveStatus::Optimal)
+  assert_true(@core.approx_eq(sol.objective, -2.0))
+  assert_true(@core.approx_eq(sol.values[0], -2.0))
 }
 
 ///|

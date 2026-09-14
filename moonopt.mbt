@@ -62,6 +62,11 @@ pub fn solve(model : @model.Model) -> Solution {
 
 ///|
 /// Solves `model` and returns a `Solution` describing what happened.
+///
+/// The work happens in the `simplex` kernel; this function only validates the
+/// model, maps the kernel's status onto the public one, and makes sure that a
+/// question the kernel cannot answer comes back as `NotSolved` with a reason
+/// rather than as a plausible looking answer.
 pub fn solve_with(model : @model.Model, options : SolveOptions) -> Solution {
   let issues = model.validate()
   if issues.length() > 0 {
@@ -73,130 +78,61 @@ pub fn solve_with(model : @model.Model, options : SolveOptions) -> Solution {
       message: "model is not well formed: " + issues[0],
     }
   }
-  let (problem, reason) = to_kernel(model)
-  match problem {
-    None =>
-      return {
+  match
+    @simplex.solve_model_with(
+      model,
+      @simplex.SimplexOptions::with_max_iterations(options.max_iterations),
+    ) {
+    Err(reason) =>
+      {
         status: NotSolved,
         values: [],
         objective: 0.0,
         iterations: 0,
         message: reason,
       }
-    Some(kernel) => {
-      let res = @oracle.solve_standard(
-        kernel.num_vars,
-        kernel.objective,
-        kernel.rows,
-        max_iterations=options.max_iterations,
-      )
-      let sign = kernel.objective_sign
-      match res.status {
-        @oracle.Optimal =>
+    Ok(result) =>
+      match result.status {
+        @simplex.SimplexStatus::Optimal =>
           {
             status: Optimal,
-            values: res.values,
-            objective: sign * res.objective,
-            iterations: res.iterations,
+            values: result.values,
+            objective: result.objective,
+            iterations: result.iterations,
             message: "",
           }
-        @oracle.Infeasible =>
+        @simplex.SimplexStatus::Infeasible =>
           {
             status: Infeasible,
             values: [],
             objective: 0.0,
-            iterations: res.iterations,
-            message: "no feasible point exists",
+            iterations: result.iterations,
+            message: result.message,
           }
-        @oracle.Unbounded =>
+        @simplex.SimplexStatus::Unbounded =>
           {
             status: Unbounded,
             values: [],
             objective: 0.0,
-            iterations: res.iterations,
-            message: "the objective is unbounded on the feasible set",
+            iterations: result.iterations,
+            message: result.message,
           }
-        @oracle.IterationLimit =>
+        @simplex.SimplexStatus::IterationLimit =>
           {
             status: NotSolved,
             values: [],
             objective: 0.0,
-            iterations: res.iterations,
-            message: "iteration limit reached before optimality was proven",
+            iterations: result.iterations,
+            message: result.message,
+          }
+        @simplex.SimplexStatus::NumericalFailure =>
+          {
+            status: NotSolved,
+            values: [],
+            objective: 0.0,
+            iterations: result.iterations,
+            message: result.message,
           }
       }
-    }
   }
-}
-
-///|
-/// A model as the kernel sees it.
-///
-/// `objective_sign` is `1.0` for a maximisation and `-1.0` for a minimisation,
-/// because the kernel only maximises; multiplying the kernel objective value by
-/// the sign gives the value in the model's own units.
-priv struct KernelProblem {
-  num_vars : Int
-  objective : Array[Double]
-  rows : Array[(Array[Double], @model.Rel, Double)]
-  objective_sign : Double
-}
-
-///|
-/// Adapts a model into the kernel's standard form.
-///
-/// Returns `(Some(problem), "")` on success, or `(None, reason)` when the model
-/// uses a construct the current kernel cannot represent. Finite upper bounds are
-/// turned into explicit `xⱼ ≤ ub` rows rather than being dropped.
-fn to_kernel(model : @model.Model) -> (KernelProblem?, String) {
-  let nvars = model.num_vars()
-  let sign = if model.sense() == @model.Sense::Minimize { -1.0 } else { 1.0 }
-  let objective : Array[Double] = []
-  for j = 0; j < nvars; j = j + 1 {
-    objective.push(0.0)
-  }
-  let obj_terms = model.objective()
-  for k = 0; k < obj_terms.length(); k = k + 1 {
-    let (index, coeff) = obj_terms[k]
-    objective[index] = sign * coeff
-  }
-  let rows : Array[(Array[Double], @model.Rel, Double)] = []
-  for j = 0; j < nvars; j = j + 1 {
-    let variable = model.get_var(j)
-    if variable.is_int {
-      return (
-        None,
-        "integer variables are not supported by the current kernel (planned for the branch-and-bound stage)",
-      )
-    }
-    if !@core.approx_zero(variable.lb, abs=1.0e-9) {
-      return (
-        None,
-        "the current kernel requires lower bounds of zero; variable " +
-        variable.name +
-        " has lb = " +
-        variable.lb.to_string(),
-      )
-    }
-    if variable.ub < @model.infinite_bound {
-      let coeff : Array[Double] = []
-      for i = 0; i < nvars; i = i + 1 {
-        coeff.push(if i == j { 1.0 } else { 0.0 })
-      }
-      rows.push((coeff, @model.Rel::LessEqual, variable.ub))
-    }
-  }
-  for c = 0; c < model.num_constraints(); c = c + 1 {
-    let con = model.constraint(c)
-    let coeff : Array[Double] = []
-    for j = 0; j < nvars; j = j + 1 {
-      coeff.push(0.0)
-    }
-    for k = 0; k < con.terms.length(); k = k + 1 {
-      let (index, value) = con.terms[k]
-      coeff[index] = value
-    }
-    rows.push((coeff, con.rel, con.rhs))
-  }
-  (Some({ num_vars: nvars, objective, rows, objective_sign: sign, }), "")
 }

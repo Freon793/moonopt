@@ -1,0 +1,73 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Freon793/moonopt/simplex"
+
+import {
+  "Freon793/moonopt/core",
+  "Freon793/moonopt/model",
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn from_model_with(@model.Model, Bool) -> Result[KernelProblem, String]
+
+pub fn solve_model(@model.Model) -> Result[SimplexResult, String]
+
+pub fn solve_model_with(@model.Model, SimplexOptions) -> Result[SimplexResult, String]
+
+pub fn solve_standard(Int, Array[Double], Array[(Array[Double], @model.Rel, Double)]) -> SimplexResult
+
+pub fn solve_standard_with(Int, Array[Double], Array[(Array[Double], @model.Rel, Double)], SimplexOptions) -> SimplexResult
+
+// Errors
+
+// Types and methods
+pub struct KernelProblem {
+  nrows : Int
+  ncols : Int
+  structural : Int
+  matrix : @core.SparseMatrix
+  rhs : Array[Double]
+  cost : Array[Double]
+  is_artificial : Array[Bool]
+  var_columns : Array[Array[(Int, Double)]]
+  var_offset : Array[Double]
+  objective_constant : Double
+  model_sign : Double
+  initial_basis : Array[Int]
+} derive(@debug.Debug)
+pub fn KernelProblem::from_model(@model.Model) -> Result[Self, String]
+pub fn KernelProblem::from_standard(Int, Array[Double], Array[(Array[Double], @model.Rel, Double)]) -> Self
+pub fn KernelProblem::slack_row_map(Self) -> Array[Int]
+pub fn KernelProblem::solution(Self, Array[Double]) -> Array[Double]
+
+pub(all) struct SimplexOptions {
+  max_iterations : Int
+  refactorize_every : Int
+  feasibility_tolerance : Double
+  pivot_tolerance : Double
+  reduced_cost_tolerance : Double
+  relax_integrality : Bool
+} derive(@debug.Debug)
+pub fn SimplexOptions::default() -> Self
+pub fn SimplexOptions::relaxed() -> Self
+pub fn SimplexOptions::with_max_iterations(Int) -> Self
+
+pub struct SimplexResult {
+  status : SimplexStatus
+  values : Array[Double]
+  objective : Double
+  iterations : Int
+  message : String
+} derive(@debug.Debug)
+
+pub(all) enum SimplexStatus {
+  Optimal
+  Infeasible
+  Unbounded
+  IterationLimit
+  NumericalFailure
+} derive(Eq, @debug.Debug)
+
+// Type aliases
+
+// Traits
