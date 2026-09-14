@@ -21,13 +21,16 @@ You can browse and install extra skills here:
   - `core/`: numeric and sparse infrastructure (tolerances, compensated
     summation, CSC sparse matrix). Must not depend on other packages here.
   - `model/`: variables, linear expressions, constraints, objective, validation.
+  - `format/`: MPS and LP readers and writers, plus the shared `ParseIssue`
+    position reporting. Implemented.
   - `oracle/`: dense two-phase tableau simplex used as the *reference* for
     differential tests. Deliberately simple; it is not the shipped solver.
-  - `simplex/`, `format/`, `presolve/`, `mip/`, `verify/`: added milestone by
-    milestone, see `docs/roadmap.md`.
-  - `cmd/main/`: CLI. `examples/`: runnable examples. `bench/`: benchmark data
-    policy and reports. `docs/`: design notes, technical roadmap and the
-    ecosystem survey that defines the design boundary.
+  - `simplex/`, `presolve/`, `verify/`, `mip/`: added milestone by milestone,
+    see `docs/roadmap.md`.
+  - `cmd/main/`: demo CLI. `cmd/parse/`: model file inspection CLI. `examples/`:
+    runnable examples. `bench/`: data policy, fetch and report scripts, reports.
+    `docs/`: design notes, technical roadmap and the ecosystem survey that
+    defines the design boundary.
 
 ## Coding convention
 
@@ -48,6 +51,12 @@ You can browse and install extra skills here:
 
 - Keep the public surface small. Anything that appears in a `.mbti` is a
   contract.
+
+- Library packages stay dependency free. Only CLI packages may import
+  `moonbitlang/x`; today that is `cmd/parse`, which uses `fs` and `sys`.
+
+- Scripts under `bench/` are ASCII only: Windows PowerShell 5.1 decodes UTF-8
+  script files without a BOM as ANSI, so non-ASCII characters become mojibake.
 
 ## Tooling
 

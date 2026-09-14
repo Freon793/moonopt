@@ -8,11 +8,13 @@
 presolve/postsolve、可复用的分支切割框架，以及**可被第三方独立校验**的最优性（对偶可行解）、
 不可行性（Farkas）与无界（射线）证书。纯 MoonBit 实现，无 FFI 依赖。
 
-> 状态：**v0.1.0-dev**，`M1`（基础层与模型层）已落地：可构建、可测试、CI 全绿，
-> 但求解内核仍是稠密参考实现（见下文“当前能力”），尚未发布到 mooncakes.io。
+> 状态：**v0.1.0-dev**，`M1`（基础层与模型层）与 `M2`（标准模型输入）已落地：
+> 可构建、可测试、CI 全绿，且已在 **MIPLIB 2017 的 33 个真实实例**上跑通解析报告
+> （33 成功 / 0 失败，见 [`bench/parse-report.md`](bench/parse-report.md)）。
+> 求解内核仍是稠密参考实现（见下文“当前能力”），尚未发布到 mooncakes.io。
 > 里程碑划分、范围闸门与明确**不做**的内容见 [`docs/roadmap.md`](docs/roadmap.md)。
 
-## 当前能力（M1）
+## 当前能力（M1 与 M2）
 
 已经可用并且有测试覆盖的部分：
 
@@ -20,11 +22,16 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
   Neumaier 补偿求和、**CSC 稀疏矩阵**（构造时排序/合并/丢结构零、按列访问、转置、稠密化、矩阵向量乘）；
 - `model`：LP/MILP 模型层 —— 变量（上下界、整数标记）、线性表达式、约束（`≤` / `≥` / `=`）、
   目标（min/max）、模型校验（返回人类可读的问题列表）；
+- `format`：**MPS 读取器与写出器**（free / fixed 布局、`RANGES` 展开、`MARKER` 整数块、
+  free row 语义、`OBJSENSE` 扩展）与 **LP 格式读写**（目标、`Subject To`、`Bounds` 的各种写法、
+  `Generals` / `Binary`），读→写→读 幂等；
 - `oracle`：**稠密两阶段单纯形参考实现**（含人工变量 Phase I、Bland 防循环、正规化负右端项），
   作为后续稀疏实现的差分测试对照基准；
 - `moonopt`：公开入口 `solve` / `solve_with`，返回 `SolveStatus` + `Solution`
   （状态、变量取值、目标值、迭代数、失败原因）；
-- CLI 与两个可运行示例（见下文），`moon test` 38 个测试全绿，CI 覆盖 Linux/macOS/Windows 与 wasm-gc/js 目标。
+- `cmd/parse`：模型文件巡检 CLI（按扩展名或内容判定格式、打印规模统计与校验结果、
+  `--manifest` 批量模式、失败返回非零退出码）；
+- CLI 与两个可运行示例，`moon test` 58 个测试全绿，CI 覆盖 Linux/macOS/Windows 与 wasm-gc/js 目标。
 
 **当前内核的能力边界（明确写出来，不夸大）**：
 
@@ -32,8 +39,9 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 | --- | --- |
 | 连续变量、`x ≥ 0` | 非零下界（M3 起由内核直接支持） |
 | 有限上界（自动转成显式行） | 整数 / 0-1 变量（M5） |
-| `≤`、`≥`、`=` 任意混合 | MPS / LP 文件输入（M2） |
-| min / max（内部统一为 max） | 证书与 `verify` 校验器（M4） |
+| `≤`、`≥`、`=` 任意混合 | 证书与 `verify` 校验器（M4） |
+| min / max（内部统一为 max） | —— |
+| MPS / LP 文件读入与写出（M2） | MPS 的 `SC`/`SI` 半连续界、完整 `SOS` / `MARKER` 语义 |
 
 ## 为什么需要它
 
@@ -99,6 +107,14 @@ fn demo() -> Unit {
 moon run examples/production_plan    # 两产品生产计划，最优 21 at (3, 1.5)
 moon run examples/transportation     # 产销平衡运输问题（全等式约束，走 Phase I），最优 11
 moon run cmd/main                    # 打印两个示例 + 一个“当前不支持”的诚实示例
+moon run cmd/parse -- <file.mps>     # 读模型文件，打印规模统计与校验结论
+```
+
+巡检真实数据集（MIPLIB 2017，33 个实例）：
+
+```bash
+powershell -NoProfile -ExecutionPolicy Bypass -File bench/fetch-instances.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-parse.ps1
 ```
 
 `moon run cmd/main` 的实际输出（节选）：
@@ -125,17 +141,23 @@ objective  : 21
 moonopt.mbt       公开入口：solve / solve_with、SolveStatus、Solution、SolveOptions
 core/             数值与稀疏基础设施（容差比较、补偿求和、CSC 稀疏矩阵）
 model/            模型层（变量、线性表达式、约束、目标、模型校验）
+format/           MPS 与 LP 格式读写、解析错误定位
 oracle/           参考实现：稠密两阶段单纯形（差分测试对照基准，非交付求解器）
 simplex/          稀疏修正单纯形与对偶单纯形（M3）
-format/           MPS / LP 读写（M2）
 presolve/         presolve 与 postsolve（M3）
 verify/           证书校验器（M4）
 mip/              分支定界与割平面（M5，受范围闸门约束）
-cmd/main/         CLI
+cmd/main/         示例 CLI 与演示输出
+cmd/parse/        模型文件巡检 CLI（解析报告使用）
 examples/         可运行示例
-bench/            基准数据集政策与结果报告
+bench/            数据政策、下载与报告脚本、报告
 docs/             设计说明、技术路线图、生态现状调研
 ```
+
+## 依赖
+
+库包（`core` / `model` / `oracle` / `format` / 根包 `moonopt`）**不依赖任何第三方包**。
+只有 `cmd/parse` 依赖官方 `moonbitlang/x` 的 `fs` 与 `sys`，用于读文件与取命令行参数。
 
 ## 开发
 
@@ -171,6 +193,7 @@ CI（[`.github/workflows/check.yml`](.github/workflows/check.yml)）在 Linux / 
 ## 数据与许可
 
 - 本项目以 **Apache-2.0** 发布（见 [`LICENSE`](LICENSE)）。
-- 基准数据（Netlib LP、MIPLIB）**不由本仓库再分发**：仓库只提供下载/校验脚本与来源说明，
-  具体来源、许可证与引用方式见 [`bench/README.md`](bench/README.md)。
+- 基准数据（MIPLIB 2017）**不由本仓库再分发**：仓库只提供下载脚本、清单与报告，
+  具体来源与获取方式见 [`bench/README.md`](bench/README.md)。
+  其中也说明了为什么没有直接使用 Netlib LP 测试集（其 `lp/data` 是私有压缩容器，不是 MPS）。
 - 算法实现基于公开文献，代码为本项目原创，未移植任何第三方实现。

@@ -5,7 +5,39 @@
 
 ## [Unreleased]
 
-### Added — 2026-09-14
+### Added — M2 (standard model input)
+
+- `format`：**MPS 读取器**（free 与 fixed 布局、`NAME` / `ROWS` / `COLUMNS` / `RHS` /
+  `RANGES` / `BOUNDS` / `OBJSENSE` / `ENDATA`、`MARKER` 整数块、Fortran 风格指数 `1.5D+02`、
+  额外的 `N` 行按 MPS 语义当作 free row 忽略、`RANGES` 展开为两条不等式）；
+- `format`：**MPS 写出器**（列顺序保持稳定、整数列用 `INTORG`/`INTEND` 包裹、显式写出非默认上下界，
+  因此 读→写→读 得到等价模型且文本稳定）；
+- `format`：**LP 格式读写**（`Minimize`/`Maximize`、目标行、`Subject To`、`Bounds` 的全部常见写法、
+  `Generals`/`Binary`、`End`，支持粘连写法 `3x`、`x+y<=4`、`1e-3` 与 `free`/`infinity` 等）；
+- `format`：`ParseIssue`（行号、列号、token、原因）与 `split_tokens` / `parse_number` 工具；
+  所有畸形输入只报错不 panic，错误信息带精确位置；
+- `cmd/parse`：模型文件巡检 CLI —— 按扩展名或内容判定格式、打印规模统计与校验结果、
+  `--manifest` 批量模式、失败时返回非零退出码；
+- `bench/`：`fetch-instances.ps1`（下载 MIPLIB 2017 实例，gzip 解压，数据不入库）、
+  `report-parse.ps1`（生成报告，含工具链版本与提交哈希）、`parse-report.md`。
+- 模型层新增 `Model::set_var_bounds` / `Model::set_var_integer`：文件读取器在读到 `BOUNDS`
+  段之后才确定变量上下界，需要这两个 setter。
+
+### Benchmark — 2026-09-14
+
+- 在 **MIPLIB 2017 的 33 个实例**上运行解析报告：**33 解析成功 / 0 失败**，
+  合计 173 934 个变量、44 480 条约束、1 651 814 个非零元，最大实例 `fast0507`（472 358 非零元）。
+  完整表格见 [`bench/parse-report.md`](bench/parse-report.md)。
+- 报告脚本会记录工具链版本与提交哈希，数字可追溯。
+
+### Notes
+
+- 库包（`core` / `model` / `oracle` / `format` / 根包）保持零第三方依赖；
+  仅 CLI（`cmd/parse`）依赖官方 `moonbitlang/x` 的 `fs` 与 `sys` 用于文件与命令行访问。
+- `bench/` 下的脚本只用 ASCII 字符：Windows PowerShell 5.1 读取无 BOM 的 UTF-8 脚本时会按
+  ANSI 解码，非 ASCII 字符会变成乱码。
+
+### Added — 2026-09-14 (M1)
 
 - 项目骨架：`moon.mod` / 多包布局 / CI（Linux、macOS、Windows + wasm-gc、js 目标）/ pre-commit hook / 文档。
 - `core`：相对容差比较（`approx_eq` / `approx_zero` / `approx_positive` / `is_finite` / `is_nan`）、
