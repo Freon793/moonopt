@@ -1,0 +1,40 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Freon793/moonopt"
+
+import {
+  "Freon793/moonopt/model",
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn solve(@model.Model) -> Solution
+
+pub fn solve_with(@model.Model, SolveOptions) -> Solution
+
+// Errors
+
+// Types and methods
+pub struct Solution {
+  status : SolveStatus
+  values : Array[Double]
+  objective : Double
+  iterations : Int
+  message : String
+} derive(@debug.Debug)
+
+pub(all) struct SolveOptions {
+  max_iterations : Int
+} derive(@debug.Debug)
+pub fn SolveOptions::default() -> Self
+pub fn SolveOptions::new(Int) -> Self
+
+pub(all) enum SolveStatus {
+  Optimal
+  Infeasible
+  Unbounded
+  NotSolved
+} derive(Eq, @debug.Debug)
+
+// Type aliases
+
+// Traits
