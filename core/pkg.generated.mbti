@@ -1,0 +1,71 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Freon793/moonopt/core"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn approx_eq(Double, Double, rel? : Double, abs? : Double) -> Bool
+
+pub fn approx_negative(Double, abs? : Double) -> Bool
+
+pub fn approx_positive(Double, abs? : Double) -> Bool
+
+pub fn approx_zero(Double, abs? : Double) -> Bool
+
+pub let default_abs_tolerance : Double
+
+pub let default_rel_tolerance : Double
+
+pub fn dot_compensated(Array[Double], Array[Double]) -> Double
+
+pub fn fabs(Double) -> Double
+
+pub fn fmax(Double, Double) -> Double
+
+pub fn fmax_int(Int, Int) -> Int
+
+pub fn fmin(Double, Double) -> Double
+
+pub fn fmin_int(Int, Int) -> Int
+
+pub fn is_finite(Double) -> Bool
+
+pub fn is_nan(Double) -> Bool
+
+pub fn sum_compensated(Array[Double]) -> Double
+
+// Errors
+
+// Types and methods
+pub struct CompensatedSum {
+  mut total : Double
+  mut correction : Double
+}
+pub fn CompensatedSum::add(Self, Double) -> Unit
+pub fn CompensatedSum::new() -> Self
+pub fn CompensatedSum::value(Self) -> Double
+
+pub struct SparseMatrix {
+  nrows : Int
+  ncols : Int
+  col_ptr : Array[Int]
+  row_idx : Array[Int]
+  values : Array[Double]
+} derive(@debug.Debug)
+pub fn SparseMatrix::col_nnz(Self, Int) -> Int
+pub fn SparseMatrix::column(Self, Int) -> Array[(Int, Double)]
+pub fn SparseMatrix::from_columns(Int, Array[Array[(Int, Double)]]) -> Self
+pub fn SparseMatrix::get(Self, Int, Int) -> Double
+pub fn SparseMatrix::mul_vec(Self, Array[Double]) -> Array[Double]
+pub fn SparseMatrix::ncols(Self) -> Int
+pub fn SparseMatrix::nnz(Self) -> Int
+pub fn SparseMatrix::nrows(Self) -> Int
+pub fn SparseMatrix::to_dense(Self) -> Array[Array[Double]]
+pub fn SparseMatrix::transpose(Self) -> Self
+pub fn SparseMatrix::zeros(Int, Int) -> Self
+
+// Type aliases
+
+// Traits
