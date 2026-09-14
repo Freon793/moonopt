@@ -1,0 +1,31 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Freon793/moonopt/oracle"
+
+import {
+  "Freon793/moonopt/model",
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn solve_standard(Int, Array[Double], Array[(Array[Double], @model.Rel, Double)], max_iterations? : Int) -> OracleResult
+
+// Errors
+
+// Types and methods
+pub struct OracleResult {
+  status : OracleStatus
+  values : Array[Double]
+  objective : Double
+  iterations : Int
+} derive(@debug.Debug)
+
+pub(all) enum OracleStatus {
+  Optimal
+  Infeasible
+  Unbounded
+  IterationLimit
+} derive(Eq, @debug.Debug)
+
+// Type aliases
+
+// Traits
