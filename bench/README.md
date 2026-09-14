@@ -23,20 +23,48 @@ MIPLIB 2017 —— 它提供同样性质的工业实例，但以纯 MPS（gzip �
 | --- | --- |
 | `fetch-instances.ps1` | 下载实例到 `bench/data/instances/`，生成 `manifest.txt`（相对路径，可移植） |
 | `report-parse.ps1` | 通过 `moon run cmd/parse -- --manifest ...` 解析全部实例，生成 `parse-report.md` |
+| `report-solve.ps1` | 加 `--solve --relax --max-rows N` 求解，生成 `solve-report.md` |
+| `check-relaxation-bounds.ps1` | 把求解报告里的目标值与 MIPLIB 官方最优值表对拍 |
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/fetch-instances.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-parse.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 200
+powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-relaxation-bounds.ps1
 ```
 
-两个脚本只用 ASCII 字符：Windows PowerShell 5.1 读取**没有 BOM** 的 UTF-8 脚本时会按 ANSI 解码，
+四个脚本只用 ASCII 字符：Windows PowerShell 5.1 读取**没有 BOM** 的 UTF-8 脚本时会按 ANSI 解码，
 非 ASCII 字符会变成乱码。新增脚本请遵守这一约定。
 
 ## 报告
 
 - `parse-report.md`：解析报告。含工具链版本与产生它的提交哈希，因此每个数字都可追溯到具体代码；
   记录每个实例的规模、整数列数与校验结论，失败的实例逐条给出原因与位置。
-- 后续里程碑会加入求解报告（目标值、与公开已知最优值的相对误差、迭代数、耗时）。
+- `solve-report.md`：求解报告。记录模式（是否 LP 松弛）、行数上限、工具链版本与提交哈希，
+  逐实例给出状态、目标值与枢轴迭代数；非最优结果逐条如实列出，包含内核自检测得的残差与负值。
+
+## 交叉校验（外部权威，独立于本实现）
+
+`check-relaxation-bounds.ps1` 把求解报告里的目标值与 **MIPLIB 2017 官方最优值表**
+（`miplib2017-v26.solu`）对拍。松弛问题的目标值不可能超过原问题最优值，所以每个求到最优的实例
+都给出一个可判定不等式；一旦松弛值超过官方最优值，就说明内核错了。
+
+最近一次结果（与 `solve-report.md` 同批实例）：
+
+| 实例 | 松弛目标值 | 官方最优值 | 结论 |
+| --- | ---: | ---: | --- |
+| flugpl | 1 167 185.7256 | 1 201 500 | 松弛 ≤ 最优 |
+| gt2 | 13 460.2331 | 21 166 | 松弛 ≤ 最优 |
+| khb05250 | 95 919 464 | 106 940 226 | 松弛 ≤ 最优 |
+| markshare1 | 0 | 1 | 松弛 ≤ 最优 |
+| markshare2 | 0 | 1 | 松弛 ≤ 最优 |
+| mod010 | 6 532.0833 | 6 548 | 松弛 ≤ 最优 |
+| p0201 | 6 875 | 7 615 | 松弛 ≤ 最优 |
+| pk1 | 0 | 11 | 松弛 ≤ 最优 |
+| 22433 | 21 240.5262 | 21 477 | 松弛 ≤ 最优 |
+
+**9 项校验，0 项违反。** 这不是正确性证明，但能廉价地排掉一整类错误，而且结论是记录下来的，
+不是假定的。
 
 ## 报告原则
 
