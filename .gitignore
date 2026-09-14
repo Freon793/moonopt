@@ -4,3 +4,6 @@ target/
 target
 .mooncakes/
 .moonagent/
+
+# Third party benchmark data is downloaded, never committed (see bench/README.md).
+bench/data/
