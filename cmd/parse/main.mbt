@@ -115,8 +115,62 @@ fn report(path : String, model : @model.Model, format_name : String) -> Unit {
 }
 
 ///|
+/// Flags that decide whether the kernel is run on a parsed model.
+pub(all) struct SolveFlags {
+  enabled : Bool
+  relax : Bool
+  max_rows : Int
+}
+
+///|
+/// Solves a parsed model and prints the outcome.
+///
+/// The row limit is explicit because the kernel keeps a dense basis inverse:
+/// beyond a few hundred rows it needs a sparse factorization first, and silently
+/// attempting it would look like a hang rather than a boundary. Instances over
+/// the limit are reported as skipped, not as failures.
+fn solve_and_report(model : @model.Model, flags : SolveFlags) -> Unit {
+  if model.num_constraints() > flags.max_rows {
+    println(
+      "       solve=skipped(rows=" +
+      model.num_constraints().to_string() +
+      " > " +
+      flags.max_rows.to_string() +
+      ")",
+    )
+    return
+  }
+  let options = if flags.relax {
+    @simplex.SimplexOptions::relaxed()
+  } else {
+    @simplex.SimplexOptions::default()
+  }
+  match @simplex.solve_model_with(model, options) {
+    Err(reason) => println("       solve=refused(" + reason + ")")
+    Ok(result) => {
+      let status = match result.status {
+        @simplex.SimplexStatus::Optimal => "optimal"
+        @simplex.SimplexStatus::Infeasible => "infeasible"
+        @simplex.SimplexStatus::Unbounded => "unbounded"
+        @simplex.SimplexStatus::IterationLimit => "iteration-limit"
+        @simplex.SimplexStatus::NumericalFailure => "numerical-failure"
+      }
+      println(
+        "       solve=" +
+        status +
+        " obj=" +
+        result.objective.to_string() +
+        " iters=" +
+        result.iterations.to_string() +
+        (if result.message == "" { "" } else { " (" + result.message + ")" }),
+      )
+    }
+  }
+}
+
+///|
 /// Parses one file and prints the outcome. Returns `true` on success.
-fn inspect(path : String) -> Bool {
+fn inspect(path : String, flags : SolveFlags) -> Bool {
   let content = match read_text(path) {
     Some(text) => text
     None => return false
@@ -130,6 +184,9 @@ fn inspect(path : String) -> Bool {
   match parsed {
     Ok(model) => {
       report(path, model, if is_lp { "lp" } else { "mps" })
+      if flags.enabled {
+        solve_and_report(model, flags)
+      }
       true
     }
     Err(issue) => {
@@ -159,9 +216,33 @@ fn main {
   let args = @env.args()
   let files : Array[String] = []
   let mut manifest = ""
+  let mut solve_enabled = false
+  let mut relax = false
+  let mut max_rows = 200
   let mut index = 1
   while index < args.length() {
     let argument = args[index]
+    if argument == "--solve" {
+      solve_enabled = true
+      index = index + 1
+      continue
+    }
+    if argument == "--relax" {
+      relax = true
+      solve_enabled = true
+      index = index + 1
+      continue
+    }
+    if argument == "--max-rows" {
+      if index + 1 < args.length() {
+        match @format.parse_index(args[index + 1]) {
+          Some(value) => max_rows = value
+          None => ()
+        }
+        index = index + 2
+        continue
+      }
+    }
     if argument == "--manifest" {
       if index + 1 < args.length() {
         manifest = args[index + 1]
@@ -203,8 +284,9 @@ fn main {
     @sys.exit(2)
   }
   let mut failures = 0
+  let flags : SolveFlags = { enabled: solve_enabled, relax, max_rows, }
   for path in files {
-    if !inspect(path) {
+    if !inspect(path, flags) {
       failures = failures + 1
     }
   }

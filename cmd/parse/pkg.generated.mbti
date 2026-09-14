@@ -6,6 +6,11 @@ package "Freon793/moonopt/cmd/parse"
 // Errors
 
 // Types and methods
+pub(all) struct SolveFlags {
+  enabled : Bool
+  relax : Bool
+  max_rows : Int
+}
 
 // Type aliases
 
