@@ -1,0 +1,66 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Freon793/moonopt/model"
+
+import {
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub let infinite_bound : Double
+
+pub fn normalize_terms(Array[(Int, Double)]) -> Array[(Int, Double)]
+
+// Errors
+
+// Types and methods
+pub struct Constraint {
+  name : String
+  rel : Rel
+  rhs : Double
+  terms : Array[(Int, Double)]
+} derive(@debug.Debug)
+
+pub struct Model {
+  mut sense : Sense
+  mut objective_terms : Array[(Int, Double)]
+  vars : Array[Var]
+  constraints : Array[Constraint]
+} derive(@debug.Debug)
+pub fn Model::add_constraint(Self, Array[(Int, Double)], Rel, Double) -> Unit
+pub fn Model::add_named_constraint(Self, Array[(Int, Double)], Rel, Double, String) -> Unit
+pub fn Model::add_var(Self, String, lb? : Double, ub? : Double, is_int? : Bool) -> Int
+pub fn Model::constraint(Self, Int) -> Constraint
+pub fn Model::get_var(Self, Int) -> Var
+pub fn Model::is_valid(Self) -> Bool
+pub fn Model::new(Sense) -> Self
+pub fn Model::num_constraints(Self) -> Int
+pub fn Model::num_vars(Self) -> Int
+pub fn Model::objective(Self) -> Array[(Int, Double)]
+pub fn Model::sense(Self) -> Sense
+pub fn Model::set_objective(Self, Array[(Int, Double)]) -> Unit
+pub fn Model::set_sense(Self, Sense) -> Unit
+pub fn Model::validate(Self) -> Array[String]
+
+pub(all) enum Rel {
+  LessEqual
+  GreaterEqual
+  Equal
+} derive(Eq, @debug.Debug)
+pub fn Rel::from_symbol(String) -> Self?
+
+pub(all) enum Sense {
+  Minimize
+  Maximize
+} derive(Eq, @debug.Debug)
+pub fn Sense::from_symbol(String) -> Self?
+
+pub struct Var {
+  name : String
+  lb : Double
+  ub : Double
+  is_int : Bool
+} derive(@debug.Debug)
+
+// Type aliases
+
+// Traits
