@@ -5,6 +5,20 @@
 
 ## [Unreleased]
 
+### Changed — M3 (product-form / eta basis updates)
+
+- **基逆不再被显式维护**：枢轴改为追加一个**稀疏 eta**（`B⁻¹ = E_k·…·E₁·B₀⁻¹`，
+  `E = I + w·eᵣᵀ`，`w = (eᵣ − d)/dᵣ`，Sherman–Morrison 推导，符号写反会被差分测试立刻抓到），
+  每枢轴从 O(m²) 的行操作降到 eta 的非零元个数；基逆只在重新分解时重建，
+  重新分解间隔由 100 提升到 500；
+- 正向/反向求解（FTRAN/BTRAN）按稀疏方式实现：基准逆按输入向量的非零元走，
+  eta 按时间顺序/逆序施加；对偶值与方向计算改用共享 scratch buffer，迭代循环内不再分配；
+- 结果：`mod010`（146 行 / 2655 列）**121.2s → 1.8s**，`22433`（198 行）**35.5s → 0.4s**，
+  `khb05250` 0.5s → 0.2s（均为 native release）；
+- 声明最优前的自检若失败，会**先折回分解（refactorize）再判一次**：eta 的累积舍入常在这一步被消除，
+  只有仍然违反的才算数值失败。`blend2` 因此恢复为最优（obj 6.915675114009083），
+  `noswot` 仍是真实失败（缩放负值 1.7e-4，是真实的非负性违反）。
+
 ### Changed — M3 (performance, measured rather than guessed)
 
 - 定价与方向计算改为直接遍历 CSC 原始数组（新增
@@ -20,9 +34,8 @@
 - 可行性的判定改为**按行缩放残差**（`|Ax−b| / (1+|b|+Σ|a·x|)`，负值同样按解的尺度缩放）：
   绝对残差 2.5e-7 出现在右端项上百的行上是舍入误差，而相对量级 2.0e-4 的负值才是真实违反。
   此前 `blend2` 因绝对口径被误判为数值失败，修正后它求到最优，`noswot` 仍被判为真实失败；
-- 求解报告的行数上限由 200 提升到 300：**14 个实例求到最优**、18 个超规模跳过、1 个数值失败；
-  14 项松弛值经外部对拍全部 ≤ MIPLIB 官方最优值（0 违反）。覆盖的实例与结果见
-  [`bench/solve-report.md`](bench/solve-report.md)。
+- 求解报告的行数上限由 200 提升到 300；eta 版落地后进一步提升到 1000，
+  覆盖的实例与结果见 [`bench/solve-report.md`](bench/solve-report.md)。
 
 ### Added — M3 (sparse revised simplex kernel)
 

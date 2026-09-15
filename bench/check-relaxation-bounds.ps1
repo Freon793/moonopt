@@ -27,11 +27,22 @@ if (-not (Test-Path $Report)) {
 }
 
 $cache = Join-Path $env:TEMP "miplib-optima.solu"
+$fresh = $false
 try {
   Invoke-WebRequest -Uri $SolutionFile -UseBasicParsing -OutFile $cache -TimeoutSec 90
+  $fresh = $true
 } catch {
-  Write-Error ("cannot download the optimum table: " + $_.Exception.Message)
-  exit 2
+  # The table changes rarely, so a cached copy keeps the check runnable when the
+  # site is unreachable. The fallback is reported, never silent.
+  if (Test-Path $cache) {
+    Write-Host ("download failed ({0}); using the cached table" -f $_.Exception.Message)
+  } else {
+    Write-Error ("cannot download the optimum table and no cached copy exists: " + $_.Exception.Message)
+    exit 2
+  }
+}
+if ($fresh) {
+  Write-Host "optimum table downloaded"
 }
 
 $optima = @{}

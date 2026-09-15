@@ -27,10 +27,12 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 - `format`：**MPS 读取器与写出器**（free / fixed 布局、`RANGES` 展开、`MARKER` 整数块、
   free row 语义、`OBJSENSE` 扩展）与 **LP 格式读写**（目标、`Subject To`、`Bounds` 的各种写法、
   `Generals` / `Binary`），读→写→读 幂等；
-- `simplex`：**稀疏修正单纯形内核** —— 稀疏 CSC 列存储 + 基逆乘积形式更新 + 周期性重新分解、
-  Phase I（人工变量）与 Phase II、Dantzig 定价并在停滞时自动切换到 Bland 规则、
+- `simplex`：**稀疏修正单纯形内核** —— 稀疏 CSC 列存储、**乘积形式（eta）基更新**
+  （每枢轴只追加一个稀疏 eta，基逆仅在重新分解时重建）、稀疏 FTRAN/BTRAN、
+  Phase I（人工变量 + 驱逐）与 Phase II、Dantzig 定价并在停滞时自动切换到 Bland 规则、
   **Harris 两遍比值检验**、对偶值与检验数、不可行 / 无界 / 迭代上限 / 数值失败四类状态各自区分；
   模型侧的上下界、自由变量（拆成正负两部分）与 `≤` / `≥` / `=` 混合约束都在内核内完成变换；
+  迭代循环内不分配内存（对偶值、方向、基本成本都用共享 scratch buffer）；
 - `oracle`：**稠密两阶段单纯形参考实现**，作为稀疏内核的差分测试对照基准（不是交付求解器）；
 - `moonopt`：公开入口 `solve` / `solve_with`，返回 `SolveStatus` + `Solution`
   （状态、变量取值、目标值、迭代数、失败原因）；非法模型返回 `NotSolved` 并带原因；

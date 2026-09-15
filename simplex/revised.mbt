@@ -14,14 +14,85 @@
 /// termination on degenerate problems instead of cycling.
 
 ///|
+/// One product-form update of the basis.
+///
+/// Pivoting column `j` into row `r` replaces column `r` of the basis, so
+/// `B_new = B + (aⱼ − B eᵣ)·eᵣᵀ = B·M` with `M = I + (d − eᵣ)·eᵣᵀ`, where
+/// `d = B⁻¹ aⱼ`. Inverting `M` by Sherman–Morrison gives
+///
+///   `B_new⁻¹ = E · B⁻¹`,   `E = I + w·eᵣᵀ`,   `w = (eᵣ − d)/dᵣ`.
+///
+/// The sign matters: `(d − eᵣ)/dᵣ` is the negation and inverts the update
+/// backwards (the test suite caught exactly that). Storing `w` sparsely is what
+/// makes the update cheap: applying `E` costs the nonzeros of `w` rather than the
+/// number of rows, so a pivot no longer performs an O(m²) row operation on an
+/// explicit inverse.
+priv struct Eta {
+  row : Int
+  indices : Array[Int]
+  weights : Array[Double]
+}
+
+///|
+/// Builds the product-form update from a tableau direction.
+fn Eta::from_direction(row : Int, direction : Array[Double]) -> Eta {
+  let pivot = direction[row]
+  let indices : Array[Int] = []
+  let weights : Array[Double] = []
+  for i = 0; i < direction.length(); i = i + 1 {
+    let weight = if i == row {
+      (1.0 - direction[i]) / pivot
+    } else {
+      -direction[i] / pivot
+    }
+    // Dropping the negligible entries keeps the updates sparse; they cannot
+    // affect the result beyond the pivot tolerance the ratio test already uses.
+    if @core.fabs(weight) > 1.0e-12 {
+      indices.push(i)
+      weights.push(weight)
+    }
+  }
+  { row, indices, weights, }
+}
+
+///|
+/// `x ← E x = x + u·xᵣ`.
+fn Eta::apply(self : Eta, x : Array[Double]) -> Unit {
+  let factor = x[self.row]
+  if factor != 0.0 {
+    for k = 0; k < self.indices.length(); k = k + 1 {
+      x[self.indices[k]] = x[self.indices[k]] + self.weights[k] * factor
+    }
+  }
+}
+
+///|
+/// `z ← Eᵀ z`, which adds `uᵀz` to component `r`.
+fn Eta::apply_transpose(self : Eta, z : Array[Double]) -> Unit {
+  let mut acc = 0.0
+  for k = 0; k < self.indices.length(); k = k + 1 {
+    acc = acc + self.weights[k] * z[self.indices[k]]
+  }
+  z[self.row] = z[self.row] + acc
+}
+
+///|
 /// Mutable state of one run.
 priv struct State {
   problem : KernelProblem
   options : SimplexOptions
   m : Int
   n : Int
-  /// Dense basis inverse. Replaced wholesale by refactorization.
-  mut inv : Array[Array[Double]]
+  /// Dense inverse of the basis as of the last refactorization (`B₀⁻¹`).
+  mut base_inv : Array[Array[Double]]
+  /// Product-form updates since then: `B⁻¹ = E_k · … · E₁ · B₀⁻¹`.
+  mut etas : Array[Eta]
+  /// Scratch buffers, allocated once per run: the iteration loop must not
+  /// allocate, and the duals and the tableau direction are computed on every
+  /// iteration.
+  duals_buffer : Array[Double]
+  direction_buffer : Array[Double]
+  basic_cost_buffer : Array[Double]
   /// Values of the basic variables.
   xb : Array[Double]
   /// `basis[row]` is the column that is basic in that row.
@@ -62,7 +133,11 @@ fn State::new(problem : KernelProblem, options : SimplexOptions) -> State {
     options,
     m,
     n,
-    inv,
+    base_inv: inv,
+    etas: [],
+    duals_buffer: Array::make(m, 0.0),
+    direction_buffer: Array::make(m, 0.0),
+    basic_cost_buffer: Array::make(m, 0.0),
     xb: problem.rhs.copy(),
     basis,
     is_basic,
@@ -120,15 +195,34 @@ fn State::kernel_objective(self : State) -> Double {
 }
 
 ///|
-/// Duals `yᵀ = c_Bᵀ B⁻¹`, computed row by row of the inverse.
+/// Duals `y = c_Bᵀ B⁻¹`, computed by a backward solve.
+///
+/// The product-form updates are applied to `c_B` in reverse chronological order
+/// (each costs the nonzeros of its update), and the base transpose is applied
+/// through the rows of the base inverse, so only the nonzeros of the running
+/// vector cost a pass over `m`.
 fn State::duals(self : State) -> Array[Double] {
-  let y : Array[Double] = Array::make(self.m, 0.0)
+  let z = self.basic_cost_buffer
   for k = 0; k < self.m; k = k + 1 {
-    let basic_cost = self.cost[self.basis[k]]
-    if basic_cost != 0.0 {
-      let inverse_row = self.inv[k]
-      for i = 0; i < self.m; i = i + 1 {
-        y[i] = y[i] + basic_cost * inverse_row[i]
+    z[k] = self.cost[self.basis[k]]
+  }
+  let mut e = self.etas.length() - 1
+  while e >= 0 {
+    self.etas[e].apply_transpose(z)
+    e = e - 1
+  }
+  let y = self.duals_buffer
+  for i = 0; i < self.m; i = i + 1 {
+    y[i] = 0.0
+  }
+  for k = 0; k < self.m; k = k + 1 {
+    let coefficient = z[k]
+    if coefficient != 0.0 {
+      let base_row = self.base_inv[k]
+      let mut i = 0
+      while i < self.m {
+        y[i] = y[i] + base_row[i] * coefficient
+        i = i + 1
       }
     }
   }
@@ -196,9 +290,19 @@ fn State::choose_entering(self : State, duals : Array[Double]) -> Int {
 }
 
 ///|
-/// `d = B⁻¹ Aⱼ` for the entering column.
+/// `d = B⁻¹ Aⱼ` for the entering column: a forward solve.
+///
+/// The base inverse is applied by walking the nonzeros of the column (so the cost
+/// is `m` per nonzero, not a full matrix-vector product), and then the
+/// product-form updates are applied in chronological order.
+///
+/// Returns the shared direction buffer: the caller must use it before the next
+/// solve, which is exactly what the iteration does (ratio test, then pivot).
 fn State::direction(self : State, column : Int) -> Array[Double] {
-  let d : Array[Double] = Array::make(self.m, 0.0)
+  let d = self.direction_buffer
+  for i = 0; i < self.m; i = i + 1 {
+    d[i] = 0.0
+  }
   let pointers = self.problem.matrix.col_pointers()
   let rows = self.problem.matrix.row_indices()
   let values = self.problem.matrix.values_view()
@@ -210,13 +314,42 @@ fn State::direction(self : State, column : Int) -> Array[Double] {
     if value != 0.0 {
       let mut i = 0
       while i < self.m {
-        d[i] = d[i] + self.inv[i][row] * value
+        d[i] = d[i] + self.base_inv[i][row] * value
         i = i + 1
       }
     }
     k = k + 1
   }
+  for e = 0; e < self.etas.length(); e = e + 1 {
+    self.etas[e].apply(d)
+  }
   d
+}
+
+///|
+/// Row `r` of `B⁻¹`, i.e. `eᵣᵀB⁻¹`, used as the weight vector that turns a
+/// tableau entry into a sparse dot product.
+fn State::inverse_row(self : State, row : Int) -> Array[Double] {
+  let z : Array[Double] = Array::make(self.m, 0.0)
+  z[row] = 1.0
+  let mut e = self.etas.length() - 1
+  while e >= 0 {
+    self.etas[e].apply_transpose(z)
+    e = e - 1
+  }
+  let out : Array[Double] = Array::make(self.m, 0.0)
+  for k = 0; k < self.m; k = k + 1 {
+    let coefficient = z[k]
+    if coefficient != 0.0 {
+      let base_row = self.base_inv[k]
+      let mut i = 0
+      while i < self.m {
+        out[i] = out[i] + base_row[i] * coefficient
+        i = i + 1
+      }
+    }
+  }
+  out
 }
 
 ///|
@@ -260,7 +393,7 @@ fn State::drive_artificials_out(self : State) -> Unit {
       continue
     }
     // Row r of B⁻¹ is the weight vector: `eᵣᵀ B⁻¹ Aⱼ` is the entry we need.
-    let weights = self.inv[r]
+    let weights = self.inverse_row(r)
     for j = 0; j < self.n; j = j + 1 {
       if self.is_basic[j] || self.problem.is_artificial[j] {
         continue
@@ -359,22 +492,9 @@ fn State::pivot(
     }
   }
   self.xb[row] = entering_value
-  // Product form update of B⁻¹.
-  let pivot_row = self.inv[row]
-  for k = 0; k < self.m; k = k + 1 {
-    pivot_row[k] = pivot_row[k] / pivot
-  }
-  for i = 0; i < self.m; i = i + 1 {
-    if i != row {
-      let factor = d[i]
-      if factor != 0.0 {
-        let target = self.inv[i]
-        for k = 0; k < self.m; k = k + 1 {
-          target[k] = target[k] - factor * pivot_row[k]
-        }
-      }
-    }
-  }
+  // Product-form update: the pivot becomes one sparse eta instead of an O(m²)
+  // row operation on an explicit inverse.
+  self.etas.push(Eta::from_direction(row, d))
   self.is_basic[self.basis[row]] = false
   self.basis[row] = column
   self.is_basic[column] = true
@@ -401,7 +521,10 @@ fn State::refactorize(self : State) -> Bool {
   match invert(dense, m) {
     None => false
     Some(fresh) => {
-      self.inv = fresh
+      self.base_inv = fresh
+      // The updates are folded into the new base, which is the whole point of
+      // refactorizing: the eta list stays short and the drift gets discarded.
+      self.etas = []
       for i = 0; i < m; i = i + 1 {
         let acc = @core.CompensatedSum::new()
         for k = 0; k < m; k = k + 1 {
@@ -628,17 +751,30 @@ fn solve_problem(
       message: "basis became numerically singular",
     }
   }
-  let kernel_values = state.values()
+  let mut kernel_values = state.values()
   // Final self-check: never report an optimum for a point that does not satisfy
   // the rows or the non-negativity requirement, judged against the scale of the
-  // numbers involved (see max_scaled_residual). If this fires, the run is
-  // reported as a numerical failure instead of as a plausible answer.
-  let (scaled_residual, raw_residual) = max_scaled_residual(
-    problem, kernel_values, false,
-  )
-  let negativity = max_negativity(kernel_values)
-  if scaled_residual > options.feasibility_tolerance ||
-    negativity > options.feasibility_tolerance {
+  // numbers involved (see max_scaled_residual).
+  let tolerance = options.feasibility_tolerance
+  let measured = max_scaled_residual(problem, kernel_values, false)
+  let mut scaled_residual = measured.0
+  let mut raw_residual = measured.1
+  let mut negativity = max_negativity(kernel_values)
+  if scaled_residual > tolerance || negativity > tolerance {
+    // The product-form updates are exact in exact arithmetic but accumulate
+    // round-off; folding them into a fresh factorization often restores the last
+    // digits. Only a violation that survives that is a numerical failure.
+    if state.refactorize() {
+      kernel_values = state.values()
+      let (retry_scaled, retry_raw) = max_scaled_residual(
+        problem, kernel_values, false,
+      )
+      scaled_residual = retry_scaled
+      raw_residual = retry_raw
+      negativity = max_negativity(kernel_values)
+    }
+  }
+  if scaled_residual > tolerance || negativity > tolerance {
     return {
       status: NumericalFailure,
       values: [],

@@ -37,12 +37,13 @@ pub(all) struct SimplexOptions {
 } derive(Debug)
 
 ///|
-/// Defaults: generous iteration budget, refactorization every 100 pivots, and
+/// Defaults: generous iteration budget, refactorization every 500 pivots (the
+/// product-form updates are cheap, so the expensive rebuild can wait longer), and
 /// tolerances in the range real LP codes use.
 pub fn SimplexOptions::default() -> SimplexOptions {
   {
     max_iterations: 20000,
-    refactorize_every: 100,
+    refactorize_every: 500,
     feasibility_tolerance: 1.0e-7,
     pivot_tolerance: 1.0e-9,
     reduced_cost_tolerance: 1.0e-9,
