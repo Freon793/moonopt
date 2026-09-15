@@ -36,6 +36,24 @@ pub fn ReducedModel::reconstruct(
 }
 
 ///|
+/// The objective the *original* model assigns to `values`.
+///
+/// This is the number the reduced solve has to reproduce once the offset is added
+/// back, and it is computed from the original model rather than from the reduced
+/// one, so an error in the reduction's bookkeeping shows up as a disagreement
+/// instead of hiding inside a single number.
+pub fn objective_value(model : @model.Model, values : Array[Double]) -> Double {
+  let acc = @core.CompensatedSum::new()
+  for term in model.objective() {
+    let (j, coefficient) = term
+    if j >= 0 && j < values.length() {
+      acc.add(coefficient * values[j])
+    }
+  }
+  acc.value()
+}
+
+///|
 /// Largest violation of the model's own rows by `values`, scaled per row the same
 /// way the kernel's self-check scales its residuals: a violation is only a
 /// violation relative to the size of the numbers in that row.

@@ -77,6 +77,13 @@ this milestone; the dense basis inverse would ask for about 30779.13 MB. ...)
 `bench/report-solve.ps1` 已按此运行。**排查崩溃或用例复现时反过来走 wasm 目标**：
 它带边界检查，越界会给出 panic 信息而不是访问冲突，也不会造成内存破坏。
 
+**数值失败的两道防线**：① 比值检验选出的主元若小于该次方向最大元的 `pivot_relative_tolerance`
+（默认 1e-8），内核先重建基逆、重做比值检验再枢轴（陈旧的基逆正是"合法枢轴变成奇异基"的来源）；
+② 一次运行以数值失败结束时，从初始基**重启一次**，改用 Bland 规则并缩短重新分解间隔，
+恢复结果同样要过残差自检，仍失败才返回**原始失败**。恢复成功的运行会在消息里如实标注
+（`recovered from a numerical failure by restarting with Bland's rule (...)`）：
+"换了一条路走通"和"原来那条路是对的"不是一回事。
+
 ## 为什么需要它
 
 MoonBit 生态已经有一批排产、排班、路由、装箱、约束模型库，但它们几乎全部是启发式或专用实现：

@@ -144,7 +144,7 @@ fn State::new(problem : KernelProblem, options : SimplexOptions) -> State {
     cost: problem.cost.copy(),
     forbid: problem.is_artificial.copy(),
     iterations: 0,
-    bland: false,
+    bland: options.start_with_bland,
     stalled: 0,
     best_objective: 0.0,
     saw_objective: false,
@@ -623,6 +623,33 @@ fn invert(matrix : Array[Array[Double]], m : Int) -> Array[Array[Double]]? {
 }
 
 ///|
+/// `true` when the pivot the ratio test chose is negligible compared with the
+/// largest entry of the direction, which means the direction is not accurate
+/// enough to trust that pivot.
+///
+/// The comparison is relative on purpose. An absolute threshold fires on
+/// well-scaled small problems and stays silent on badly scaled large ones, which
+/// is exactly backwards: the pivot has to be judged against the scale of the
+/// direction it came from.
+fn State::weak_pivot(self : State, d : Array[Double], leaving : Int) -> Bool {
+  let tolerance = self.options.pivot_relative_tolerance
+  if tolerance <= 0.0 {
+    return false
+  }
+  let mut scale = 0.0
+  for i = 0; i < self.m; i = i + 1 {
+    let magnitude = @core.fabs(d[i])
+    if magnitude > scale {
+      scale = magnitude
+    }
+  }
+  if scale <= 0.0 {
+    return false
+  }
+  @core.fabs(d[leaving]) < tolerance * scale
+}
+
+///|
 /// Runs the current phase to optimality.
 ///
 /// Codes: `0` optimal, `1` unbounded, `2` iteration limit, `3` numerical
@@ -642,9 +669,27 @@ fn State::iterate(self : State) -> Int {
       return 0
     }
     let d = self.direction(entering)
-    let leaving = self.ratio_test(d)
+    let mut leaving = self.ratio_test(d)
     if leaving < 0 {
       return 1
+    }
+    // Pivot stability. The ratio test picks the leaving row from the tableau
+    // direction, so a pivot that is negligible compared with the rest of the
+    // direction means the direction itself is unreliable — the product-form
+    // updates have drifted away from the true basis inverse. Pivoting there
+    // produces a basis that is singular or nearly so, and the next
+    // refactorization then fails on it. Rebuilding the inverse and redoing the
+    // choice costs one factorization; the pivot that comes out of the rebuilt
+    // inverse is accepted even if it is still small, because at that point the
+    // direction is as accurate as this code can make it.
+    if self.weak_pivot(d, leaving) {
+      if self.refactorize() {
+        let retried = self.ratio_test(self.direction(entering))
+        if retried < 0 {
+          return 1
+        }
+        leaving = retried
+      }
     }
     self.pivot(leaving, entering, d)
     // Stall detection: switch to Bland's rule when the objective stops moving.
@@ -688,12 +733,64 @@ fn State::values(self : State) -> Array[Double] {
 ///|
 /// Solves a standard-form problem and returns kernel column values.
 ///
+/// A run that ends in a numerical failure gets exactly one recovery attempt: the
+/// same problem, restarted from the initial basis with Bland's rule and a much
+/// shorter refactorization interval. A singular basis is a statement about the
+/// path a run took, not about the problem, and a different pivot rule walks a
+/// different path — Bland's rule is deterministic and cannot cycle, so it is the
+/// natural second opinion on a degenerate model.
+///
+/// The recovery is not trusted on its own. Whatever it returns goes through the
+/// same residual self-check as any other run, and if it also fails numerically the
+/// original failure is the result, message included.
+fn solve_problem(
+  problem : KernelProblem,
+  options : SimplexOptions,
+) -> SimplexResult {
+  let first = solve_once(problem, options)
+  if first.status != NumericalFailure {
+    return first
+  }
+  let every = if options.refactorize_every <= 0 {
+    0
+  } else {
+    @core.fmin_int(options.refactorize_every, 100)
+  }
+  let recovery : SimplexOptions = {
+    max_iterations: options.max_iterations,
+    refactorize_every: every,
+    feasibility_tolerance: options.feasibility_tolerance,
+    pivot_tolerance: options.pivot_tolerance,
+    pivot_relative_tolerance: options.pivot_relative_tolerance,
+    start_with_bland: true,
+    reduced_cost_tolerance: options.reduced_cost_tolerance,
+    relax_integrality: options.relax_integrality,
+    max_kernel_rows: options.max_kernel_rows,
+  }
+  let second = solve_once(problem, recovery)
+  if second.status == NumericalFailure {
+    return first
+  }
+  {
+    status: second.status,
+    values: second.values,
+    objective: second.objective,
+    iterations: second.iterations,
+    message: "recovered from a numerical failure by restarting with Bland's rule (" +
+    first.message +
+    ")",
+  }
+}
+
+///|
+/// Solves a standard-form problem and returns kernel column values.
+///
 /// The size check happens before anything is allocated. It is not a performance
 /// hint: `State::new` builds a dense `m x m` basis inverse, so a kernel problem of
 /// sixty thousand rows asks for tens of gigabytes, and on the native backend that
 /// request ends the process instead of returning an error. Refusing with a
 /// measured reason is the only outcome the caller can act on.
-fn solve_problem(
+fn solve_once(
   problem : KernelProblem,
   options : SimplexOptions,
 ) -> SimplexResult {

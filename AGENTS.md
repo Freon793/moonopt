@@ -28,8 +28,10 @@ You can browse and install extra skills here:
   - `simplex/`: the sparse revised simplex kernel. Sparse CSC columns, dense
     basis inverse with product-form updates and periodic refactorization, Phase I
     and II, Harris ratio test with a feasibility guard and a Bland fallback, a
-    row gate that refuses a kernel problem it cannot allocate for, and a residual
-    self-check before it will report `Optimal`.
+    pivot stability check that rebuilds a stale inverse before pivoting, one
+    recovery attempt with Bland's rule after a numerical failure, a row gate that
+    refuses a kernel problem it cannot allocate for, and a residual self-check
+    before it will report `Optimal`.
   - `presolve/`: model reduction and postsolve. Empty rows and columns, rows the
     bounds already settle, singleton rows turned into bounds, implied bounds, and
     fixed-variable elimination with an objective offset; `reconstruct` maps a

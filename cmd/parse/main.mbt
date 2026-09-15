@@ -182,6 +182,37 @@ fn report_solve_result(result : @simplex.SimplexResult) -> Unit {
 }
 
 ///|
+/// Same line, with the objective restated in the original model's sense.
+///
+/// A presolved run optimises the *reduced* model, so its own objective is missing
+/// the eliminated variables' contribution. Printing that number next to results
+/// from unreduced runs made a 162 000 difference on flugpl look like a wrong
+/// answer when it was only a wrong label; the reduction was right and the
+/// reconstruction check now proves it every time.
+fn report_solve_result_scaled(
+  result : @simplex.SimplexResult,
+  presolved : @presolve.ReducedModel,
+) -> Unit {
+  let status = match result.status {
+    @simplex.SimplexStatus::Optimal => "optimal"
+    @simplex.SimplexStatus::Infeasible => "infeasible"
+    @simplex.SimplexStatus::Unbounded => "unbounded"
+    @simplex.SimplexStatus::IterationLimit => "iteration-limit"
+    @simplex.SimplexStatus::NumericalFailure => "numerical-failure"
+    @simplex.SimplexStatus::TooLarge => "too-large"
+  }
+  println(
+    "       solve=" +
+    status +
+    " obj=" +
+    presolved.objective(result.objective).to_string() +
+    " iters=" +
+    result.iterations.to_string() +
+    (if result.message == "" { "" } else { " (" + result.message + ")" }),
+  )
+}
+
+///|
 /// Solves a parsed model and prints the outcome.
 ///
 /// The row limit is explicit because the kernel keeps a dense basis inverse:
@@ -241,11 +272,23 @@ fn solve_and_report(model : @model.Model, flags : SolveFlags) -> Unit {
       match @simplex.solve_model_with(reduced, options) {
         Err(reason) => println("       solve=refused(" + reason + ")")
         Ok(result) => {
-          report_solve_result(result)
+          report_solve_result_scaled(result, presolved)
           if result.status == @simplex.SimplexStatus::Optimal {
             let values = presolved.reconstruct(result.values)
             let rows = @presolve.max_row_violation(model, values)
             let bounds = @presolve.max_bound_violation(model, values)
+            // The reduced solve and the original model must agree on the
+            // objective as well. The offset is easy to get wrong, and a wrong
+            // offset leaves a solution that is perfectly feasible while the
+            // reported number is not the objective of anything.
+            let reported = presolved.objective(result.objective)
+            let recomputed = @presolve.objective_value(model, values)
+            let agrees = @core.approx_eq(
+              reported,
+              recomputed,
+              rel=1.0e-9,
+              abs=1.0e-6,
+            )
             println(
               "       reconstructed: rows " +
               values.length().to_string() +
@@ -253,10 +296,17 @@ fn solve_and_report(model : @model.Model, flags : SolveFlags) -> Unit {
               rows.to_string() +
               ", worst bound violation " +
               bounds.to_string() +
-              (if rows <= 1.0e-7 && bounds <= 1.0e-7 {
+              ", objective " +
+              recomputed.to_string() +
+              (if agrees {
+                " (agrees with the reported " + reported.to_string() + ")"
+              } else {
+                " (DISAGREES with the reported " + reported.to_string() + ")"
+              }) +
+              (if rows <= 1.0e-7 && bounds <= 1.0e-7 && agrees {
                 " (feasible)"
               } else {
-                " (INFEASIBLE: the reduction is wrong)"
+                " (FAILED: the reduction is not trustworthy here)"
               }),
             )
           }

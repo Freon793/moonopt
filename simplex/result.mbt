@@ -42,6 +42,19 @@ pub(all) struct SimplexOptions {
   refactorize_every : Int
   feasibility_tolerance : Double
   pivot_tolerance : Double
+  /// A pivot smaller than this fraction of the largest entry of the tableau
+  /// direction is treated as evidence that the basis inverse is stale. A stale
+  /// inverse is how a mathematically valid pivot turns into a singular basis: the
+  /// ratio test picks a leaving row from `B⁻¹aⱼ`, and if that entry is really zero
+  /// while the computed one is not, the new basis is singular. When this fires the
+  /// kernel rebuilds the inverse and redoes the ratio test before pivoting. Zero
+  /// disables the check.
+  pivot_relative_tolerance : Double
+  /// Start with Bland's rule instead of Dantzig's. Bland's rule is deterministic
+  /// and cannot cycle, so it walks a different path through a degenerate problem;
+  /// the kernel uses it for the recovery attempt after a numerically singular
+  /// basis, where a different path is the whole point.
+  start_with_bland : Bool
   reduced_cost_tolerance : Double
   /// Treat integer variables as continuous (the LP relaxation of a model).
   relax_integrality : Bool
@@ -64,6 +77,8 @@ pub fn SimplexOptions::default() -> SimplexOptions {
     refactorize_every: 500,
     feasibility_tolerance: 1.0e-7,
     pivot_tolerance: 1.0e-9,
+    pivot_relative_tolerance: 1.0e-8,
+    start_with_bland: false,
     reduced_cost_tolerance: 1.0e-9,
     relax_integrality: false,
     max_kernel_rows: 4000,
@@ -79,6 +94,8 @@ pub fn SimplexOptions::relaxed() -> SimplexOptions {
     refactorize_every: base.refactorize_every,
     feasibility_tolerance: base.feasibility_tolerance,
     pivot_tolerance: base.pivot_tolerance,
+    pivot_relative_tolerance: base.pivot_relative_tolerance,
+    start_with_bland: base.start_with_bland,
     reduced_cost_tolerance: base.reduced_cost_tolerance,
     relax_integrality: true,
     max_kernel_rows: base.max_kernel_rows,
@@ -96,6 +113,8 @@ pub fn SimplexOptions::with_max_iterations(
     refactorize_every: base.refactorize_every,
     feasibility_tolerance: base.feasibility_tolerance,
     pivot_tolerance: base.pivot_tolerance,
+    pivot_relative_tolerance: base.pivot_relative_tolerance,
+    start_with_bland: base.start_with_bland,
     reduced_cost_tolerance: base.reduced_cost_tolerance,
     relax_integrality: base.relax_integrality,
     max_kernel_rows: base.max_kernel_rows,
@@ -114,6 +133,8 @@ pub fn SimplexOptions::with_max_kernel_rows(
     refactorize_every: base.refactorize_every,
     feasibility_tolerance: base.feasibility_tolerance,
     pivot_tolerance: base.pivot_tolerance,
+    pivot_relative_tolerance: base.pivot_relative_tolerance,
+    start_with_bland: base.start_with_bland,
     reduced_cost_tolerance: base.reduced_cost_tolerance,
     relax_integrality: base.relax_integrality,
     max_kernel_rows,
