@@ -9,11 +9,14 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 不可行性（Farkas）与无界（射线）证书。纯 MoonBit 实现，无 FFI 依赖。
 
 > 状态：**v0.1.0-dev**，`M1`（基础层与模型层）、`M2`（标准模型输入）已落地，`M3` 进行中
-> （稀疏修正单纯形、性能测量与优化已完成；对偶单纯形、presolve、稀疏 LU 基分解待完成）：
-> 可构建、可测试、CI 全绿，并已在 **MIPLIB 2017 的 33 个真实实例**上跑通解析报告
+> （稀疏修正单纯形、性能测量与优化、比值检验的可行性守卫与内核规模门禁已完成；
+> 对偶单纯形、presolve、稀疏 LU 基分解待完成）：
+> 可构建、可测试、CI 全绿，并已在 **MIPLIB 2017 的 32 个真实实例**上跑通解析报告
 > （33 成功 / 0 失败，见 [`bench/parse-report.md`](bench/parse-report.md)）与求解报告
-> （14 个 LP 松弛求到最优、18 个超规模跳过、1 个数值失败，见
-> [`bench/solve-report.md`](bench/solve-report.md)）。尚未发布到 mooncakes.io。
+> （仓库里的
+> [`bench/solve-report.md`](bench/solve-report.md) 由提交 `f7dba3a` 生成：14 个 LP 松弛求到最优、
+> 18 个超规模跳过、1 个数值失败；该失败已由守卫式 Harris 比值检验修掉，重新生成后为
+> 15 optimal / 17 skipped / 0 其他，报告文件本身尚待重跑对齐）。尚未发布到 mooncakes.io。
 > 里程碑划分、范围闸门与明确**不做**的内容见 [`docs/roadmap.md`](docs/roadmap.md)。
 
 ## 当前能力（M1、M2 与 M3 进行中）
@@ -38,7 +41,7 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
   （状态、变量取值、目标值、迭代数、失败原因）；非法模型返回 `NotSolved` 并带原因；
 - `cmd/parse`：模型文件巡检 CLI（格式判定、规模统计与校验结论、`--manifest` 批量模式、
   `--solve` / `--relax` / `--max-rows` 求解开关、失败返回非零退出码）；
-- CLI 与两个可运行示例，`moon test` 72 个测试全绿，CI 覆盖 Linux/macOS/Windows 与 wasm-gc/js 目标。
+- CLI 与两个可运行示例，`moon test` 75 个测试全绿，CI 覆盖 Linux/macOS/Windows 与 wasm-gc/js 目标。
 
 **当前内核的能力边界（明确写出来，不夸大）**：
 
@@ -48,16 +51,31 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 | `≤`、`≥`、`=` 任意混合，含负右端项 | 证书与 `verify` 独立校验器（M4） |
 | min / max | 对偶单纯形热启动、presolve / postsolve（M3 剩余部分） |
 | MPS / LP 文件读入与写出（M2） | MPS 的 `SC`/`SI` 半连续界、完整 `SOS` / `MARKER` 语义 |
-| 行数 ≲ 300 的模型（稠密基逆的当前规模上限） | 更大规模需先落地稀疏 LU 基分解（M3 性能部分） |
+| 内核行数 ≤ 4000 的模型（`SimplexOptions::max_kernel_rows`，稠密基逆 128 MB） | 更大规模需先落地稀疏 LU 基分解（M3 性能部分） |
+
+**两个行数上限不要混淆**：`cmd/parse --max-rows N` 限制的是**模型约束数**（超过即
+`solve=skipped`）；内核自己的门禁 `max_kernel_rows` 限制的是**内核行数**，而内核行数 =
+模型约束数 + **每个有限上界一行**（本里程碑还没有 bounded-variable pivot）。实测的极端例子是
+`fast0507`：507 条约束、63009 个 0/1 变量，内核规模 **63516 行**，稠密基逆需要 **约 30.8 GB**，
+此前在 native 目标上以访问冲突（exit `0xC0000005`）退出并因巨量换页拖垮整机。现在内核在
+**分配之前**按实测数字拒绝：
+
+```
+solve=too-large obj=0 iters=0 (kernel problem has 63516 rows, above the 4000 row limit of
+this milestone; the dense basis inverse would ask for about 30779.13 MB. ...)
+```
 
 **内核的一条硬规则**：声明 `Optimal` 之前，内核会用自己的矩阵独立重算**按行缩放的行残差**
 （`|Ax−b| / (1+|b|+Σ|a·x|)`，不计人工列）与缩放的负值，只要超过容差就返回 `NumericalFailure`
-并给出测得的数值，而不是给出一个看起来合理的解。求解报告里那 1 个数值失败正是这条规则生效的结果：
-它的缩放负值为 2.0e-4，是真实违反而不是舍入误差。
+并给出测得的数值，而不是给出一个看起来合理的解。这条规则生效过两次：`blend2` 的绝对残差
+2.5e-7 是舍入误差（改用缩放口径后恢复为最优），而 `noswot` 的缩放负值 2.0e-4 是真实违反 ——
+后者是比值检验把基本变量推出可行性下限造成的，已由守卫式 Harris 修掉（先模拟这一步，
+若破坏可行性则退回严格最小比值行）。
 
 **基准运行方式**：内核基准一律用 **native release** 目标（`moon run --target native --release`）。
 同一实例实测比默认 wasm 目标快约 6 倍（`mod010`：wasm 119.6s / native release 18.8s），
-`bench/report-solve.ps1` 已按此运行。
+`bench/report-solve.ps1` 已按此运行。**排查崩溃或用例复现时反过来走 wasm 目标**：
+它带边界检查，越界会给出 panic 信息而不是访问冲突，也不会造成内存破坏。
 
 ## 为什么需要它
 
