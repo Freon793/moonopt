@@ -24,6 +24,7 @@ pub struct Solution {
 
 pub(all) struct SolveOptions {
   max_iterations : Int
+  presolve : Bool
 } derive(@debug.Debug)
 pub fn SolveOptions::default() -> Self
 pub fn SolveOptions::new(Int) -> Self

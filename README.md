@@ -51,7 +51,7 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 | `≤`、`≥`、`=` 任意混合，含负右端项 | 证书与 `verify` 独立校验器（M4） |
 | min / max | 对偶单纯形热启动（M3 剩余部分） |
 | MPS / LP 文件读入与写出（M2） | MPS 的 `SC`/`SI` 半连续界、完整 `SOS` / `MARKER` 语义 |
-| presolve：空行/列消元、冗余行、singleton 转界、隐式界收紧、固定变量消元 + 解还原（`--presolve`，**默认关闭**） | 系数强化、对偶固定、变量/行的重复与支配检测；默认关闭的原因见 `docs/roadmap.md` 的已知阻塞项 |
+| presolve：空行/列消元、冗余行、singleton 转界、隐式界收紧、固定变量消元 + 解还原（`solve` 默认开启，`--presolve`） | 系数强化、对偶固定、变量/行的重复与支配检测；整数模型不经化简（保持内核的拒绝语义） |
 | 内核行数 ≤ 4000 的模型（`SimplexOptions::max_kernel_rows`，稠密基逆 128 MB） | 更大规模需先落地稀疏 LU 基分解（M3 性能部分） |
 
 **两个行数上限不要混淆**：`cmd/parse --max-rows N` 限制的是**模型约束数**（超过即
@@ -65,6 +65,15 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 solve=too-large obj=0 iters=0 (kernel problem has 63516 rows, above the 4000 row limit of
 this milestone; the dense basis inverse would ask for about 30779.13 MB. ...)
 ```
+
+**公开入口的默认路径**（`solve` / `solve_with`）：先化简（`presolve`，默认开启），再交给内核算，
+然后把解还原回原变量。还原结果必须**同时**通过三项检查才以 `Optimal` 返回 —— 原模型的行、
+原模型的界、以及用原模型目标向量重算出的目标值与报告值一致；任何一项不过就返回 `NotSolved`
+并附上实测违反量。化简能自行证明不可行或无界时直接返回该判定，不启动内核。
+
+**整数模型不经化简**：内核在 M5 之前拒绝整数变量，而这个承诺不能取决于化简是否碰巧把所有
+整数变量定住 —— 那也正是"固定值可能非整数"会溜进来的地方，所以含整数变量的模型直接交给内核领取拒绝理由。
+要看内核在原始模型上的行为，传 `SolveOptions { presolve: false }`。
 
 **内核的一条硬规则**：声明 `Optimal` 之前，内核会用自己的矩阵独立重算**按行缩放的行残差**
 （`|Ax−b| / (1+|b|+Σ|a·x|)`，不计人工列）与缩放的负值，只要超过容差就返回 `NumericalFailure`
@@ -174,25 +183,25 @@ moonopt 0.1.0-dev
 status     : Optimal
 iterations : 2
 objective  : 21
-  x = 3
+  x = 3.0000000000000004
   y = 1.4999999999999998
 ```
 
-> `1.4999999999999998` 是浮点表示的真实值（在 `1e-9` 相对容差内等于 1.5）。
-> 面向人读的定点格式化属于报表层（M6），当前示例直接打印原始值，不做美化。
+> `3.0000000000000004` 与 `1.4999999999999998` 是浮点表示的真实值（都在 `1e-9` 相对容差内
+> 等于 3 与 1.5）。面向人读的定点格式化属于报表层（M6），当前示例直接打印原始值，不做美化。
 
 `solve` / `verify` / `fmt` / `bench` 等子命令随 M2–M6 落地，见 [`docs/roadmap.md`](docs/roadmap.md)。
 
 ## 项目结构
 
 ```
-moonopt.mbt       公开入口：solve / solve_with、SolveStatus、Solution、SolveOptions
+moonopt.mbt       公开入口：solve / solve_with、SolveStatus、Solution、SolveOptions（默认开启 presolve）
 core/             数值与稀疏基础设施（容差比较、补偿求和、CSC 稀疏矩阵）
 model/            模型层（变量、线性表达式、约束、目标、模型校验）
 format/           MPS 与 LP 格式读写、解析错误定位
 oracle/           参考实现：稠密两阶段单纯形（差分测试对照基准，非交付求解器）
 simplex/          稀疏修正单纯形内核（M3 进行中：对偶单纯形待补）
-presolve/         presolve 与 postsolve（M3）
+presolve/         模型化简与解还原（M3；公开接口可单独使用）
 verify/           证书校验器（M4）
 mip/              分支定界与割平面（M5，受范围闸门约束）
 cmd/main/         示例 CLI 与演示输出

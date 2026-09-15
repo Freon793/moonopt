@@ -18,6 +18,10 @@ You can browse and install extra skills here:
 - Package layout of this project:
   - `moonopt.mbt` (module root package): public entry points — `Model::solve`,
     `SolveStatus`, `Solution`, `SolveOptions`. Keep it thin: orchestration only.
+    Presolve is on by default here, so this is also the layer that reconstructs the
+    solution into the original variables and **verifies** it against the original
+    model before reporting `Optimal`; integer models skip the reduction so the
+    kernel's refusal stays independent of what a reduction happened to fix.
   - `core/`: numeric and sparse infrastructure (tolerances, compensated
     summation, CSC sparse matrix). Must not depend on other packages here.
   - `model/`: variables, linear expressions, constraints, objective, validation.
