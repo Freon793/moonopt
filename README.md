@@ -9,10 +9,11 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 不可行性（Farkas）与无界（射线）证书。纯 MoonBit 实现，无 FFI 依赖。
 
 > 状态：**v0.1.0-dev**，`M1`（基础层与模型层）、`M2`（标准模型输入）已落地，`M3` 进行中
-> （稀疏修正单纯形已接入公开入口；对偶单纯形与 presolve、稀疏基分解、性能优化待完成）：
+> （稀疏修正单纯形、性能测量与优化已完成；对偶单纯形、presolve、稀疏 LU 基分解待完成）：
 > 可构建、可测试、CI 全绿，并已在 **MIPLIB 2017 的 33 个真实实例**上跑通解析报告
 > （33 成功 / 0 失败，见 [`bench/parse-report.md`](bench/parse-report.md)）与求解报告
-> （见 [`bench/solve-report.md`](bench/solve-report.md)）。尚未发布到 mooncakes.io。
+> （14 个 LP 松弛求到最优、18 个超规模跳过、1 个数值失败，见
+> [`bench/solve-report.md`](bench/solve-report.md)）。尚未发布到 mooncakes.io。
 > 里程碑划分、范围闸门与明确**不做**的内容见 [`docs/roadmap.md`](docs/roadmap.md)。
 
 ## 当前能力（M1、M2 与 M3 进行中）
@@ -45,11 +46,16 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 | `≤`、`≥`、`=` 任意混合，含负右端项 | 证书与 `verify` 独立校验器（M4） |
 | min / max | 对偶单纯形热启动、presolve / postsolve（M3 剩余部分） |
 | MPS / LP 文件读入与写出（M2） | MPS 的 `SC`/`SI` 半连续界、完整 `SOS` / `MARKER` 语义 |
-| 行数 ≲ 200 的模型（稠密基逆的当前规模上限） | 更大规模需先落地稀疏 LU 基分解（M3 性能部分） |
+| 行数 ≲ 300 的模型（稠密基逆的当前规模上限） | 更大规模需先落地稀疏 LU 基分解（M3 性能部分） |
 
-**内核的一条硬规则**：声明 `Optimal` 之前，内核会用自己的矩阵独立重算行残差与非负性；
-只要残差或负值超过容差，就返回 `NumericalFailure` 并给出测得的数值，而不是给出一个看起来合理的解。
-求解报告里出现的数值失败正是这条规则生效的结果。
+**内核的一条硬规则**：声明 `Optimal` 之前，内核会用自己的矩阵独立重算**按行缩放的行残差**
+（`|Ax−b| / (1+|b|+Σ|a·x|)`，不计人工列）与缩放的负值，只要超过容差就返回 `NumericalFailure`
+并给出测得的数值，而不是给出一个看起来合理的解。求解报告里那 1 个数值失败正是这条规则生效的结果：
+它的缩放负值为 2.0e-4，是真实违反而不是舍入误差。
+
+**基准运行方式**：内核基准一律用 **native release** 目标（`moon run --target native --release`）。
+同一实例实测比默认 wasm 目标快约 6 倍（`mod010`：wasm 119.6s / native release 18.8s），
+`bench/report-solve.ps1` 已按此运行。
 
 ## 为什么需要它
 

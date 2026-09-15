@@ -121,6 +121,31 @@ pub fn SparseMatrix::get(self : SparseMatrix, i : Int, j : Int) -> Double {
 }
 
 ///|
+/// Raw column pointers, for kernels whose inner loops must not allocate.
+///
+/// With `row_indices` and `values_view` this exposes the storage so a solver can
+/// walk the entries of a column in place: `column(j)` builds a fresh
+/// `(row, value)` list per call, which is convenient but costs an allocation per
+/// entry per pivot in a hot loop. The invariants documented at the top of this
+/// file still hold for everything reached this way; the views must not outlive a
+/// call that rebuilds the matrix.
+pub fn SparseMatrix::col_pointers(self : SparseMatrix) -> ArrayView[Int] {
+  self.col_ptr[:]
+}
+
+///|
+/// Raw row indices of the stored entries.
+pub fn SparseMatrix::row_indices(self : SparseMatrix) -> ArrayView[Int] {
+  self.row_idx[:]
+}
+
+///|
+/// Raw values of the stored entries, aligned with `row_indices`.
+pub fn SparseMatrix::values_view(self : SparseMatrix) -> ArrayView[Double] {
+  self.values[:]
+}
+
+///|
 /// Transposes the matrix. Row `i` of `self` becomes column `i` of the result, so
 /// the result has `ncols` rows and `nrows` columns.
 pub fn SparseMatrix::transpose(self : SparseMatrix) -> SparseMatrix {

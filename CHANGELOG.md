@@ -5,6 +5,25 @@
 
 ## [Unreleased]
 
+### Changed — M3 (performance, measured rather than guessed)
+
+- 定价与方向计算改为直接遍历 CSC 原始数组（新增
+  `SparseMatrix::col_pointers` / `row_indices` / `values_view`），不再为每一列分配一个
+  `(row, value)` 列表：`mod010` 的求解时间从 154.6s 降到 121.2s（约 20%）。先测量、再改，
+  没有凭感觉优化；
+- 人工变量驱逐改为用基逆的一行作权向量、按列非零元计算单个表元素（`tableau_entry`）；
+  原实现为每个候选列构造完整方向，复杂度 O(m·nnz) 且每次都分配一个 m 向量。
+  现在只有真正要枢轴的那一列才重建完整方向；
+- **基准改用原生 release 目标**：同一实例（`mod010`，146 行 / 2655 列）实测
+  wasm 默认目标 119.6s、native debug 203.6s、**native release 18.8s**（6.4×）。
+  `bench/report-solve.ps1` 已切到 native release，报告里的数字全部来自该目标；
+- 可行性的判定改为**按行缩放残差**（`|Ax−b| / (1+|b|+Σ|a·x|)`，负值同样按解的尺度缩放）：
+  绝对残差 2.5e-7 出现在右端项上百的行上是舍入误差，而相对量级 2.0e-4 的负值才是真实违反。
+  此前 `blend2` 因绝对口径被误判为数值失败，修正后它求到最优，`noswot` 仍被判为真实失败；
+- 求解报告的行数上限由 200 提升到 300：**14 个实例求到最优**、18 个超规模跳过、1 个数值失败；
+  14 项松弛值经外部对拍全部 ≤ MIPLIB 官方最优值（0 违反）。覆盖的实例与结果见
+  [`bench/solve-report.md`](bench/solve-report.md)。
+
 ### Added — M3 (sparse revised simplex kernel)
 
 - `simplex`：**稀疏修正单纯形内核**，公开入口 `solve_standard` / `solve_model`

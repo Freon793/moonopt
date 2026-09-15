@@ -137,18 +137,27 @@ fn State::duals(self : State) -> Array[Double] {
 
 ///|
 /// Reduced cost of a column: `cⱼ − y·Aⱼ`, walking only that column's nonzeros.
+///
+/// The accumulation is a plain sum rather than a compensated one: a column of an
+/// LP holds a handful of entries, and paying for an accumulator object per column
+/// would cost more than it saves. The compensated path is used where it matters,
+/// on the long accumulations (residuals, objective values).
 fn State::reduced_cost(
   self : State,
   column : Int,
   duals : Array[Double],
+  pointers : ArrayView[Int],
+  rows : ArrayView[Int],
+  values : ArrayView[Double],
 ) -> Double {
-  let acc = @core.CompensatedSum::new()
-  let entries = self.problem.matrix.column(column)
-  for e = 0; e < entries.length(); e = e + 1 {
-    let (row, value) = entries[e]
-    acc.add(duals[row] * value)
+  let mut acc = 0.0
+  let mut k = pointers[column]
+  let end = pointers[column + 1]
+  while k < end {
+    acc = acc + duals[rows[k]] * values[k]
+    k = k + 1
   }
-  self.cost[column] - acc.value()
+  self.cost[column] - acc
 }
 
 ///|
@@ -157,15 +166,22 @@ fn State::reduced_cost(
 /// Dantzig (most negative reduced cost) by default, Bland (smallest index) when
 /// the run has stalled — Bland's rule is what makes termination certain on
 /// degenerate problems, at the price of more iterations.
+///
+/// Pricing walks the raw CSC arrays: an earlier version asked for a freshly
+/// allocated `(row, value)` list per column, which dominated the runtime on the
+/// larger instances (a few million short-lived arrays for one solve).
 fn State::choose_entering(self : State, duals : Array[Double]) -> Int {
   let threshold = -self.options.reduced_cost_tolerance
+  let pointers = self.problem.matrix.col_pointers()
+  let rows = self.problem.matrix.row_indices()
+  let values = self.problem.matrix.values_view()
   let mut best = -1
   let mut best_reduced = 0.0
   for j = 0; j < self.n; j = j + 1 {
     if self.is_basic[j] || self.forbid[j] {
       continue
     }
-    let reduced = self.reduced_cost(j, duals)
+    let reduced = self.reduced_cost(j, duals, pointers, rows, values)
     if reduced < threshold {
       if self.bland {
         return j
@@ -183,16 +199,49 @@ fn State::choose_entering(self : State, duals : Array[Double]) -> Int {
 /// `d = B⁻¹ Aⱼ` for the entering column.
 fn State::direction(self : State, column : Int) -> Array[Double] {
   let d : Array[Double] = Array::make(self.m, 0.0)
-  let entries = self.problem.matrix.column(column)
-  for e = 0; e < entries.length(); e = e + 1 {
-    let (row, value) = entries[e]
+  let pointers = self.problem.matrix.col_pointers()
+  let rows = self.problem.matrix.row_indices()
+  let values = self.problem.matrix.values_view()
+  let mut k = pointers[column]
+  let end = pointers[column + 1]
+  while k < end {
+    let row = rows[k]
+    let value = values[k]
     if value != 0.0 {
-      for i = 0; i < self.m; i = i + 1 {
+      let mut i = 0
+      while i < self.m {
         d[i] = d[i] + self.inv[i][row] * value
+        i = i + 1
       }
     }
+    k = k + 1
   }
   d
+}
+
+///|
+/// Tableau entry `(B⁻¹ Aⱼ)ᵣ` of one column, without forming the whole direction.
+///
+/// Uses row `r` of the basis inverse as a weight vector, so the cost is the
+/// column's nonzero count instead of a matrix-vector product. This is what makes
+/// the artificial eviction below affordable: it would otherwise build a full
+/// direction for every candidate column it looks at.
+fn State::tableau_entry(
+  self : State,
+  column : Int,
+  weights : Array[Double],
+) -> Double {
+  let pointers = self.problem.matrix.col_pointers()
+  let rows = self.problem.matrix.row_indices()
+  let values = self.problem.matrix.values_view()
+  let mut acc = 0.0
+  let mut k = pointers[column]
+  let end = pointers[column + 1]
+  while k < end {
+    acc = acc + weights[rows[k]] * values[k]
+    k = k + 1
+  }
+  acc
 }
 
 ///|
@@ -205,16 +254,21 @@ fn State::direction(self : State, column : Int) -> Array[Double] {
 /// cannot move either — every eligible direction has a zero entry in that row —
 /// so it is safe to leave it in place.
 fn State::drive_artificials_out(self : State) -> Unit {
+  let tolerance = self.options.pivot_tolerance
   for r = 0; r < self.m; r = r + 1 {
     if !self.problem.is_artificial[self.basis[r]] {
       continue
     }
+    // Row r of B⁻¹ is the weight vector: `eᵣᵀ B⁻¹ Aⱼ` is the entry we need.
+    let weights = self.inv[r]
     for j = 0; j < self.n; j = j + 1 {
       if self.is_basic[j] || self.problem.is_artificial[j] {
         continue
       }
-      let d = self.direction(j)
-      if @core.fabs(d[r]) > self.options.pivot_tolerance {
+      let entry = self.tableau_entry(j, weights)
+      if @core.fabs(entry) > tolerance {
+        // Rebuild the full direction only for the column that will be pivoted.
+        let d = self.direction(j)
         self.pivot(r, j, d)
         break
       }
@@ -514,22 +568,24 @@ fn solve_problem(
         message: "basis became numerically singular during Phase I",
       }
     }
-    // Feasibility is decided by measuring, not by trusting the bookkeeping: the
-    // artificial sum is the total row infeasibility, and the residual check
-    // repeats it independently on the real columns.
+    // Feasibility is decided by measuring, not by trusting the bookkeeping. The
+    // scaled residual carries the decision: the artificial sum is reported for
+    // diagnosis, but scaled it would say the same thing less precisely.
     let phase1_values = state.values()
-    let phase1_residual = max_residual(problem, phase1_values, false)
+    let (phase1_scaled, phase1_raw) = max_scaled_residual(
+      problem, phase1_values, false,
+    )
     let artificial_sum = state.artificial_sum()
-    let feasibility_limit = options.feasibility_tolerance *
-      (1.0 + @core.fabs(problem.objective_constant))
-    if phase1_residual > feasibility_limit || artificial_sum > feasibility_limit {
+    if phase1_scaled > options.feasibility_tolerance {
       return {
         status: Infeasible,
         values: [],
         objective: 0.0,
         iterations: state.iterations,
-        message: "no feasible point exists (row residual " +
-        phase1_residual.to_string() +
+        message: "no feasible point exists (scaled row residual " +
+        phase1_scaled.to_string() +
+        ", raw " +
+        phase1_raw.to_string() +
         ", artificial sum " +
         artificial_sum.to_string() +
         ")",
@@ -574,21 +630,25 @@ fn solve_problem(
   }
   let kernel_values = state.values()
   // Final self-check: never report an optimum for a point that does not satisfy
-  // the rows or the non-negativity requirement. If this fires, the run is
+  // the rows or the non-negativity requirement, judged against the scale of the
+  // numbers involved (see max_scaled_residual). If this fires, the run is
   // reported as a numerical failure instead of as a plausible answer.
-  let residual = max_residual(problem, kernel_values, false)
+  let (scaled_residual, raw_residual) = max_scaled_residual(
+    problem, kernel_values, false,
+  )
   let negativity = max_negativity(kernel_values)
-  let limit = options.feasibility_tolerance *
-    (1.0 + @core.fabs(problem.objective_constant))
-  if residual > limit || negativity > limit {
+  if scaled_residual > options.feasibility_tolerance ||
+    negativity > options.feasibility_tolerance {
     return {
       status: NumericalFailure,
       values: [],
       objective: 0.0,
       iterations: state.iterations,
-      message: "the resulting basis is not feasible (row residual " +
-      residual.to_string() +
-      ", negative value " +
+      message: "the resulting basis is not feasible (scaled row residual " +
+      scaled_residual.to_string() +
+      ", raw " +
+      raw_residual.to_string() +
+      ", scaled negative value " +
       negativity.to_string() +
       ")",
     }
@@ -608,49 +668,79 @@ fn solve_problem(
 }
 
 ///|
-/// Largest violation of the row residuals `|A x − b|` over the *real* columns.
+/// Largest *scaled* row residual over the real columns.
+///
+/// A residual is judged against the scale of the row it belongs to:
+///
+///   |A x − b| / (1 + |b| + Σ |aᵢⱼ|·|xⱼ|)
+///
+/// This is the convention real LP codes use, and it is what makes a tolerance
+/// mean the same thing across models whose coefficients differ by orders of
+/// magnitude. A raw residual of 2.5e-7 on a row whose right hand side is in the
+/// hundreds, or whose terms sum to tens, is round-off, not infeasibility; a raw
+/// residual of 3.9e-5 against a right hand side of order one is infeasibility.
 ///
 /// Artificial columns are excluded on purpose: an artificial variable sitting in
 /// the basis would absorb exactly the amount by which its row is violated, so
 /// including them would make the check vacuous. Slacks and surplus columns are
 /// real columns and stay in the measurement.
-fn max_residual(
+fn max_scaled_residual(
   problem : KernelProblem,
   values : Array[Double],
   include_artificial : Bool,
-) -> Double {
-  let residual : Array[Double] = Array::make(problem.nrows, 0.0)
+) -> (Double, Double) {
+  let signed : Array[Double] = Array::make(problem.nrows, 0.0)
+  let magnitude : Array[Double] = Array::make(problem.nrows, 0.0)
+  let pointers = problem.matrix.col_pointers()
+  let rows = problem.matrix.row_indices()
+  let coefficients = problem.matrix.values_view()
   for j = 0; j < problem.ncols; j = j + 1 {
     if !include_artificial && problem.is_artificial[j] {
       continue
     }
     let value = values[j]
     if value != 0.0 {
-      let entries = problem.matrix.column(j)
-      for e = 0; e < entries.length(); e = e + 1 {
-        let (row, coefficient) = entries[e]
-        residual[row] = residual[row] + coefficient * value
+      let mut k = pointers[j]
+      let end = pointers[j + 1]
+      while k < end {
+        let row = rows[k]
+        let contribution = coefficients[k] * value
+        signed[row] = signed[row] + contribution
+        magnitude[row] = magnitude[row] + @core.fabs(contribution)
+        k = k + 1
       }
     }
   }
   let mut worst = 0.0
+  let mut raw = 0.0
   for i = 0; i < problem.nrows; i = i + 1 {
-    let deviation = @core.fabs(residual[i] - problem.rhs[i])
-    if deviation > worst {
-      worst = deviation
+    let deviation = @core.fabs(signed[i] - problem.rhs[i])
+    if deviation > raw {
+      raw = deviation
+    }
+    let scale = 1.0 + @core.fabs(problem.rhs[i]) + magnitude[i]
+    let scaled = deviation / scale
+    if scaled > worst {
+      worst = scaled
     }
   }
-  worst
+  (worst, raw)
 }
 
 ///|
-/// Worst violation of the non-negativity requirement.
+/// Worst violation of the non-negativity requirement, scaled by the magnitude of
+/// the solution so a `-1e-12` next to values of size 1e6 counts as rounded off.
 fn max_negativity(values : Array[Double]) -> Double {
   let mut worst = 0.0
+  let mut scale = 1.0
   for j = 0; j < values.length(); j = j + 1 {
+    let magnitude = @core.fabs(values[j])
+    if magnitude > scale {
+      scale = magnitude
+    }
     if values[j] < 0.0 && -values[j] > worst {
       worst = -values[j]
     }
   }
-  worst
+  worst / scale
 }

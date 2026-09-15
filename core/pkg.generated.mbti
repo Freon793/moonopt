@@ -55,6 +55,7 @@ pub struct SparseMatrix {
   values : Array[Double]
 } derive(@debug.Debug)
 pub fn SparseMatrix::col_nnz(Self, Int) -> Int
+pub fn SparseMatrix::col_pointers(Self) -> ArrayView[Int]
 pub fn SparseMatrix::column(Self, Int) -> Array[(Int, Double)]
 pub fn SparseMatrix::from_columns(Int, Array[Array[(Int, Double)]]) -> Self
 pub fn SparseMatrix::get(Self, Int, Int) -> Double
@@ -62,8 +63,10 @@ pub fn SparseMatrix::mul_vec(Self, Array[Double]) -> Array[Double]
 pub fn SparseMatrix::ncols(Self) -> Int
 pub fn SparseMatrix::nnz(Self) -> Int
 pub fn SparseMatrix::nrows(Self) -> Int
+pub fn SparseMatrix::row_indices(Self) -> ArrayView[Int]
 pub fn SparseMatrix::to_dense(Self) -> Array[Array[Double]]
 pub fn SparseMatrix::transpose(Self) -> Self
+pub fn SparseMatrix::values_view(Self) -> ArrayView[Double]
 pub fn SparseMatrix::zeros(Int, Int) -> Self
 
 // Type aliases

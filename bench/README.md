@@ -29,9 +29,13 @@ MIPLIB 2017 —— 它提供同样性质的工业实例，但以纯 MPS（gzip �
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/fetch-instances.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-parse.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 200
+powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 300
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-relaxation-bounds.ps1
 ```
+
+`report-solve.ps1` 用 **native release** 目标运行内核：同一实例在默认 wasm 目标上要慢约 6 倍
+（实测 `mod010`：wasm 119.6s / native debug 203.6s / native release 18.8s），
+报告里的每个结果与耗时都来自 native release。
 
 四个脚本只用 ASCII 字符：Windows PowerShell 5.1 读取**没有 BOM** 的 UTF-8 脚本时会按 ANSI 解码，
 非 ASCII 字符会变成乱码。新增脚本请遵守这一约定。

@@ -31,7 +31,13 @@ Push-Location $root
 try {
   $version = (& $Moon version --all 2>&1 | Out-String).Trim()
   $commit = (& git rev-parse --short HEAD 2>&1 | Out-String).Trim()
-  $arguments = @("run", "cmd/parse", "--", "--manifest", $Manifest, "--solve", "--max-rows", "$MaxRows")
+  # Native release: the same solve takes about six times longer on the default
+  # wasm backend, which is the difference between a report that finishes and one
+  # that does not.
+  $arguments = @(
+    "run", "--target", "native", "--release", "cmd/parse", "--",
+    "--manifest", $Manifest, "--solve", "--max-rows", "$MaxRows"
+  )
   if ($Relax) { $arguments += "--relax" }
   $lines = & $Moon @arguments 2>&1 | ForEach-Object { $_.ToString() }
 } finally {
