@@ -25,8 +25,15 @@
 - **诚实记在消息里**：恢复成功的运行会带 `recovered from a numerical failure by restarting with Bland's rule (...)`
   ——"重新走了一条路"和"那条路本来就对"不是一回事，报告不该混为一谈。
 
-### Added — M3 (presolve: model reduction and postsolve)
+- **`bench/report-solve.ps1` 支持 `-Presolve`，并被切换为基准口径**：报告表格新增
+  `presolve`（化简前后规模与各项计数）与 `check`（还原解在原模型上的最大行/界违反、
+  以及用原模型目标向量重算的目标值）两列；任何重建检查失败（`FAILED` / `DISAGREES`）
+  都会**拒绝写报告**（退出码 5）。基准报告现在同时是 presolve 正确性的证据：
+  15 个最优实例的重建解全部通过三项检查，其中 `noswot` 的一次 Bland 恢复也被如实记录进报告；
+- 报告脚本的括注解析改为贪婪匹配：恢复消息自带一层括号
+  （`... with Bland's rule (basis became numerically singular)`），非贪婪模式会静默只留下内层。
 
+### Added — M3 (presolve: model reduction and postsolve)
 - `presolve` 包：空行/列消元、活动范围推出的冗余行、singleton 行转界、隐式界收紧、
   固定变量消元（含目标常数偏移）与 `postsolve` 解还原；证明不可行或无界时返回判定而不是调用内核。
   公开接口：`presolve`、`ReducedModel::{reduced,stats,verdict,reason,objective_offset,

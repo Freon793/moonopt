@@ -14,6 +14,7 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 > 可构建、可测试、CI 全绿，并已在 **MIPLIB 2017 的 32 个真实实例**上跑通解析报告
 > （33 成功 / 0 失败，见 [`bench/parse-report.md`](bench/parse-report.md)）与求解报告
 > （**15 个 LP 松弛求到最优、17 个超规模跳过、0 个数值失败、0 个拒绝，32/32 全覆盖**；
+> 基准口径**开启 presolve**，每个重建解都在原模型上通过行、界与目标值三项检查，
 > 15 项松弛值经 MIPLIB 官方最优值表交叉校验、**0 违反**，见
 > [`bench/solve-report.md`](bench/solve-report.md)）。尚未发布到 mooncakes.io。
 > 里程碑划分、范围闸门与明确**不做**的内容见 [`docs/roadmap.md`](docs/roadmap.md)。

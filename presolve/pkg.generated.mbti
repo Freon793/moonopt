@@ -11,6 +11,8 @@ pub fn max_bound_violation(@model.Model, Array[Double]) -> Double
 
 pub fn max_row_violation(@model.Model, Array[Double]) -> Double
 
+pub fn objective_value(@model.Model, Array[Double]) -> Double
+
 pub fn presolve(@model.Model) -> ReducedModel
 
 // Errors

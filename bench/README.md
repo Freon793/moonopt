@@ -29,7 +29,7 @@ MIPLIB 2017 —— 它提供同样性质的工业实例，但以纯 MPS（gzip �
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/fetch-instances.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-parse.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 300
+powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 300 -Presolve
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-relaxation-bounds.ps1
 ```
 
@@ -70,8 +70,11 @@ this milestone; the dense basis inverse would ask for about 30779.13 MB. ...)
   记录每个实例的规模、整数列数与校验结论，失败的实例逐条给出原因与位置。
 - `solve-report.md`：求解报告。记录模式（是否 LP 松弛）、行数上限、工具链版本与提交哈希，
   逐实例给出状态、目标值与枢轴迭代数；非最优结果逐条如实列出，包含内核自检测得的残差与负值。
-  当前这份由提交 `d4f749a` 生成：**32 个实例全覆盖、15 最优、17 因行数上限跳过、
-  0 数值失败、0 规模拒绝，单进程 native release 用时 83 秒**。
+  当前这份由带 `-Presolve` 的运行生成：**32 个实例全覆盖、15 最优、17 因行数上限跳过、
+  0 数值失败、0 规模拒绝**，并且每个重建解都在**原模型**上通过行、界与目标值三项检查。
+  报告里每行还带 `presolve`（化简前后规模与各项计数）与 `check`（还原解在原模型上的
+  最大行/界违反，以及用原模型目标向量重算出的目标值）两列 —— 化简是实验的一部分，
+  它的记账必须自己站得住。
 
 ## 交叉校验（外部权威，独立于本实现）
 
