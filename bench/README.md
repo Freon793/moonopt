@@ -29,7 +29,7 @@ MIPLIB 2017 —— 它提供同样性质的工业实例，但以纯 MPS（gzip �
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/fetch-instances.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-parse.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 300 -Presolve
+powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 1000 -Presolve
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-relaxation-bounds.ps1
 ```
 
@@ -70,11 +70,16 @@ this milestone; the dense basis inverse would ask for about 30779.13 MB. ...)
   记录每个实例的规模、整数列数与校验结论，失败的实例逐条给出原因与位置。
 - `solve-report.md`：求解报告。记录模式（是否 LP 松弛）、行数上限、工具链版本与提交哈希，
   逐实例给出状态、目标值与枢轴迭代数；非最优结果逐条如实列出，包含内核自检测得的残差与负值。
-  当前这份由带 `-Presolve` 的运行生成：**32 个实例全覆盖、15 最优、17 因行数上限跳过、
-  0 数值失败、0 规模拒绝**，并且每个重建解都在**原模型**上通过行、界与目标值三项检查。
+  当前这份由 `-Relax -MaxRows 1000 -Presolve` 生成，用时 142 秒：**32 个实例全覆盖、
+  19 最优、11 因行数上限跳过、2 因内核规模上限被拒绝、0 数值失败**，
+  21 个实例经过化简、19 个重建解全部通过三项检查、1 次运行由 Bland 恢复（`noswot`）。
   报告里每行还带 `presolve`（化简前后规模与各项计数）与 `check`（还原解在原模型上的
   最大行/界违反，以及用原模型目标向量重算出的目标值）两列 —— 化简是实验的一部分，
   它的记账必须自己站得住。
+  两个被拒绝的实例恰好说明化简能做什么、不能做什么：`30n20b8` 被化简掉 **7282 个变量**
+  （18380→11098，内核行 18956→11591，降 39%），但仍有 11591 行、需约 1.0 GB 基逆；
+  `fast0507` 是集覆盖问题，几乎没有可约的上界行（63009→63001 个变量），内核仍要 63490 行、
+  约 30.8 GB —— 两者都在**分配之前**被拒绝。
 
 ## 交叉校验（外部权威，独立于本实现）
 
@@ -82,13 +87,15 @@ this milestone; the dense basis inverse would ask for about 30779.13 MB. ...)
 （`miplib2017-v26.solu`）对拍。松弛问题的目标值不可能超过原问题最优值，所以每个求到最优的实例
 都给出一个可判定不等式；一旦松弛值超过官方最优值，就说明内核错了。
 
-最近一次结果（与 `solve-report.md` 同批实例，15 项全部对拍）：
+最近一次结果（与 `solve-report.md` 同批实例，19 项全部对拍）：
 
 | 实例 | 松弛目标值 | 官方最优值 | 结论 |
 | --- | ---: | ---: | --- |
 | flugpl | 1 167 185.7256 | 1 201 500 | 松弛 ≤ 最优 |
 | blend2 | 6.9157 | 7.598985 | 松弛 ≤ 最优 |
+| danoint | 62.6373 | 65.6666666666 | 松弛 ≤ 最优 |
 | dcmulti | 183 975.5397 | 188 182 | 松弛 ≤ 最优 |
+| fiber | 156 082.5176 | 405 935.18 | 松弛 ≤ 最优 |
 | gt2 | 13 460.2331 | 21 166 | 松弛 ≤ 最优 |
 | khb05250 | 95 919 464 | 106 940 226 | 松弛 ≤ 最优 |
 | markshare1 | 0 | 0.999999999999 | 松弛 ≤ 最优 |
@@ -101,10 +108,15 @@ this milestone; the dense basis inverse would ask for about 30779.13 MB. ...)
 | rout | 981.8643 | 1 077.56 | 松弛 ≤ 最优 |
 | 22433 | 21 240.5262 | 21 477 | 松弛 ≤ 最优 |
 | 50v-10 | 2 879.0657 | 3 311.1799841 | 松弛 ≤ 最优 |
+| bienst1 | 11.7241 | 46.7499999999999 | 松弛 ≤ 最优 |
+| bienst2 | 11.7241 | 54.6 | 松弛 ≤ 最优 |
 
-**15 项校验，0 项违反。** 这不是正确性证明，但能廉价地排掉一整类错误，而且结论是记录下来的，
+**19 项校验，0 项违反。** 这不是正确性证明，但能廉价地排掉一整类错误，而且结论是记录下来的，
 不是假定的。表里每一行都由 `check-relaxation-bounds.ps1` 从报告文件直接生成并对拍。`noswot` 一行
 也说明了为什么这类对拍值得做：它的松弛值 `-43` 比 MIP 最优值 `-41.00000885` 更小才是正确的方向。
+`bienst1` 与 `bienst2` 两行还顺带闭合了一个早先的疑点：两者整数列不同但松弛问题相同，
+报告里都给出 `11.724137931034488`（2130 次迭代），与官方最优值方向一致 ——
+而崩溃进程曾经把其中一个写成 `11`，那是一次被污染的读数，不是内核的另一个答案。
 
 ## 报告原则
 
