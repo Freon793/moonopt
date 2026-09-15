@@ -9,6 +9,7 @@ package "Freon793/moonopt/cmd/parse"
 pub(all) struct SolveFlags {
   enabled : Bool
   relax : Bool
+  presolve : Bool
   max_rows : Int
 }
 

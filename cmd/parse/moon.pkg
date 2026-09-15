@@ -1,6 +1,7 @@
 import {
   "Freon793/moonopt/format",
   "Freon793/moonopt/model",
+  "Freon793/moonopt/presolve",
   "Freon793/moonopt/simplex",
   "moonbitlang/core/env",
   "moonbitlang/x/fs",

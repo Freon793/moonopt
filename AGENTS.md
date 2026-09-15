@@ -29,7 +29,16 @@ You can browse and install extra skills here:
     basis inverse with product-form updates and periodic refactorization, Phase I
     and II, Harris ratio test with a feasibility guard and a Bland fallback, a
     row gate that refuses a kernel problem it cannot allocate for, and a residual
-    self-check before it will report `Optimal`. `presolve/`, `verify/`, `mip/`:
+    self-check before it will report `Optimal`.
+  - `presolve/`: model reduction and postsolve. Empty rows and columns, rows the
+    bounds already settle, singleton rows turned into bounds, implied bounds, and
+    fixed-variable elimination with an objective offset; `reconstruct` maps a
+    reduced solution back to the original variables and `max_row_violation` /
+    `max_bound_violation` check it against the original model instead of trusting
+    the reduction's bookkeeping. Every reduction must be proved before it fires,
+    and a model presolve proves infeasible or unbounded is reported as such rather
+    than handed to the kernel.
+  - `verify/`, `mip/`:
     added milestone by milestone, see `docs/roadmap.md`.
   - `cmd/main/`: demo CLI. `cmd/parse/`: model file inspection CLI. `examples/`:
     runnable examples. `bench/`: data policy, fetch and report scripts, reports.
@@ -104,6 +113,11 @@ You can browse and install extra skills here:
   solver; there are tests for exactly that case.
 - A report under `bench/` is evidence, so a script must not write one unless the
   run it describes finished and covered every manifest entry.
+- A presolve reduction may only fire on a proved reduction, and a reconstructed
+  solution must be checked against the **original** model by an independent
+  routine (`max_row_violation` / `max_bound_violation`), never against the
+  reduction's own bookkeeping. A reduction that cannot be verified is worse than
+  no reduction.
 - Adding an algorithm requires a unit test, an invariant test, and — when it
   overlaps the oracle — a differential test against `oracle/`.
 - Never enlarge the promised model class silently. If support for a construct is

@@ -10,7 +10,7 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 
 > 状态：**v0.1.0-dev**，`M1`（基础层与模型层）、`M2`（标准模型输入）已落地，`M3` 进行中
 > （稀疏修正单纯形、性能测量与优化、比值检验的可行性守卫与内核规模门禁已完成；
-> 对偶单纯形、presolve、稀疏 LU 基分解待完成）：
+> 对偶单纯形与稀疏 LU 基分解待完成；presolve/postsolve 已落地但默认关闭，见能力表与 roadmap）：
 > 可构建、可测试、CI 全绿，并已在 **MIPLIB 2017 的 32 个真实实例**上跑通解析报告
 > （33 成功 / 0 失败，见 [`bench/parse-report.md`](bench/parse-report.md)）与求解报告
 > （**15 个 LP 松弛求到最优、17 个超规模跳过、0 个数值失败、0 个拒绝，32/32 全覆盖**；
@@ -40,7 +40,7 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
   （状态、变量取值、目标值、迭代数、失败原因）；非法模型返回 `NotSolved` 并带原因；
 - `cmd/parse`：模型文件巡检 CLI（格式判定、规模统计与校验结论、`--manifest` 批量模式、
   `--solve` / `--relax` / `--max-rows` 求解开关、失败返回非零退出码）；
-- CLI 与两个可运行示例，`moon test` 75 个测试全绿，CI 覆盖 Linux/macOS/Windows 与 wasm-gc/js 目标。
+- CLI 与两个可运行示例，`moon test` 85 个测试全绿，CI 覆盖 Linux/macOS/Windows 与 wasm-gc/js 目标。
 
 **当前内核的能力边界（明确写出来，不夸大）**：
 
@@ -48,8 +48,9 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 | --- | --- |
 | 连续变量、任意有限上下界、自由变量 | 整数 / 0-1 变量（M5；当前可用 `SimplexOptions::relaxed()` 求 LP 松弛） |
 | `≤`、`≥`、`=` 任意混合，含负右端项 | 证书与 `verify` 独立校验器（M4） |
-| min / max | 对偶单纯形热启动、presolve / postsolve（M3 剩余部分） |
+| min / max | 对偶单纯形热启动（M3 剩余部分） |
 | MPS / LP 文件读入与写出（M2） | MPS 的 `SC`/`SI` 半连续界、完整 `SOS` / `MARKER` 语义 |
+| presolve：空行/列消元、冗余行、singleton 转界、隐式界收紧、固定变量消元 + 解还原（`--presolve`，**默认关闭**） | 系数强化、对偶固定、变量/行的重复与支配检测；默认关闭的原因见 `docs/roadmap.md` 的已知阻塞项 |
 | 内核行数 ≤ 4000 的模型（`SimplexOptions::max_kernel_rows`，稠密基逆 128 MB） | 更大规模需先落地稀疏 LU 基分解（M3 性能部分） |
 
 **两个行数上限不要混淆**：`cmd/parse --max-rows N` 限制的是**模型约束数**（超过即
@@ -141,14 +142,19 @@ moon run examples/production_plan    # 两产品生产计划，最优 21 at (3, 
 moon run examples/transportation     # 产销平衡运输问题（全等式约束，走 Phase I），最优 11
 moon run cmd/main                    # 打印两个示例 + 一个“当前不支持”的诚实示例
 moon run cmd/parse -- <file.mps>     # 读模型文件，打印规模统计与校验结论
+moon run cmd/parse -- <file.mps> --presolve --relax --max-rows 300
 ```
 
-巡检与求解真实数据集（MIPLIB 2017，33 个实例）：
+`--presolve` 先做模型化简（空行/列、冗余行、singleton 转界、隐式界收紧、固定变量消元），
+打印每实例的化简前后规模，然后求解**化简后**的模型并把解还原回原变量，
+最后打印还原解在**原模型**上的最大行/界违反（可行才标 `(feasible)`）。
+
+巡检与求解真实数据集（MIPLIB 2017，32 个实例）：
 
 ```bash
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/fetch-instances.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-parse.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 200
+powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 300
 ```
 
 `moon run cmd/main` 的实际输出（节选）：
@@ -177,7 +183,7 @@ core/             数值与稀疏基础设施（容差比较、补偿求和、CS
 model/            模型层（变量、线性表达式、约束、目标、模型校验）
 format/           MPS 与 LP 格式读写、解析错误定位
 oracle/           参考实现：稠密两阶段单纯形（差分测试对照基准，非交付求解器）
-simplex/          稀疏修正单纯形内核（M3 进行中：对偶单纯形与 presolve 待补）
+simplex/          稀疏修正单纯形内核（M3 进行中：对偶单纯形待补）
 presolve/         presolve 与 postsolve（M3）
 verify/           证书校验器（M4）
 mip/              分支定界与割平面（M5，受范围闸门约束）

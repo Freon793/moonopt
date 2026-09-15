@@ -10,11 +10,17 @@
 /// ```
 /// moon run cmd/parse -- <file> [<file> ...]
 /// moon run cmd/parse -- --manifest <list-file>
+/// moon run cmd/parse -- <file> --solve --max-rows 300
+/// moon run cmd/parse -- <file> --presolve --relax
 /// ```
 ///
 /// A manifest is a text file with one path per line; `#` starts a comment. The
 /// paths inside it are resolved relative to the manifest's own directory, which
 /// is what makes the checked-in manifest usable from any working directory.
+///
+/// `--presolve` reduces the model before the kernel sees it and prints what the
+/// reduction did, followed by the reconstructed solution's violations against the
+/// original rows — the reduction is only useful if the way back is correct.
 
 ///|
 /// Prints the usage line.
@@ -119,7 +125,60 @@ fn report(path : String, model : @model.Model, format_name : String) -> Unit {
 pub(all) struct SolveFlags {
   enabled : Bool
   relax : Bool
+  presolve : Bool
   max_rows : Int
+}
+
+///|
+/// Describes what the reduction did, in one line, so a benchmark run shows the
+/// effect per instance instead of only the final answer.
+fn presolve_line(before_rows : Int, reduced : @presolve.ReducedModel) -> String {
+  let stats = reduced.stats()
+  "       presolve: rows " +
+  before_rows.to_string() +
+  " -> " +
+  reduced.reduced().num_constraints().to_string() +
+  ", vars " +
+  reduced.num_original_vars().to_string() +
+  " -> " +
+  reduced.reduced().num_vars().to_string() +
+  " (empty=" +
+  stats.rows_removed_empty.to_string() +
+  " redundant=" +
+  stats.rows_removed_redundant.to_string() +
+  " singleton=" +
+  stats.rows_removed_singleton.to_string() +
+  " tightened=" +
+  stats.bounds_tightened.to_string() +
+  " fixed=" +
+  stats.variables_fixed.to_string() +
+  " empty-cols=" +
+  stats.columns_removed_empty.to_string() +
+  " rounds=" +
+  stats.rounds.to_string() +
+  ")"
+}
+
+///|
+/// Prints the kernel's outcome for a solved problem.
+fn report_solve_result(result : @simplex.SimplexResult) -> Unit {
+  let status = match result.status {
+    @simplex.SimplexStatus::Optimal => "optimal"
+    @simplex.SimplexStatus::Infeasible => "infeasible"
+    @simplex.SimplexStatus::Unbounded => "unbounded"
+    @simplex.SimplexStatus::IterationLimit => "iteration-limit"
+    @simplex.SimplexStatus::NumericalFailure => "numerical-failure"
+    @simplex.SimplexStatus::TooLarge => "too-large"
+  }
+  println(
+    "       solve=" +
+    status +
+    " obj=" +
+    result.objective.to_string() +
+    " iters=" +
+    result.iterations.to_string() +
+    (if result.message == "" { "" } else { " (" + result.message + ")" }),
+  )
 }
 
 ///|
@@ -129,6 +188,11 @@ pub(all) struct SolveFlags {
 /// beyond a few hundred rows it needs a sparse factorization first, and silently
 /// attempting it would look like a hang rather than a boundary. Instances over
 /// the limit are reported as skipped, not as failures.
+///
+/// With `--presolve` the reduction runs first, and the reconstructed solution is
+/// checked against the *original* rows before the outcome is printed. A reduction
+/// that is wrong is worse than no reduction, so the check is part of the report
+/// rather than something the caller has to remember to do.
 fn solve_and_report(model : @model.Model, flags : SolveFlags) -> Unit {
   if model.num_constraints() > flags.max_rows {
     println(
@@ -145,26 +209,59 @@ fn solve_and_report(model : @model.Model, flags : SolveFlags) -> Unit {
   } else {
     @simplex.SimplexOptions::default()
   }
-  match @simplex.solve_model_with(model, options) {
-    Err(reason) => println("       solve=refused(" + reason + ")")
-    Ok(result) => {
-      let status = match result.status {
-        @simplex.SimplexStatus::Optimal => "optimal"
-        @simplex.SimplexStatus::Infeasible => "infeasible"
-        @simplex.SimplexStatus::Unbounded => "unbounded"
-        @simplex.SimplexStatus::IterationLimit => "iteration-limit"
-        @simplex.SimplexStatus::NumericalFailure => "numerical-failure"
-        @simplex.SimplexStatus::TooLarge => "too-large"
-      }
+  if !flags.presolve {
+    match @simplex.solve_model_with(model, options) {
+      Err(reason) => println("       solve=refused(" + reason + ")")
+      Ok(result) => report_solve_result(result)
+    }
+    return
+  }
+  let presolved = @presolve.presolve(model)
+  println(presolve_line(model.num_constraints(), presolved))
+  match presolved.verdict() {
+    @presolve.PresolveVerdict::Infeasible =>
       println(
-        "       solve=" +
-        status +
-        " obj=" +
-        result.objective.to_string() +
-        " iters=" +
-        result.iterations.to_string() +
-        (if result.message == "" { "" } else { " (" + result.message + ")" }),
+        "       solve=infeasible (from presolve: " + presolved.reason() + ")",
       )
+    @presolve.PresolveVerdict::Unbounded =>
+      println(
+        "       solve=unbounded (from presolve: " + presolved.reason() + ")",
+      )
+    @presolve.PresolveVerdict::Reduced => {
+      let reduced = presolved.reduced()
+      if reduced.num_vars() == 0 {
+        // Everything was eliminated; the reduction's own answer is the answer.
+        println(
+          "       solve=optimal obj=" +
+          presolved.objective(0.0).to_string() +
+          " iters=0 (presolve eliminated every variable)",
+        )
+        return
+      }
+      match @simplex.solve_model_with(reduced, options) {
+        Err(reason) => println("       solve=refused(" + reason + ")")
+        Ok(result) => {
+          report_solve_result(result)
+          if result.status == @simplex.SimplexStatus::Optimal {
+            let values = presolved.reconstruct(result.values)
+            let rows = @presolve.max_row_violation(model, values)
+            let bounds = @presolve.max_bound_violation(model, values)
+            println(
+              "       reconstructed: rows " +
+              values.length().to_string() +
+              " vars, worst row violation " +
+              rows.to_string() +
+              ", worst bound violation " +
+              bounds.to_string() +
+              (if rows <= 1.0e-7 && bounds <= 1.0e-7 {
+                " (feasible)"
+              } else {
+                " (INFEASIBLE: the reduction is wrong)"
+              }),
+            )
+          }
+        }
+      }
     }
   }
 }
@@ -219,6 +316,7 @@ fn main {
   let mut manifest = ""
   let mut solve_enabled = false
   let mut relax = false
+  let mut presolve_enabled = false
   let mut max_rows = 200
   let mut index = 1
   while index < args.length() {
@@ -230,6 +328,12 @@ fn main {
     }
     if argument == "--relax" {
       relax = true
+      solve_enabled = true
+      index = index + 1
+      continue
+    }
+    if argument == "--presolve" {
+      presolve_enabled = true
       solve_enabled = true
       index = index + 1
       continue
@@ -285,7 +389,12 @@ fn main {
     @sys.exit(2)
   }
   let mut failures = 0
-  let flags : SolveFlags = { enabled: solve_enabled, relax, max_rows, }
+  let flags : SolveFlags = {
+    enabled: solve_enabled,
+    relax,
+    presolve: presolve_enabled,
+    max_rows,
+  }
   for path in files {
     if !inspect(path, flags) {
       failures = failures + 1

@@ -5,6 +5,25 @@
 
 ## [Unreleased]
 
+### Added — M3 (presolve: model reduction and postsolve)
+
+- `presolve` 包：空行/列消元、活动范围推出的冗余行、singleton 行转界、隐式界收紧、
+  固定变量消元（含目标常数偏移）与 `postsolve` 解还原；证明不可行或无界时返回判定而不是调用内核。
+  公开接口：`presolve`、`ReducedModel::{reduced,stats,verdict,reason,objective_offset,
+  reconstruct,objective}`，以及 `max_row_violation` / `max_bound_violation` —— 后两个是
+  **独立于化简记账**的可行性检查，还原解必须自己站得住；
+- 测试 85 个（新增 10）：9 个手工可验的化简用例 + 150 个随机模型的差异测试
+  （状态一致、目标值一致、还原解在原模型的行与界上可行）。生成器专门覆盖无约束列、
+  上下界相等、singleton 行、宽松行与无穷界；差异测试还断言化简至少在这 150 例中的 40 例真正触发，
+  否则"一致"就是空话；
+- `cmd/parse --presolve`：逐实例打印化简前后规模与各项计数，并打印还原解在原模型上的
+  最大行/界违反，可行才标 `(feasible)`；
+- 实测（wasm、单进程）：`blend2` 274→186 行 / 353→336 变量 / 17 固定 / 108 界收紧，
+  `khb05250` 1350→1299 变量 / 51 固定 / 2596 界收紧，`dcmulti` 290→272 行 / 533 界收紧，
+  目标值与无 presolve 完全一致，还原解全部可行；
+- **已知阻塞项**：`noswot` 在界收紧后内核于第一次重新分解时报基奇异（基矩阵有整行为零与整列为零，
+  非尺度问题，见 `docs/roadmap.md`），因此 presolve 暂不作为默认求解路径。
+
 ### Fixed — M3 (numerical robustness and a size gate that fails instead of crashing)
 
 - **守卫式 Harris 比值检验**：第二遍按数值偏好选出主元行后先模拟这一步，

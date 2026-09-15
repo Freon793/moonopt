@@ -1,0 +1,59 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Freon793/moonopt/presolve"
+
+import {
+  "Freon793/moonopt/model",
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn max_bound_violation(@model.Model, Array[Double]) -> Double
+
+pub fn max_row_violation(@model.Model, Array[Double]) -> Double
+
+pub fn presolve(@model.Model) -> ReducedModel
+
+// Errors
+
+// Types and methods
+pub(all) struct PresolveStats {
+  rows_removed_empty : Int
+  rows_removed_redundant : Int
+  rows_removed_singleton : Int
+  bounds_tightened : Int
+  variables_fixed : Int
+  columns_removed_empty : Int
+  rounds : Int
+} derive(@debug.Debug)
+
+pub(all) enum PresolveVerdict {
+  Reduced
+  Infeasible
+  Unbounded
+} derive(Eq, @debug.Debug)
+
+pub struct ReducedModel {
+  model : @model.Model
+  forms : Array[VarForm]
+  objective_offset : Double
+  stats : PresolveStats
+  verdict : PresolveVerdict
+  reason : String
+}
+pub fn ReducedModel::num_original_vars(Self) -> Int
+pub fn ReducedModel::objective(Self, Double) -> Double
+pub fn ReducedModel::objective_offset(Self) -> Double
+pub fn ReducedModel::reason(Self) -> String
+pub fn ReducedModel::reconstruct(Self, Array[Double]) -> Array[Double]
+pub fn ReducedModel::reduced(Self) -> @model.Model
+pub fn ReducedModel::stats(Self) -> PresolveStats
+pub fn ReducedModel::verdict(Self) -> PresolveVerdict
+
+pub(all) enum VarForm {
+  Fixed(Double)
+  Linear(Double, Array[(Int, Double)])
+} derive(@debug.Debug)
+
+// Type aliases
+
+// Traits
