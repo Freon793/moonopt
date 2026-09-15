@@ -154,6 +154,7 @@ fn solve_and_report(model : @model.Model, flags : SolveFlags) -> Unit {
         @simplex.SimplexStatus::Unbounded => "unbounded"
         @simplex.SimplexStatus::IterationLimit => "iteration-limit"
         @simplex.SimplexStatus::NumericalFailure => "numerical-failure"
+        @simplex.SimplexStatus::TooLarge => "too-large"
       }
       println(
         "       solve=" +

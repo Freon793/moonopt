@@ -5,6 +5,24 @@
 
 ## [Unreleased]
 
+### Fixed — M3 (numerical robustness and a size gate that fails instead of crashing)
+
+- **守卫式 Harris 比值检验**：第二遍按数值偏好选出主元行后先模拟这一步，
+  若有基本变量会被推出可行性下限（`-tol·(1+|xb|)`）就退回严格最小比值行。
+  Harris 的带宽是相对量，超调量却是"带宽 × 主元元素"，在比值与元素都在 1e5 量级的实例上
+  足以把基本变量推负：`noswot` 因此以缩放负值 4.2e-4 报数值失败，修复后求到最优 `obj = -43.0`
+  （官方 MIP 最优值 `-41.00000885`，松弛值更小，方向一致）；
+- **`SimplexStatus::TooLarge` 与 `SimplexOptions::max_kernel_rows`（默认 4000）**：
+  内核在分配稠密基逆**之前**按实测行数拒绝。每个有限上界都会变成一行，
+  所以模型行数不能代表内核规模：`fast0507`（507 条约束、63009 个 0/1 变量）的内核规模是
+  63516 行，稠密基逆需要约 30.8 GB，此前在 native 目标上以访问冲突（exit `0xC0000005`）退出，
+  并因巨量换页拖垮整机；现在同一实例返回 `too-large` 并以 0 退出。
+  这是边界声明，不是错误答案：拒绝带着实测数字回来，调用方可以据此行动；
+- **`bench/report-solve.ps1` 拒绝写不能自证的报告**：内核退出码非零，
+  或覆盖实例数与清单条数不符时直接失败。此前一次 native 崩溃被写成
+  "optimal=17 skipped=5" 的完整报告（实际只跑了 22/33 个实例）。
+  同时修正 `solve=` 列被空格截断的解析问题，并删掉清单里重复的 `danoint` 一行。
+
 ### Changed — M3 (product-form / eta basis updates)
 
 - **基逆不再被显式维护**：枢轴改为追加一个**稀疏 eta**（`B⁻¹ = E_k·…·E₁·B₀⁻¹`，

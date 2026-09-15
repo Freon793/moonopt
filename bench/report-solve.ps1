@@ -8,6 +8,11 @@
 # sparse factorization that is the next milestone, and a ten minute hang would
 # look like a defect instead of a boundary.
 #
+# The script refuses to write a report it cannot stand behind: a non-zero exit
+# from the kernel, or a run that did not cover every manifest entry, is an error.
+# A partial run presented as a whole one is worse than no report at all - a crash
+# once produced a "successful" 22 of 33 instance report.
+#
 # The report records the toolchain version and the commit it came from, so every
 # number in it can be traced back to the code that produced it.
 
@@ -27,6 +32,16 @@ if (-not (Test-Path $Manifest)) {
   exit 2
 }
 
+$expected = @(
+  Get-Content $Manifest |
+    ForEach-Object { $_.Trim() } |
+    Where-Object { $_ -ne "" -and -not $_.StartsWith("#") }
+).Count
+if ($expected -eq 0) {
+  Write-Error "manifest is empty: $Manifest"
+  exit 2
+}
+
 Push-Location $root
 try {
   $version = (& $Moon version --all 2>&1 | Out-String).Trim()
@@ -40,8 +55,16 @@ try {
   )
   if ($Relax) { $arguments += "--relax" }
   $lines = & $Moon @arguments 2>&1 | ForEach-Object { $_.ToString() }
+  $exitCode = $LASTEXITCODE
 } finally {
   Pop-Location
+}
+
+# A crash or a refused file leaves the output incomplete. Writing it up anyway
+# would publish numbers that describe a run that did not happen.
+if ($exitCode -ne 0) {
+  Write-Error ("the kernel run failed with exit code {0}; no report written" -f $exitCode)
+  exit 3
 }
 
 $rows = @()
@@ -62,21 +85,29 @@ foreach ($line in $lines) {
     $rows += $current
     continue
   }
-  if ($null -ne $current -and $line -match '^\s+solve=(\S+)') {
+  if ($null -ne $current -and $line -match '^\s+solve=([^\s(]+)') {
     $current.Solve = $Matches[1]
     if ($line -match 'obj=(\S+)\s+iters=(\d+)') {
       $current.Objective = $Matches[1]
       $current.Iterations = $Matches[2]
     }
-    if ($line -match '\((.*)\)\s*$') {
+    if ($line -match '\(([^)]*)\)\s*$') {
       $current.Note = $Matches[1]
     }
   }
 }
 
+if ($rows.Count -ne $expected) {
+  Write-Error ("the run reported {0} of {1} manifest entries; no report written" -f $rows.Count, $expected)
+  exit 4
+}
+
 $optimal = @($rows | Where-Object { $_.Solve -eq "optimal" })
 $skipped = @($rows | Where-Object { $_.Solve -like "skipped*" })
-$other = @($rows | Where-Object { $_.Solve -ne "-" -and $_.Solve -ne "optimal" -and $_.Solve -notlike "skipped*" })
+$refused = @($rows | Where-Object { $_.Solve -eq "too-large" })
+$other = @($rows | Where-Object {
+    $_.Solve -ne "-" -and $_.Solve -ne "optimal" -and $_.Solve -notlike "skipped*" -and $_.Solve -ne "too-large"
+  })
 
 $build = @()
 $build += "# Kernel solve report"
@@ -86,6 +117,7 @@ $build += ""
 $build += "- Toolchain: ``$($version -replace "`r?`n", " | ")``"
 $build += "- Instances: MIPLIB 2017 (<https://miplib.zib.de>), fetched by ``bench/fetch-instances.ps1``."
 $build += "- Mode: $(if ($Relax) { "LP relaxation (integer columns treated as continuous)" } else { "as-is (integer models are refused by the linear kernel)" }), row limit $MaxRows."
+$build += "- The script writes nothing unless the kernel exited zero and reported every manifest entry."
 $build += ""
 $build += "## Summary"
 $build += ""
@@ -94,6 +126,7 @@ $build += "| --- | --- |"
 $build += "| instances in manifest | $($rows.Count) |"
 $build += "| solved to optimality | $($optimal.Count) |"
 $build += "| skipped (row count over the limit) | $($skipped.Count) |"
+$build += "| refused (kernel problem over the dense-inverse row limit) | $($refused.Count) |"
 $build += "| other outcomes | $($other.Count) |"
 if ($optimal.Count -gt 0) {
   $build += "| pivot iterations (total) | $(($optimal | Measure-Object Iterations -Sum).Sum) |"
@@ -105,6 +138,12 @@ if ($other.Count -gt 0) {
   $build += "measured verdict from the kernel's own residual check, not a silent wrong answer."
   $build += ""
 }
+if ($refused.Count -gt 0) {
+  $build += "A refusal is the kernel's row ceiling doing its job: every finite upper bound becomes"
+  $build += "an explicit row, so these models reach the limit on kernel rows even though their"
+  $build += "constraint counts look small. The run stops before allocating the basis inverse."
+  $build += ""
+}
 $build += "## Instances"
 $build += ""
 $build += "| instance | vars | cons | nonzeros | integer vars | solve | objective | pivots | note |"
@@ -114,7 +153,10 @@ foreach ($row in $rows) {
 }
 $build += ""
 [IO.File]::WriteAllLines($Output, $build)
-Write-Host ("wrote {0}: optimal={1} skipped={2} other={3}" -f $Output, $optimal.Count, $skipped.Count, $other.Count)
+Write-Host ("wrote {0}: optimal={1} skipped={2} refused={3} other={4}" -f $Output, $optimal.Count, $skipped.Count, $refused.Count, $other.Count)
 foreach ($row in $other) {
   Write-Host ("  {0}: {1} {2}" -f $row.Instance, $row.Solve, $row.Note)
+}
+foreach ($row in $refused) {
+  Write-Host ("  {0}: too-large {1}" -f $row.Instance, $row.Note)
 }

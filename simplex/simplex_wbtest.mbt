@@ -191,3 +191,62 @@ test "model path: infeasible bound combination is reported" {
   }
   assert_eq(result.status, Infeasible)
 }
+
+///|
+/// The row gate is what keeps a bounded model from turning into an allocation
+/// nobody asked for. It has to refuse *before* the dense basis inverse is built,
+/// and it has to say why: an access violation on the native backend is not a
+/// boundary a caller can act on.
+test "kernel refuses a problem over the row limit instead of allocating" {
+  let result = solve_standard_with(
+    2,
+    [1.0, 1.0],
+    [([1.0, 1.0], @model.Rel::LessEqual, 4.0)],
+    SimplexOptions::with_max_kernel_rows(0),
+  )
+  assert_eq(result.status, TooLarge)
+  assert_eq(result.iterations, 0)
+  assert_true(result.message.contains("row limit"))
+  assert_true(result.values.length() == 0)
+}
+
+///|
+/// Every finite upper bound becomes an explicit kernel row, so a model whose
+/// constraint count is small can still exceed the limit. Twenty bounded variables
+/// and one constraint is twenty-one kernel rows, which is the same mechanism that
+/// took a 635 row instance to 63 644 rows.
+test "model path: bound rows count against the kernel row limit" {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let vars : Array[Int] = []
+  for j = 0; j < 20; j = j + 1 {
+    vars.push(model.add_var("x" + j.to_string(), lb=0.0, ub=1.0))
+  }
+  model.set_objective([(vars[0], 1.0)])
+  model.add_constraint([(vars[0], 1.0)], @model.Rel::GreaterEqual, 0.5)
+  let result = match
+    solve_model_with(model, SimplexOptions::with_max_kernel_rows(5)) {
+    Ok(ok) => ok
+    Err(reason) => fail("kernel refused the model: " + reason)
+  }
+  assert_eq(result.status, TooLarge)
+  assert_true(result.message.contains("21 rows"))
+}
+
+///|
+/// The same model solved with the default limit is untouched by the gate: the
+/// ceiling only exists to stop runs that cannot be honoured.
+test "model path: the default row limit does not interfere with small models" {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let vars : Array[Int] = []
+  for j = 0; j < 20; j = j + 1 {
+    vars.push(model.add_var("x" + j.to_string(), lb=0.0, ub=1.0))
+  }
+  model.set_objective([(vars[0], 1.0)])
+  model.add_constraint([(vars[0], 1.0)], @model.Rel::GreaterEqual, 0.5)
+  let result = match solve_model(model) {
+    Ok(ok) => ok
+    Err(reason) => fail("kernel refused the model: " + reason)
+  }
+  assert_eq(result.status, Optimal)
+  assert_true(@core.approx_eq(result.objective, 0.5, rel=1.0e-9, abs=1.0e-9))
+}

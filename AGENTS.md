@@ -27,9 +27,10 @@ You can browse and install extra skills here:
     differential tests. Deliberately simple; it is not the shipped solver.
   - `simplex/`: the sparse revised simplex kernel. Sparse CSC columns, dense
     basis inverse with product-form updates and periodic refactorization, Phase I
-    and II, Harris ratio test with a Bland fallback, and a residual self-check
-    before it will report `Optimal`. `presolve/`, `verify/`, `mip/`: added
-    milestone by milestone, see `docs/roadmap.md`.
+    and II, Harris ratio test with a feasibility guard and a Bland fallback, a
+    row gate that refuses a kernel problem it cannot allocate for, and a residual
+    self-check before it will report `Optimal`. `presolve/`, `verify/`, `mip/`:
+    added milestone by milestone, see `docs/roadmap.md`.
   - `cmd/main/`: demo CLI. `cmd/parse/`: model file inspection CLI. `examples/`:
     runnable examples. `bench/`: data policy, fetch and report scripts, reports.
     `docs/`: design notes, technical roadmap and the ecosystem survey that
@@ -50,7 +51,13 @@ You can browse and install extra skills here:
   - every "is this zero / is this positive" decision must be tolerance-aware;
   - use compensated summation when accumulating many terms;
   - any routine that can fail numerically must report that explicitly instead of
-    silently returning a wrong answer.
+    silently returning a wrong answer;
+  - a routine whose cost follows the caller's problem size must check that size
+    **before** it allocates and return a measured refusal (`TooLarge` and friends)
+    when the request cannot be honoured. A model's row count is not a proxy for
+    the kernel's row count: every finite upper bound becomes an explicit row, so a
+    507 constraint instance can reach 63 516 kernel rows. Attempting that
+    allocation is not a slow solve, it is a dead process on the native backend.
 
 - Keep the public surface small. Anything that appears in a `.mbti` is a
   contract.
@@ -95,6 +102,8 @@ You can browse and install extra skills here:
   ascending inside each column.
 - `verify` must reject a wrong solution produced by an intentionally broken
   solver; there are tests for exactly that case.
+- A report under `bench/` is evidence, so a script must not write one unless the
+  run it describes finished and covered every manifest entry.
 - Adding an algorithm requires a unit test, an invariant test, and — when it
   overlaps the oracle — a differential test against `oracle/`.
 - Never enlarge the promised model class silently. If support for a construct is

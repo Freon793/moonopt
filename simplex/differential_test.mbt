@@ -58,6 +58,7 @@ fn kernel_status_name(status : @simplex.SimplexStatus) -> String {
     @simplex.SimplexStatus::Unbounded => "Unbounded"
     @simplex.SimplexStatus::IterationLimit => "IterationLimit"
     @simplex.SimplexStatus::NumericalFailure => "NumericalFailure"
+    @simplex.SimplexStatus::TooLarge => "TooLarge"
   }
 }
 

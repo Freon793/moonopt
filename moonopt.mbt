@@ -5,11 +5,11 @@
 /// into the form a kernel accepts, calls the kernel, and reports the outcome.
 /// Algorithm details live in the kernel packages — see `docs/design.md`.
 ///
-/// Current capability: the only kernel wired up is `oracle`, the dense
-/// reference implementation. It handles continuous variables with `x >= 0`,
-/// finite upper bounds (added as explicit rows) and any mix of `≤`, `≥`, `=`
-/// rows. Anything outside that class returns `NotSolved` together with the
-/// reason — never a plausible but unverified answer.
+/// Current capability: the `simplex` kernel solves continuous models with
+/// `x >= 0`, finite upper bounds (added as explicit rows) and any mix of `≤`,
+/// `≥`, `=` rows, with integer models handled through their LP relaxation.
+/// Anything outside that class returns `NotSolved` together with the reason —
+/// never a plausible but unverified answer.
 
 ///|
 /// Outcome of a solve call.
@@ -131,6 +131,14 @@ pub fn solve_with(model : @model.Model, options : SolveOptions) -> Solution {
             values: [],
             objective: 0.0,
             iterations: result.iterations,
+            message: result.message,
+          }
+        @simplex.SimplexStatus::TooLarge =>
+          {
+            status: NotSolved,
+            values: [],
+            objective: 0.0,
+            iterations: 0,
             message: result.message,
           }
       }

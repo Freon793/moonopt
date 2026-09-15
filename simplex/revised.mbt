@@ -413,42 +413,49 @@ fn State::drive_artificials_out(self : State) -> Unit {
 /// Harris two-pass ratio test.
 ///
 /// Pass one takes the smallest ratio over positive `d` entries; pass two picks,
-/// among the rows within the feasibility tolerance of that ratio, the one with
-/// the largest pivot element. That second pass is what keeps the basis
+/// among the rows whose ratio is within a *relative* band of that minimum, the one
+/// with the largest pivot element. That second pass is what keeps the basis
 /// well-conditioned: it prefers a numerically strong pivot over the
 /// mathematically exact one.
+///
+/// The band is deliberately relative (`1e-9·|ratio|`) rather than the feasibility
+/// tolerance. A band of `1e-7·(1+|ratio|)` lets the step overshoot by `1e-7·ratio`,
+/// and that overshoot is multiplied by the pivot element when the basic values are
+/// updated: with ratios and pivots around 1e5, a "tiny" relative allowance became
+/// an absolute violation of tens on MIPLIB's noswot.
 ///
 /// Returns the leaving row, or `-1` when no row limits the step (unbounded).
 fn State::ratio_test(self : State, d : Array[Double]) -> Int {
   let tolerance = self.options.pivot_tolerance
+  let feasibility = self.options.feasibility_tolerance
   // A basic variable that drifted slightly negative counts as zero, and it may
   // not limit the step: letting it do so takes the step backwards and leaves a
   // basis that is infeasible by far more than the round-off it started from.
   for i = 0; i < self.m; i = i + 1 {
-    if self.xb[i] < 0.0 && self.xb[i] > -self.options.feasibility_tolerance {
+    if self.xb[i] < 0.0 && self.xb[i] > -feasibility {
       self.xb[i] = 0.0
     }
   }
-  let mut ratio_max = 0.0
-  let mut found = false
+  let mut ratio_min = 0.0
+  let mut strict_row = -1
   for i = 0; i < self.m; i = i + 1 {
-    if d[i] > tolerance && self.xb[i] > -self.options.feasibility_tolerance {
+    if d[i] > tolerance && self.xb[i] > -feasibility {
       let ratio = self.xb[i] / d[i]
-      if !found || ratio < ratio_max {
-        ratio_max = ratio
-        found = true
+      if strict_row < 0 || ratio < ratio_min {
+        ratio_min = ratio
+        strict_row = i
       }
     }
   }
-  if !found {
+  if strict_row < 0 {
     return -1
   }
-  let relaxed = ratio_max +
-    self.options.feasibility_tolerance * (1.0 + @core.fabs(ratio_max))
+  let band = 1.0e-9 * @core.fabs(ratio_min) + tolerance
+  let relaxed = ratio_min + band
   let mut leave = -1
   let mut best_pivot = 0.0
   for i = 0; i < self.m; i = i + 1 {
-    if d[i] > tolerance && self.xb[i] > -self.options.feasibility_tolerance {
+    if d[i] > tolerance && self.xb[i] > -feasibility {
       let ratio = self.xb[i] / d[i]
       if ratio <= relaxed {
         let better = if leave < 0 {
@@ -466,7 +473,28 @@ fn State::ratio_test(self : State, d : Array[Double]) -> Int {
     }
   }
   if leave < 0 {
-    return -1
+    return strict_row
+  }
+  // Harris's preference is only safe if the step it implies keeps every basic
+  // value feasible. Simulating the step costs one pass over the rows, and it is
+  // what stops a "well conditioned" pivot from writing off feasibility: the
+  // overshoot of the band is multiplied by the pivot element, so with ratios and
+  // rows in the 1e5 range a relative allowance of 1e-9 still moved a basic value
+  // by tens on MIPLIB's noswot.
+  if leave != strict_row {
+    let step = self.xb[leave] / d[leave]
+    let mut keeps_feasibility = true
+    for i = 0; i < self.m; i = i + 1 {
+      if i != leave {
+        let candidate = self.xb[i] - d[i] * step
+        if candidate < -feasibility * (1.0 + @core.fabs(self.xb[i])) {
+          keeps_feasibility = false
+        }
+      }
+    }
+    if !keeps_feasibility {
+      return strict_row
+    }
   }
   leave
 }
@@ -659,10 +687,33 @@ fn State::values(self : State) -> Array[Double] {
 
 ///|
 /// Solves a standard-form problem and returns kernel column values.
+///
+/// The size check happens before anything is allocated. It is not a performance
+/// hint: `State::new` builds a dense `m x m` basis inverse, so a kernel problem of
+/// sixty thousand rows asks for tens of gigabytes, and on the native backend that
+/// request ends the process instead of returning an error. Refusing with a
+/// measured reason is the only outcome the caller can act on.
 fn solve_problem(
   problem : KernelProblem,
   options : SimplexOptions,
 ) -> SimplexResult {
+  if problem.nrows > options.max_kernel_rows {
+    let rows = Double::from_int(problem.nrows)
+    let megabytes = rows * rows * 8.0 / 1048576.0
+    return {
+      status: TooLarge,
+      values: [],
+      objective: 0.0,
+      iterations: 0,
+      message: "kernel problem has " +
+      problem.nrows.to_string() +
+      " rows, above the " +
+      options.max_kernel_rows.to_string() +
+      " row limit of this milestone; the dense basis inverse would ask for about " +
+      megabytes.to_string() +
+      " MB. Kernel rows are the model's rows plus one explicit row per finite upper bound, so a model with few constraints can still land here",
+    }
+  }
   let state = State::new(problem, options)
   let mut has_artificial = false
   for j = 0; j < problem.ncols; j = j + 1 {

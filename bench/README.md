@@ -37,6 +37,30 @@ powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-relaxation-bound
 （实测 `mod010`：wasm 119.6s / native debug 203.6s / native release 18.8s），
 报告里的每个结果与耗时都来自 native release。
 
+`report-solve.ps1` 在两种情况下**拒绝写报告**并以非零码退出：内核退出码非零
+（崩溃或某个文件解析失败），或解析到的实例数与清单条数不一致。一次 native 崩溃曾被写成
+"22/33 实例成功"的报告，而报告是仓库里唯一的实测证据，不能把一次没跑完的运行写成一次跑完的运行。
+
+## 行数上限有两个，别混淆
+
+| 上限 | 位置 | 含义 |
+| --- | --- | --- |
+| `--max-rows N` | `cmd/parse` | **模型约束数**，超过即报 `solve=skipped`，不进入内核 |
+| `max_kernel_rows` | `SimplexOptions`（默认 4000） | **内核行数**，超过即返回 `SimplexStatus::TooLarge` |
+
+内核行数 = 模型约束数 + **每个有限上界一行**（本里程碑还没有 bounded-variable pivot）。
+因此只看模型行数会漏判：`fast0507` 是 507 条约束，但 63009 个 0/1 变量各带一条上界行，
+内核规模是 **63516 行**，稠密基逆需要 **约 30.8 GB**。此前 native 目标在这里直接以
+访问冲突退出（`0xC0000005`）并造成整机换页卡顿；现在内核在**分配之前**改用实测数字拒绝：
+
+```
+solve=too-large obj=0 iters=0 (kernel problem has 63516 rows, above the 4000 row limit of
+this milestone; the dense basis inverse would ask for about 30779.13 MB. ...)
+```
+
+4000 行对应 128 MB 的稠密基逆（4000² 个 double）。这个上限是**当前里程碑的边界**，
+不是算法结论：稀疏基分解落地后它会随之上移。
+
 四个脚本只用 ASCII 字符：Windows PowerShell 5.1 读取**没有 BOM** 的 UTF-8 脚本时会按 ANSI 解码，
 非 ASCII 字符会变成乱码。新增脚本请遵守这一约定。
 
@@ -46,6 +70,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-relaxation-bound
   记录每个实例的规模、整数列数与校验结论，失败的实例逐条给出原因与位置。
 - `solve-report.md`：求解报告。记录模式（是否 LP 松弛）、行数上限、工具链版本与提交哈希，
   逐实例给出状态、目标值与枢轴迭代数；非最优结果逐条如实列出，包含内核自检测得的残差与负值。
+  仓库里这一份由提交 `f7dba3a` 生成，比内核晚一代：它的 `noswot` 行仍是数值失败，
+  而守卫式 Harris 比值检验已把该实例修到最优。下一次按上面命令重新生成即可对齐。
 
 ## 交叉校验（外部权威，独立于本实现）
 
