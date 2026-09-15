@@ -13,10 +13,9 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 > 对偶单纯形、presolve、稀疏 LU 基分解待完成）：
 > 可构建、可测试、CI 全绿，并已在 **MIPLIB 2017 的 32 个真实实例**上跑通解析报告
 > （33 成功 / 0 失败，见 [`bench/parse-report.md`](bench/parse-report.md)）与求解报告
-> （仓库里的
-> [`bench/solve-report.md`](bench/solve-report.md) 由提交 `f7dba3a` 生成：14 个 LP 松弛求到最优、
-> 18 个超规模跳过、1 个数值失败；该失败已由守卫式 Harris 比值检验修掉，重新生成后为
-> 15 optimal / 17 skipped / 0 其他，报告文件本身尚待重跑对齐）。尚未发布到 mooncakes.io。
+> （**15 个 LP 松弛求到最优、17 个超规模跳过、0 个数值失败、0 个拒绝，32/32 全覆盖**；
+> 15 项松弛值经 MIPLIB 官方最优值表交叉校验、**0 违反**，见
+> [`bench/solve-report.md`](bench/solve-report.md)）。尚未发布到 mooncakes.io。
 > 里程碑划分、范围闸门与明确**不做**的内容见 [`docs/roadmap.md`](docs/roadmap.md)。
 
 ## 当前能力（M1、M2 与 M3 进行中）
