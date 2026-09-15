@@ -47,6 +47,7 @@ pub(all) struct SimplexOptions {
   pivot_tolerance : Double
   pivot_relative_tolerance : Double
   start_with_bland : Bool
+  degeneracy_perturbation : Double
   reduced_cost_tolerance : Double
   relax_integrality : Bool
   max_kernel_rows : Int

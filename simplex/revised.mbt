@@ -95,6 +95,14 @@ priv struct State {
   basic_cost_buffer : Array[Double]
   /// Values of the basic variables.
   xb : Array[Double]
+  /// The right hand side the run is solved against.
+  ///
+  /// This is `problem.rhs` plus the degeneracy perturbation, and it is what every
+  /// recomputation of the basic values uses. The residual self-check at the end
+  /// reads `problem.rhs` instead, so a solution only gets reported if it is
+  /// feasible for the model the caller actually wrote rather than for the slightly
+  /// perturbed one the algorithm preferred.
+  solve_rhs : Array[Double]
   /// `basis[row]` is the column that is basic in that row.
   basis : Array[Int]
   is_basic : Array[Bool]
@@ -128,6 +136,17 @@ fn State::new(problem : KernelProblem, options : SimplexOptions) -> State {
     basis.push(column)
     is_basic[column] = true
   }
+  // Degeneracy perturbation, applied row by row with a deterministic pattern so a
+  // run is reproducible and the direction of every nudge is known. The size is
+  // chosen well below the feasibility tolerance: it is there to make ties strict,
+  // not to change the problem.
+  let solve_rhs : Array[Double] = Array::make(m, 0.0)
+  for i = 0; i < m; i = i + 1 {
+    let value = problem.rhs[i]
+    let factor = 1.0 + Double::from_int(i % 11) * 0.037
+    solve_rhs[i] = value +
+      options.degeneracy_perturbation * (1.0 + @core.fabs(value)) * factor
+  }
   {
     problem,
     options,
@@ -138,7 +157,8 @@ fn State::new(problem : KernelProblem, options : SimplexOptions) -> State {
     duals_buffer: Array::make(m, 0.0),
     direction_buffer: Array::make(m, 0.0),
     basic_cost_buffer: Array::make(m, 0.0),
-    xb: problem.rhs.copy(),
+    xb: solve_rhs.copy(),
+    solve_rhs,
     basis,
     is_basic,
     cost: problem.cost.copy(),
@@ -556,7 +576,7 @@ fn State::refactorize(self : State) -> Bool {
       for i = 0; i < m; i = i + 1 {
         let acc = @core.CompensatedSum::new()
         for k = 0; k < m; k = k + 1 {
-          acc.add(fresh[i][k] * self.problem.rhs[k])
+          acc.add(fresh[i][k] * self.solve_rhs[k])
         }
         self.xb[i] = acc.value()
       }
@@ -763,6 +783,7 @@ fn solve_problem(
     pivot_tolerance: options.pivot_tolerance,
     pivot_relative_tolerance: options.pivot_relative_tolerance,
     start_with_bland: true,
+    degeneracy_perturbation: options.degeneracy_perturbation,
     reduced_cost_tolerance: options.reduced_cost_tolerance,
     relax_integrality: options.relax_integrality,
     max_kernel_rows: options.max_kernel_rows,

@@ -55,6 +55,23 @@ pub(all) struct SimplexOptions {
   /// the kernel uses it for the recovery attempt after a numerically singular
   /// basis, where a different path is the whole point.
   start_with_bland : Bool
+  /// Relative size of the perturbation added to the right hand side before the run
+  /// starts. This is the classical answer to degeneracy, and degeneracy — not
+  /// scaling — is what breaks this kernel on the hard instance: noswot's
+  /// coefficients span 0.25 to 21, a ratio of 84, so it is a well scaled model whose
+  /// trouble is hundreds of basic values sitting at zero. A tie between two rows
+  /// whose ratio is `min(0, 0)` gives the ratio test nothing to choose between, and
+  /// a long run of such pivots is how a basis drifts into being nearly singular.
+  ///
+  /// The default is deliberately far below the tolerances the algorithm and its
+  /// callers use: big enough to make those ties strict, small enough that no
+  /// accuracy claim changes. At `1.0e-9` it fixed noswot but moved objectives by more
+  /// than the `1e-9` relative accuracy the test suite asserts; at `1.0e-12` noswot
+  /// reaches its optimum in 158 pivots with no recovery attempt and every accuracy
+  /// assertion still holds. Zero disables it. The residual self-check always measures
+  /// against the **unperturbed** right hand side, so a perturbed run still has to be
+  /// feasible for the model the caller wrote.
+  degeneracy_perturbation : Double
   reduced_cost_tolerance : Double
   /// Treat integer variables as continuous (the LP relaxation of a model).
   relax_integrality : Bool
@@ -79,6 +96,7 @@ pub fn SimplexOptions::default() -> SimplexOptions {
     pivot_tolerance: 1.0e-9,
     pivot_relative_tolerance: 1.0e-8,
     start_with_bland: false,
+    degeneracy_perturbation: 1.0e-12,
     reduced_cost_tolerance: 1.0e-9,
     relax_integrality: false,
     max_kernel_rows: 4000,
@@ -96,6 +114,7 @@ pub fn SimplexOptions::relaxed() -> SimplexOptions {
     pivot_tolerance: base.pivot_tolerance,
     pivot_relative_tolerance: base.pivot_relative_tolerance,
     start_with_bland: base.start_with_bland,
+    degeneracy_perturbation: base.degeneracy_perturbation,
     reduced_cost_tolerance: base.reduced_cost_tolerance,
     relax_integrality: true,
     max_kernel_rows: base.max_kernel_rows,
@@ -115,6 +134,7 @@ pub fn SimplexOptions::with_max_iterations(
     pivot_tolerance: base.pivot_tolerance,
     pivot_relative_tolerance: base.pivot_relative_tolerance,
     start_with_bland: base.start_with_bland,
+    degeneracy_perturbation: base.degeneracy_perturbation,
     reduced_cost_tolerance: base.reduced_cost_tolerance,
     relax_integrality: base.relax_integrality,
     max_kernel_rows: base.max_kernel_rows,
@@ -135,6 +155,7 @@ pub fn SimplexOptions::with_max_kernel_rows(
     pivot_tolerance: base.pivot_tolerance,
     pivot_relative_tolerance: base.pivot_relative_tolerance,
     start_with_bland: base.start_with_bland,
+    degeneracy_perturbation: base.degeneracy_perturbation,
     reduced_cost_tolerance: base.reduced_cost_tolerance,
     relax_integrality: base.relax_integrality,
     max_kernel_rows,
