@@ -83,8 +83,15 @@ priv struct State {
   options : SimplexOptions
   m : Int
   n : Int
-  /// Dense inverse of the basis as of the last refactorization (`B₀⁻¹`).
-  mut base_inv : Array[Array[Double]]
+  /// Sparse factors of the basis as of the last refactorization (`P·B₀ = L·U`).
+  ///
+  /// `None` before the first factorization and after one that failed, and the run
+  /// stops in that case instead of pivoting on factors that are not a
+  /// factorization. This replaced a dense `m x m` inverse, which is what capped the
+  /// problem size: the factors cost `O(nnz(B) + fill)` where the inverse cost `m²`.
+  mut lu : BasisLu?
+  /// `true` once the basis has been factored successfully.
+  mut factorized : Bool
   /// Product-form updates since then: `B⁻¹ = E_k · … · E₁ · B₀⁻¹`.
   mut etas : Array[Eta]
   /// Scratch buffers, allocated once per run: the iteration loop must not
@@ -93,6 +100,9 @@ priv struct State {
   duals_buffer : Array[Double]
   direction_buffer : Array[Double]
   basic_cost_buffer : Array[Double]
+  /// Scratch for the triangular solves. The solvers permute the vector they are
+  /// handed, so they need somewhere to do it that is not the caller's buffer.
+  solve_scratch : Array[Double]
   /// Values of the basic variables.
   xb : Array[Double]
   /// The right hand side the run is solved against.
@@ -121,14 +131,6 @@ priv struct State {
 fn State::new(problem : KernelProblem, options : SimplexOptions) -> State {
   let m = problem.nrows
   let n = problem.ncols
-  let inv : Array[Array[Double]] = []
-  for i = 0; i < m; i = i + 1 {
-    let row : Array[Double] = []
-    for k = 0; k < m; k = k + 1 {
-      row.push(if i == k { 1.0 } else { 0.0 })
-    }
-    inv.push(row)
-  }
   let basis : Array[Int] = []
   let is_basic : Array[Bool] = Array::make(n, false)
   for i = 0; i < m; i = i + 1 {
@@ -147,16 +149,18 @@ fn State::new(problem : KernelProblem, options : SimplexOptions) -> State {
     solve_rhs[i] = value +
       options.degeneracy_perturbation * (1.0 + @core.fabs(value)) * factor
   }
-  {
+  let state = {
     problem,
     options,
     m,
     n,
-    base_inv: inv,
+    lu: None,
+    factorized: false,
     etas: [],
     duals_buffer: Array::make(m, 0.0),
     direction_buffer: Array::make(m, 0.0),
     basic_cost_buffer: Array::make(m, 0.0),
+    solve_scratch: Array::make(m, 0.0),
     xb: solve_rhs.copy(),
     solve_rhs,
     basis,
@@ -169,6 +173,11 @@ fn State::new(problem : KernelProblem, options : SimplexOptions) -> State {
     best_objective: 0.0,
     saw_objective: false,
   }
+  // The starting basis is the slacks and artificials, i.e. a permutation of the
+  // identity, so this always succeeds; the flag still records the outcome because
+  // everything afterwards depends on it being true.
+  state.factorized = state.refactorize()
+  state
 }
 
 ///|
@@ -222,29 +231,19 @@ fn State::kernel_objective(self : State) -> Double {
 /// through the rows of the base inverse, so only the nonzeros of the running
 /// vector cost a pass over `m`.
 fn State::duals(self : State) -> Array[Double] {
-  let z = self.basic_cost_buffer
+  let y = self.duals_buffer
   for k = 0; k < self.m; k = k + 1 {
-    z[k] = self.cost[self.basis[k]]
+    y[k] = self.cost[self.basis[k]]
   }
   let mut e = self.etas.length() - 1
   while e >= 0 {
-    self.etas[e].apply_transpose(z)
+    self.etas[e].apply_transpose(y)
     e = e - 1
   }
-  let y = self.duals_buffer
-  for i = 0; i < self.m; i = i + 1 {
-    y[i] = 0.0
-  }
-  for k = 0; k < self.m; k = k + 1 {
-    let coefficient = z[k]
-    if coefficient != 0.0 {
-      let base_row = self.base_inv[k]
-      let mut i = 0
-      while i < self.m {
-        y[i] = y[i] + base_row[i] * coefficient
-        i = i + 1
-      }
-    }
+  // `B₀⁻ᵀ` on what is left, through the sparse factors rather than a dense table.
+  match self.lu {
+    Some(lu) => lu.solve_transpose_into(y, self.basic_cost_buffer)
+    None => ()
   }
   y
 }
@@ -330,15 +329,15 @@ fn State::direction(self : State, column : Int) -> Array[Double] {
   let end = pointers[column + 1]
   while k < end {
     let row = rows[k]
-    let value = values[k]
-    if value != 0.0 {
-      let mut i = 0
-      while i < self.m {
-        d[i] = d[i] + self.base_inv[i][row] * value
-        i = i + 1
-      }
-    }
+    d[row] = d[row] + values[k]
     k = k + 1
+  }
+  // `d = B₀⁻¹ aⱼ` through the sparse factors: scatter the column, one triangular
+  // solve forward and one backward. The dense version of this stepped over every
+  // row for every nonzero of the column, which is where the old cost lived.
+  match self.lu {
+    Some(lu) => lu.solve_into(d, self.solve_scratch)
+    None => ()
   }
   for e = 0; e < self.etas.length(); e = e + 1 {
     self.etas[e].apply(d)
@@ -357,19 +356,14 @@ fn State::inverse_row(self : State, row : Int) -> Array[Double] {
     self.etas[e].apply_transpose(z)
     e = e - 1
   }
-  let out : Array[Double] = Array::make(self.m, 0.0)
-  for k = 0; k < self.m; k = k + 1 {
-    let coefficient = z[k]
-    if coefficient != 0.0 {
-      let base_row = self.base_inv[k]
-      let mut i = 0
-      while i < self.m {
-        out[i] = out[i] + base_row[i] * coefficient
-        i = i + 1
-      }
-    }
+  // `eᵣᵀB₀⁻¹` is the transposed solve `B₀⁻ᵀ eᵣ`. This runs during artificial
+  // eviction only, so the two allocations are not in the hot loop.
+  let scratch : Array[Double] = Array::make(self.m, 0.0)
+  match self.lu {
+    Some(lu) => lu.solve_transpose_into(z, scratch)
+    None => ()
   }
-  out
+  z
 }
 
 ///|
@@ -550,96 +544,48 @@ fn State::pivot(
 }
 
 ///|
-/// Rebuilds the basis inverse from the basis columns and recomputes the basic
-/// values. Returns `false` when the basis is numerically singular, which means
-/// the run has to stop rather than continue on garbage.
+/// Rebuilds the basis factors from the basis columns and recomputes the basic
+/// values.
+///
+/// Returns `false` when the basis has no usable pivot, which means the run has to
+/// stop rather than continue on garbage. The threshold is relative to the largest
+/// entry left in the column being eliminated: an absolute one would refuse a basis
+/// whose columns are simply small.
 fn State::refactorize(self : State) -> Bool {
   let m = self.m
-  let dense : Array[Array[Double]] = []
+  let columns : Array[Array[(Int, Double)]] = []
   for i = 0; i < m; i = i + 1 {
-    dense.push(Array::make(m, 0.0))
+    columns.push(self.problem.matrix.column(self.basis[i]))
   }
-  for i = 0; i < m; i = i + 1 {
-    let entries = self.problem.matrix.column(self.basis[i])
-    for e = 0; e < entries.length(); e = e + 1 {
-      let (row, value) = entries[e]
-      dense[row][i] = value
+  match
+    factorize_basis(
+      columns,
+      m,
+      self.options.pivot_tolerance,
+      self.options.max_factor_entries,
+    ) {
+    None => {
+      self.lu = None
+      false
     }
-  }
-  match invert(dense, m) {
-    None => false
-    Some(fresh) => {
-      self.base_inv = fresh
+    Some(factors) => {
+      self.lu = Some(factors)
+      self.factorized = true
       // The updates are folded into the new base, which is the whole point of
       // refactorizing: the eta list stays short and the drift gets discarded.
       self.etas = []
+      // Basic values of the fresh factors, from the right hand side the run is
+      // solved against.
       for i = 0; i < m; i = i + 1 {
-        let acc = @core.CompensatedSum::new()
-        for k = 0; k < m; k = k + 1 {
-          acc.add(fresh[i][k] * self.solve_rhs[k])
-        }
-        self.xb[i] = acc.value()
+        self.xb[i] = self.solve_rhs[i]
+      }
+      match self.lu {
+        Some(lu) => lu.solve_into(self.xb, self.solve_scratch)
+        None => ()
       }
       true
     }
   }
-}
-
-///|
-/// Gauss-Jordan inversion with partial pivoting.
-fn invert(matrix : Array[Array[Double]], m : Int) -> Array[Array[Double]]? {
-  let width = 2 * m
-  let augmented : Array[Array[Double]] = []
-  for i = 0; i < m; i = i + 1 {
-    let row : Array[Double] = Array::make(width, 0.0)
-    for k = 0; k < m; k = k + 1 {
-      row[k] = matrix[i][k]
-    }
-    row[m + i] = 1.0
-    augmented.push(row)
-  }
-  for col = 0; col < m; col = col + 1 {
-    let mut best = col
-    let mut best_absolute = @core.fabs(augmented[col][col])
-    for i = col + 1; i < m; i = i + 1 {
-      let candidate = @core.fabs(augmented[i][col])
-      if candidate > best_absolute {
-        best = i
-        best_absolute = candidate
-      }
-    }
-    if best_absolute < 1.0e-12 {
-      return None
-    }
-    if best != col {
-      let swap = augmented[best]
-      augmented[best] = augmented[col]
-      augmented[col] = swap
-    }
-    let pivot = augmented[col][col]
-    for k = 0; k < width; k = k + 1 {
-      augmented[col][k] = augmented[col][k] / pivot
-    }
-    for i = 0; i < m; i = i + 1 {
-      if i != col {
-        let factor = augmented[i][col]
-        if factor != 0.0 {
-          for k = 0; k < width; k = k + 1 {
-            augmented[i][k] = augmented[i][k] - factor * augmented[col][k]
-          }
-        }
-      }
-    }
-  }
-  let inverse : Array[Array[Double]] = []
-  for i = 0; i < m; i = i + 1 {
-    let row : Array[Double] = []
-    for k = 0; k < m; k = k + 1 {
-      row.push(augmented[i][m + k])
-    }
-    inverse.push(row)
-  }
-  Some(inverse)
 }
 
 ///|
@@ -675,6 +621,11 @@ fn State::weak_pivot(self : State, d : Array[Double], leaving : Int) -> Bool {
 /// Codes: `0` optimal, `1` unbounded, `2` iteration limit, `3` numerical
 /// failure (singular refactorization).
 fn State::iterate(self : State) -> Int {
+  if !self.factorized {
+    // Without factors every solve would return whatever the buffers happened to
+    // hold, and the run would "converge" on nonsense. Refuse instead.
+    return 3
+  }
   while self.iterations < self.options.max_iterations {
     if self.options.refactorize_every > 0 &&
       self.iterations > 0 &&
@@ -784,6 +735,7 @@ fn solve_problem(
     pivot_relative_tolerance: options.pivot_relative_tolerance,
     start_with_bland: true,
     degeneracy_perturbation: options.degeneracy_perturbation,
+    max_factor_entries: options.max_factor_entries,
     reduced_cost_tolerance: options.reduced_cost_tolerance,
     relax_integrality: options.relax_integrality,
     max_kernel_rows: options.max_kernel_rows,
@@ -816,8 +768,6 @@ fn solve_once(
   options : SimplexOptions,
 ) -> SimplexResult {
   if problem.nrows > options.max_kernel_rows {
-    let rows = Double::from_int(problem.nrows)
-    let megabytes = rows * rows * 8.0 / 1048576.0
     return {
       status: TooLarge,
       values: [],
@@ -827,9 +777,7 @@ fn solve_once(
       problem.nrows.to_string() +
       " rows, above the " +
       options.max_kernel_rows.to_string() +
-      " row limit of this milestone; the dense basis inverse would ask for about " +
-      megabytes.to_string() +
-      " MB. Kernel rows are the model's rows plus one explicit row per finite upper bound, so a model with few constraints can still land here",
+      " row limit. Kernel rows are the model's rows plus one explicit row per finite upper bound, so a model with few constraints can still land here. The basis is factored sparsely, so this limit guards against a hopeless run rather than against allocation; `max_factor_entries` is what bounds the factors",
     }
   }
   let state = State::new(problem, options)

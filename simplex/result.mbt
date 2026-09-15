@@ -72,11 +72,23 @@ pub(all) struct SimplexOptions {
   /// against the **unperturbed** right hand side, so a perturbed run still has to be
   /// feasible for the model the caller wrote.
   degeneracy_perturbation : Double
+  /// Largest number of entries the sparse factors of one basis may hold. Fill is
+  /// the one quantity a sparse factorization cannot predict from the row count, so
+  /// it gets a budget instead of a promise; exceeding it fails the factorization
+  /// rather than allocating without limit.
+  max_factor_entries : Int
   reduced_cost_tolerance : Double
   /// Treat integer variables as continuous (the LP relaxation of a model).
   relax_integrality : Bool
   /// Largest kernel row count the run will attempt. Above it the result is
   /// `TooLarge` and nothing is allocated.
+  ///
+  /// This was 4000 while the kernel carried a dense basis inverse, because `m²`
+  /// doubles is what an inverse costs and MIPLIB's fast0507 reaches 63 490 kernel
+  /// rows. With sparse factors the memory is `O(nnz + fill)` instead, so the
+  /// ceiling is a coarse guard against a hopeless run rather than a real limit:
+  /// what decides now is time. `max_factor_entries` is the sharper bound, and it
+  /// is on fill, which is the part that is not knowable in advance.
   max_kernel_rows : Int
 } derive(Debug)
 
@@ -85,9 +97,10 @@ pub(all) struct SimplexOptions {
 /// product-form updates are cheap, so the expensive rebuild can wait longer), and
 /// tolerances in the range real LP codes use.
 ///
-/// The row ceiling is chosen so the dense inverse stays at 128 MB (4000² doubles);
-/// the cubic refactorization cost is the wall well before that, which is why the
-/// sparse factorization is the next thing the kernel needs.
+/// The row ceiling is a coarse guard, not the memory bound it once was: the basis
+/// is factored sparsely now, so a run of tens of thousands of rows costs
+/// `O(nnz + fill)` rather than `m²`. `max_factor_entries` is what protects the
+/// allocation, and time is what decides in practice.
 pub fn SimplexOptions::default() -> SimplexOptions {
   {
     max_iterations: 20000,
@@ -97,9 +110,10 @@ pub fn SimplexOptions::default() -> SimplexOptions {
     pivot_relative_tolerance: 1.0e-8,
     start_with_bland: false,
     degeneracy_perturbation: 1.0e-12,
+    max_factor_entries: 20000000,
     reduced_cost_tolerance: 1.0e-9,
     relax_integrality: false,
-    max_kernel_rows: 4000,
+    max_kernel_rows: 200000,
   }
 }
 
@@ -115,6 +129,7 @@ pub fn SimplexOptions::relaxed() -> SimplexOptions {
     pivot_relative_tolerance: base.pivot_relative_tolerance,
     start_with_bland: base.start_with_bland,
     degeneracy_perturbation: base.degeneracy_perturbation,
+    max_factor_entries: base.max_factor_entries,
     reduced_cost_tolerance: base.reduced_cost_tolerance,
     relax_integrality: true,
     max_kernel_rows: base.max_kernel_rows,
@@ -135,9 +150,35 @@ pub fn SimplexOptions::with_max_iterations(
     pivot_relative_tolerance: base.pivot_relative_tolerance,
     start_with_bland: base.start_with_bland,
     degeneracy_perturbation: base.degeneracy_perturbation,
+    max_factor_entries: base.max_factor_entries,
     reduced_cost_tolerance: base.reduced_cost_tolerance,
     relax_integrality: base.relax_integrality,
     max_kernel_rows: base.max_kernel_rows,
+  }
+}
+
+///|
+/// Options with an explicit iteration cap, keeping everything else.
+///
+/// `with_max_iterations` starts from the defaults, which is the wrong tool when a
+/// caller has already chosen a relaxation: this one copies every field, so a
+/// bounded run stays the run that was asked for.
+pub fn SimplexOptions::limit_iterations(
+  self : SimplexOptions,
+  max_iterations : Int,
+) -> SimplexOptions {
+  {
+    max_iterations,
+    refactorize_every: self.refactorize_every,
+    feasibility_tolerance: self.feasibility_tolerance,
+    pivot_tolerance: self.pivot_tolerance,
+    pivot_relative_tolerance: self.pivot_relative_tolerance,
+    start_with_bland: self.start_with_bland,
+    degeneracy_perturbation: self.degeneracy_perturbation,
+    max_factor_entries: self.max_factor_entries,
+    reduced_cost_tolerance: self.reduced_cost_tolerance,
+    relax_integrality: self.relax_integrality,
+    max_kernel_rows: self.max_kernel_rows,
   }
 }
 
@@ -156,6 +197,7 @@ pub fn SimplexOptions::with_max_kernel_rows(
     pivot_relative_tolerance: base.pivot_relative_tolerance,
     start_with_bland: base.start_with_bland,
     degeneracy_perturbation: base.degeneracy_perturbation,
+    max_factor_entries: base.max_factor_entries,
     reduced_cost_tolerance: base.reduced_cost_tolerance,
     relax_integrality: base.relax_integrality,
     max_kernel_rows,

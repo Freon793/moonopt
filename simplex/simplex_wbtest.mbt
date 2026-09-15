@@ -193,10 +193,10 @@ test "model path: infeasible bound combination is reported" {
 }
 
 ///|
-/// The row gate is what keeps a bounded model from turning into an allocation
-/// nobody asked for. It has to refuse *before* the dense basis inverse is built,
-/// and it has to say why: an access violation on the native backend is not a
-/// boundary a caller can act on.
+/// The row ceiling is what keeps a run from being started that this kernel has no
+/// business attempting. It has to refuse before any of the problem's storage is
+/// laid out, and it has to say why: an access violation on the native backend is
+/// not a boundary a caller can act on.
 test "kernel refuses a problem over the row limit instead of allocating" {
   let result = solve_standard_with(
     2,

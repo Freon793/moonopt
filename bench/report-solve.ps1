@@ -20,6 +20,7 @@ param(
   [string]$Manifest = (Join-Path $PSScriptRoot "data/instances/manifest.txt"),
   [string]$Output = (Join-Path $PSScriptRoot "solve-report.md"),
   [int]$MaxRows = 200,
+  [int]$MaxIterations = 20000,
   [switch]$Relax,
   [switch]$Presolve,
   [string]$Moon = "moon"
@@ -52,7 +53,8 @@ try {
   # that does not.
   $arguments = @(
     "run", "--target", "native", "--release", "cmd/parse", "--",
-    "--manifest", $Manifest, "--solve", "--max-rows", "$MaxRows"
+    "--manifest", $Manifest, "--solve", "--max-rows", "$MaxRows",
+    "--max-iterations", "$MaxIterations"
   )
   if ($Relax) { $arguments += "--relax" }
   if ($Presolve) { $arguments += "--presolve" }

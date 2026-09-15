@@ -11,6 +11,7 @@ pub(all) struct SolveFlags {
   relax : Bool
   presolve : Bool
   max_rows : Int
+  max_iterations : Int
 }
 
 // Type aliases

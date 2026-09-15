@@ -127,6 +127,9 @@ pub(all) struct SolveFlags {
   relax : Bool
   presolve : Bool
   max_rows : Int
+  /// Zero means the kernel's own default; anything else bounds the run so a large
+  /// instance can be sampled instead of waited on.
+  max_iterations : Int
 }
 
 ///|
@@ -215,10 +218,11 @@ fn report_solve_result_scaled(
 ///|
 /// Solves a parsed model and prints the outcome.
 ///
-/// The row limit is explicit because the kernel keeps a dense basis inverse:
-/// beyond a few hundred rows it needs a sparse factorization first, and silently
-/// attempting it would look like a hang rather than a boundary. Instances over
-/// the limit are reported as skipped, not as failures.
+/// The row limit is explicit because no one wants to start a run that cannot
+/// finish: the basis is factored sparsely now, so the kernel would not run out of
+/// memory, but a model far beyond what this kernel has been exercised on would
+/// spend its time in Phase I instead of answering. Instances over the limit are
+/// reported as skipped, not as failures.
 ///
 /// With `--presolve` the reduction runs first, and the reconstructed solution is
 /// checked against the *original* rows before the outcome is printed. A reduction
@@ -235,11 +239,17 @@ fn solve_and_report(model : @model.Model, flags : SolveFlags) -> Unit {
     )
     return
   }
-  let options = if flags.relax {
+  let options = (if flags.relax {
     @simplex.SimplexOptions::relaxed()
   } else {
     @simplex.SimplexOptions::default()
-  }
+  }).limit_iterations(
+    if flags.max_iterations > 0 {
+      flags.max_iterations
+    } else {
+      20000
+    },
+  )
   if !flags.presolve {
     match @simplex.solve_model_with(model, options) {
       Err(reason) => println("       solve=refused(" + reason + ")")
@@ -368,6 +378,7 @@ fn main {
   let mut relax = false
   let mut presolve_enabled = false
   let mut max_rows = 200
+  let mut max_iterations = 0
   let mut index = 1
   while index < args.length() {
     let argument = args[index]
@@ -392,6 +403,16 @@ fn main {
       if index + 1 < args.length() {
         match @format.parse_index(args[index + 1]) {
           Some(value) => max_rows = value
+          None => ()
+        }
+        index = index + 2
+        continue
+      }
+    }
+    if argument == "--max-iterations" {
+      if index + 1 < args.length() {
+        match @format.parse_index(args[index + 1]) {
+          Some(value) => max_iterations = value
           None => ()
         }
         index = index + 2
@@ -444,6 +465,7 @@ fn main {
     relax,
     presolve: presolve_enabled,
     max_rows,
+    max_iterations,
   }
   for path in files {
     if !inspect(path, flags) {

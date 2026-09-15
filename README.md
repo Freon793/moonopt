@@ -9,14 +9,17 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 不可行性（Farkas）与无界（射线）证书。纯 MoonBit 实现，无 FFI 依赖。
 
 > 状态：**v0.1.0-dev**，`M1`（基础层与模型层）、`M2`（标准模型输入）已落地，`M3` 进行中
-> （稀疏修正单纯形、性能测量与优化、比值检验的可行性守卫与内核规模门禁已完成；
-> 对偶单纯形与稀疏 LU 基分解待完成；presolve/postsolve 已落地但默认关闭，见能力表与 roadmap）：
+> （稀疏修正单纯形、**稀疏 LU 基分解**、性能测量与优化、比值检验的可行性守卫、退化扰动、
+> 内核规模与填充预算门禁、presolve/postsolve 与公开契约的默认化简路径均已完成；
+> 对偶单纯形与 DeVex 定价待完成）：
 > 可构建、可测试、CI 全绿，并已在 **MIPLIB 2017 的 32 个真实实例**上跑通解析报告
 > （33 成功 / 0 失败，见 [`bench/parse-report.md`](bench/parse-report.md)）与求解报告
-> （**19 个 LP 松弛求到最优、11 个超规模跳过、2 个因内核规模上限被拒绝、0 个数值失败**；
-> 基准口径**开启 presolve**（行数上限 1000），19 个重建解全部在原模型上通过行、界与目标值三项检查，
-> 19 项松弛值经 MIPLIB 官方最优值表交叉校验、**0 违反**，见
-> [`bench/solve-report.md`](bench/solve-report.md)）。尚未发布到 mooncakes.io。
+> （**16 个 LP 松弛求到最优、11 个超规模跳过、规模拒绝归零、0 个数值失败**；
+> 基准口径**开启 presolve**，行数上限 1000、迭代上限 1200 —— 报告里另有 5 个 `iteration-limit`
+> 是这个上限造成的，其中 4 个在默认 20000 上限下可解，唯一卡住的是 `fast0507`；
+> 16 个重建解全部在原模型上通过行、界与目标值三项检查，16 项松弛值经 MIPLIB 官方最优值表
+> 交叉校验、**0 违反**，见 [`bench/solve-report.md`](bench/solve-report.md)）。
+> 尚未发布到 mooncakes.io。
 > 里程碑划分、范围闸门与明确**不做**的内容见 [`docs/roadmap.md`](docs/roadmap.md)。
 
 ## 当前能力（M1、M2 与 M3 进行中）
@@ -30,18 +33,25 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 - `format`：**MPS 读取器与写出器**（free / fixed 布局、`RANGES` 展开、`MARKER` 整数块、
   free row 语义、`OBJSENSE` 扩展）与 **LP 格式读写**（目标、`Subject To`、`Bounds` 的各种写法、
   `Generals` / `Binary`），读→写→读 幂等；
-- `simplex`：**稀疏修正单纯形内核** —— 稀疏 CSC 列存储、**乘积形式（eta）基更新**
-  （每枢轴只追加一个稀疏 eta，基逆仅在重新分解时重建）、稀疏 FTRAN/BTRAN、
+- `simplex`：**稀疏修正单纯形内核** —— 稀疏 CSC 列存储、**稀疏 LU 基分解**
+  （`P·B = L·U`，行主元相对阈值；`B x = b` 与 `Bᵀ y = c` 走三角求解，内存 `O(nnz + fill)`）、
+  **乘积形式（eta）基更新**（每枢轴只追加一个稀疏 eta，因子仅在重新分解时重建）、
   Phase I（人工变量 + 驱逐）与 Phase II、Dantzig 定价并在停滞时自动切换到 Bland 规则、
-  **Harris 两遍比值检验**、对偶值与检验数、不可行 / 无界 / 迭代上限 / 数值失败四类状态各自区分；
+  **Harris 两遍比值检验**（带可行性守卫）、退化扰动、对偶值与检验数、
+  不可行 / 无界 / 迭代上限 / 数值失败 / 超出规模各成一类状态；
   模型侧的上下界、自由变量（拆成正负两部分）与 `≤` / `≥` / `=` 混合约束都在内核内完成变换；
   迭代循环内不分配内存（对偶值、方向、基本成本都用共享 scratch buffer）；
+- `presolve`：**模型化简与解还原** —— 空行/列消元、被界推定的冗余行、singleton 行转界、
+  隐式界收紧、固定变量消元（目标贡献进 offset），以及把解还原回**原变量**并对照原模型检查
+  （行、界、目标值三项）；证明不可行/无界时直接返回该判定而不调用内核；
 - `oracle`：**稠密两阶段单纯形参考实现**，作为稀疏内核的差分测试对照基准（不是交付求解器）；
 - `moonopt`：公开入口 `solve` / `solve_with`，返回 `SolveStatus` + `Solution`
   （状态、变量取值、目标值、迭代数、失败原因）；非法模型返回 `NotSolved` 并带原因；
+  **默认先化简再求解并把解还原回原变量**（`SolveOptions { presolve: false }` 可关掉）；
 - `cmd/parse`：模型文件巡检 CLI（格式判定、规模统计与校验结论、`--manifest` 批量模式、
-  `--solve` / `--relax` / `--max-rows` 求解开关、失败返回非零退出码）；
-- CLI 与两个可运行示例，`moon test` 85 个测试全绿，CI 覆盖 Linux/macOS/Windows 与 wasm-gc/js 目标。
+  `--solve` / `--relax` / `--presolve` / `--max-rows` / `--max-iterations` 求解开关、
+  失败返回非零退出码）；
+- CLI 与两个可运行示例，`moon test` 92 个测试全绿，CI 覆盖 Linux/macOS/Windows 与 wasm-gc/js 目标。
 
 **当前内核的能力边界（明确写出来，不夸大）**：
 
@@ -52,19 +62,21 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 | min / max | 对偶单纯形热启动（M3 剩余部分） |
 | MPS / LP 文件读入与写出（M2） | MPS 的 `SC`/`SI` 半连续界、完整 `SOS` / `MARKER` 语义 |
 | presolve：空行/列消元、冗余行、singleton 转界、隐式界收紧、固定变量消元 + 解还原（`solve` 默认开启，`--presolve`） | 系数强化、对偶固定、变量/行的重复与支配检测；整数模型不经化简（保持内核的拒绝语义） |
-| 内核行数 ≤ 4000 的模型（`SimplexOptions::max_kernel_rows`，稠密基逆 128 MB） | 更大规模需先落地稀疏 LU 基分解（M3 性能部分） |
+| 内核行数 ≤ 200000 的模型（`SimplexOptions::max_kernel_rows`；基用**稀疏 LU** 因子分解，内存 `O(nnz+fill)`） | 填充量由 `max_factor_entries` 预算约束；再往上走真正的限制是时间而不是内存 |
 
 **两个行数上限不要混淆**：`cmd/parse --max-rows N` 限制的是**模型约束数**（超过即
 `solve=skipped`）；内核自己的门禁 `max_kernel_rows` 限制的是**内核行数**，而内核行数 =
 模型约束数 + **每个有限上界一行**（本里程碑还没有 bounded-variable pivot）。实测的极端例子是
-`fast0507`：507 条约束、63009 个 0/1 变量，内核规模 **63516 行**，稠密基逆需要 **约 30.8 GB**，
-此前在 native 目标上以访问冲突（exit `0xC0000005`）退出并因巨量换页拖垮整机。现在内核在
-**分配之前**按实测数字拒绝：
+`fast0507`：507 条约束、63009 个 0/1 变量，内核规模 **63516 行** —— 在还使用稠密基逆时，
+这需要约 **30.8 GB**，native 目标会以访问冲突（exit `0xC0000005`）退出并因巨量换页拖垮整机；
+门禁因此先按实测数字拒绝它，而现在改用**稀疏 LU** 之后它已经能真正跑起来（见下）。
 
-```
-solve=too-large obj=0 iters=0 (kernel problem has 63516 rows, above the 4000 row limit of
-this milestone; the dense basis inverse would ask for about 30779.13 MB. ...)
-```
+**规模上限的口径已经变了**：基不再求逆，而是做稀疏 LU 因子分解（`P·B = L·U`），
+内存从 `O(m²)` 变成 `O(nnz + fill)`，`max_kernel_rows` 默认因此从 4000 抬到 **200000**。
+填充量（fill）是稀疏分解里唯一无法事先预测的量，所以另有 `max_factor_entries`（默认 2×10⁷）
+作为预算：超预算就让分解失败，而不是无上限分配。实测：`30n20b8`（presolve 后 11591 行）
+**16 秒求到最优**，`fast0507`（63490 行）**不再被拒绝**、能跑，但 Phase I 在 500 次迭代
+（61 秒）内没有收敛 —— 对这类实例，限制已经从"内存"换成了"时间"。
 
 **公开入口的默认路径**（`solve` / `solve_with`）：先化简（`presolve`，默认开启），再交给内核算，
 然后把解还原回原变量。还原结果必须**同时**通过三项检查才以 `Optimal` 返回 —— 原模型的行、
@@ -174,7 +186,7 @@ moon run cmd/parse -- <file.mps> --presolve --relax --max-rows 300
 ```bash
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/fetch-instances.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-parse.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 300
+powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 1000 -MaxIterations 1200 -Presolve
 ```
 
 `moon run cmd/main` 的实际输出（节选）：
@@ -185,13 +197,15 @@ moonopt 0.1.0-dev
 == production plan
 status     : Optimal
 iterations : 2
-objective  : 21
-  x = 3.0000000000000004
-  y = 1.4999999999999998
+objective  : 21.00000000002238
+  x = 3.0000000000026206
+  y = 1.5000000000023193
 ```
 
-> `3.0000000000000004` 与 `1.4999999999999998` 是浮点表示的真实值（都在 `1e-9` 相对容差内
-> 等于 3 与 1.5）。面向人读的定点格式化属于报表层（M6），当前示例直接打印原始值，不做美化。
+> 这些末位偏差是**退化扰动**留下的脚印（`degeneracy_perturbation`，默认 1e-12）：内核给求解用的
+> 右端项加了一个远小于可行性容差的微扰来打破退化平局，因此结果在 1e-12 相对量级上与精确值不同，
+> 而残差自检始终针对**未扰动**的右端项测量 —— 也就是说解仍然对调用方写下的模型可行。
+> 面向人读的定点格式化属于报表层（M6），当前示例直接打印原始值，不做美化。
 
 `solve` / `verify` / `fmt` / `bench` 等子命令随 M2–M6 落地，见 [`docs/roadmap.md`](docs/roadmap.md)。
 

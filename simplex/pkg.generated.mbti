@@ -48,11 +48,13 @@ pub(all) struct SimplexOptions {
   pivot_relative_tolerance : Double
   start_with_bland : Bool
   degeneracy_perturbation : Double
+  max_factor_entries : Int
   reduced_cost_tolerance : Double
   relax_integrality : Bool
   max_kernel_rows : Int
 } derive(@debug.Debug)
 pub fn SimplexOptions::default() -> Self
+pub fn SimplexOptions::limit_iterations(Self, Int) -> Self
 pub fn SimplexOptions::relaxed() -> Self
 pub fn SimplexOptions::with_max_iterations(Int) -> Self
 pub fn SimplexOptions::with_max_kernel_rows(Int) -> Self

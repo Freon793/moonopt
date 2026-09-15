@@ -29,13 +29,15 @@ You can browse and install extra skills here:
     position reporting. Implemented.
   - `oracle/`: dense two-phase tableau simplex used as the *reference* for
     differential tests. Deliberately simple; it is not the shipped solver.
-  - `simplex/`: the sparse revised simplex kernel. Sparse CSC columns, dense
-    basis inverse with product-form updates and periodic refactorization, Phase I
-    and II, Harris ratio test with a feasibility guard and a Bland fallback, a
-    pivot stability check that rebuilds a stale inverse before pivoting, one
-    recovery attempt with Bland's rule after a numerical failure, a row gate that
-    refuses a kernel problem it cannot allocate for, and a residual self-check
-    before it will report `Optimal`.
+  - `simplex/`: the sparse revised simplex kernel. Sparse CSC columns, a **sparse LU
+    basis factorization** (`P·B = L·U`, row pivoting with a relative threshold) with
+    product-form eta updates and periodic refactorization, Phase I and II, Harris
+    ratio test with a feasibility guard and a Bland fallback, a pivot stability
+    check that rebuilds stale factors before pivoting, one recovery attempt with
+    Bland's rule after a numerical failure, a row ceiling and a fill budget that
+    refuse a problem worth refusing, and a residual self-check before it will
+    report `Optimal`. `lu.mbt` holds the factorization; its factors are verified
+    against a dense reference that lives in the test file, not in the kernel.
   - `presolve/`: model reduction and postsolve. Empty rows and columns, rows the
     bounds already settle, singleton rows turned into bounds, implied bounds, and
     fixed-variable elimination with an objective offset; `reconstruct` maps a
@@ -67,12 +69,15 @@ You can browse and install extra skills here:
   - use compensated summation when accumulating many terms;
   - any routine that can fail numerically must report that explicitly instead of
     silently returning a wrong answer;
-  - a routine whose cost follows the caller's problem size must check that size
-    **before** it allocates and return a measured refusal (`TooLarge` and friends)
-    when the request cannot be honoured. A model's row count is not a proxy for
+  - a routine whose cost follows the caller's problem size must bound that cost
+    **before** it starts. Two shapes exist here and they need different bounds: a
+    row ceiling (`TooLarge`) for "would this run have any chance of finishing", and
+    a fill budget (`max_factor_entries`) for the one quantity a sparse
+    factorization cannot predict in advance. A model's row count is not a proxy for
     the kernel's row count: every finite upper bound becomes an explicit row, so a
-    507 constraint instance can reach 63 516 kernel rows. Attempting that
-    allocation is not a slow solve, it is a dead process on the native backend.
+    507 constraint instance reaches 63 516 kernel rows. Before the basis was
+    factored sparsely, that number was an allocation of tens of gigabytes and an
+    access violation on the native backend rather than a slow solve.
 
 - Keep the public surface small. Anything that appears in a `.mbti` is a
   contract.
