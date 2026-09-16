@@ -51,7 +51,7 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 - `cmd/parse`：模型文件巡检 CLI（格式判定、规模统计与校验结论、`--manifest` 批量模式、
   `--solve` / `--relax` / `--presolve` / `--max-rows` / `--max-iterations` 求解开关、
   失败返回非零退出码）；
-- CLI 与两个可运行示例，`moon test` 93 个测试全绿，CI 覆盖 Linux/macOS/Windows 与 wasm-gc/js 目标。
+- CLI 与两个可运行示例，`moon test` 97 个测试全绿，CI 覆盖 Linux/macOS/Windows 与 wasm-gc/js 目标。
 
 **当前内核的能力边界（明确写出来，不夸大）**：
 

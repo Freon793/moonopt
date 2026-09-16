@@ -246,6 +246,145 @@ test "kernel agrees with the reference solver on random LPs" {
 }
 
 ///|
+/// The bounded-variable kernel against the reference solver, with the *same* problem
+/// written two ways: the kernel gets `xⱼ ≤ uⱼ` as a column bound, the reference gets
+/// it as an extra row. Neither formulation is a variant of the other's code, so an
+/// agreement here is evidence about the ratio test reading both bounds and about a
+/// non-basic variable being allowed to rest at its upper bound.
+///
+/// Every variable is bounded in this corpus, and that is not cosmetic: the reference
+/// treats the "no upper bound" sentinel as a finite number, so it reports an optimal
+/// value of `-3e30` on an unbounded instance instead of saying it is unbounded (seed
+/// 19 of this very generator is such a case). Bounded instances keep the comparison
+/// meaningful; the unbounded verdict has its own tests.
+test "kernel agrees with the reference solver on random bounded LPs" {
+  let mut optimal = 0
+  let mut other = 0
+  for seed = 1; seed <= 200; seed = seed + 1 {
+    let (variables, cost, rows) = random_case(seed)
+    // A deterministic upper bound per variable: tight, loose, and exactly zero (a
+    // variable pinned at its lower bound, which no column can move).
+    let bounds_lcg = Lcg::new(seed * 31 + 11)
+    let uppers : Array[Double] = []
+    for j = 0; j < variables; j = j + 1 {
+      uppers.push(
+        match bounds_lcg.below(4) {
+          0 => 1.0
+          1 => 6.0
+          2 => 0.0
+          _ => 3.5
+        },
+      )
+    }
+    let model = @model.Model::new(@model.Sense::Minimize)
+    let vars : Array[Int] = []
+    for j = 0; j < variables; j = j + 1 {
+      vars.push(model.add_var("x" + j.to_string(), lb=0.0, ub=uppers[j]))
+    }
+    let objective : Array[(Int, Double)] = []
+    for j = 0; j < variables; j = j + 1 {
+      objective.push((vars[j], cost[j]))
+    }
+    model.set_objective(objective)
+    for i = 0; i < rows.length(); i = i + 1 {
+      let (coefficients, rel, rhs) = rows[i]
+      let terms : Array[(Int, Double)] = []
+      for j = 0; j < variables; j = j + 1 {
+        if coefficients[j] != 0.0 {
+          terms.push((vars[j], coefficients[j]))
+        }
+      }
+      model.add_constraint(terms, rel, rhs)
+    }
+    let kernel = match solve_model(model) {
+      Ok(result) => result
+      Err(reason) => fail("kernel refused a continuous model: " + reason)
+    }
+    // The reference gets the bounds as rows on top of the same constraints.
+    let reference_rows : Array[(Array[Double], @model.Rel, Double)] = []
+    for i = 0; i < rows.length(); i = i + 1 {
+      reference_rows.push(rows[i])
+    }
+    for j = 0; j < variables; j = j + 1 {
+      if @core.is_finite(uppers[j]) {
+        let bound_row : Array[Double] = []
+        for k = 0; k < variables; k = k + 1 {
+          bound_row.push(if k == j { 1.0 } else { 0.0 })
+        }
+        reference_rows.push((bound_row, @model.Rel::LessEqual, uppers[j]))
+      }
+    }
+    let negated : Array[Double] = []
+    for j = 0; j < variables; j = j + 1 {
+      negated.push(-cost[j])
+    }
+    let reference = @oracle.solve_standard(variables, negated, reference_rows)
+    match kernel.status {
+      Optimal => {
+        optimal = optimal + 1
+        if reference.status != @oracle.Optimal {
+          fail(
+            "seed " +
+            seed.to_string() +
+            ": kernel optimal, reference " +
+            oracle_status_name(reference.status),
+          )
+        }
+        let expected = -reference.objective
+        if @core.fabs(kernel.objective - expected) >
+          1.0e-6 * (1.0 + @core.fabs(expected)) {
+          fail(
+            "seed " +
+            seed.to_string() +
+            ": objective " +
+            kernel.objective.to_string() +
+            " vs reference " +
+            expected.to_string(),
+          )
+        }
+        if !is_feasible(kernel.values, reference_rows, 1.0e-6) {
+          fail(
+            "seed " +
+            seed.to_string() +
+            ": kernel solution is infeasible: values=" +
+            values_to_string(kernel.values) +
+            " bounds=" +
+            values_to_string(uppers),
+          )
+        }
+      }
+      Infeasible | Unbounded => {
+        other = other + 1
+        if reference.status != @oracle.Infeasible &&
+          reference.status != @oracle.Unbounded {
+          fail(
+            "seed " +
+            seed.to_string() +
+            ": kernel " +
+            kernel_status_name(kernel.status) +
+            ", reference " +
+            oracle_status_name(reference.status),
+          )
+        }
+      }
+      status =>
+        fail(
+          "seed " +
+          seed.to_string() +
+          ": kernel returned " +
+          kernel_status_name(status) +
+          " (" +
+          kernel.message +
+          ")",
+        )
+    }
+  }
+  // The corpus has to actually exercise the bounded path.
+  assert_true(optimal > 0)
+  assert_eq(optimal + other, 200)
+}
+
+///|
 test "kernel respects the row data on shifted and rounded instances" {
   // A small family with non-trivial right hand sides, to cover the sign
   // normalisation path with values that are not integers.
