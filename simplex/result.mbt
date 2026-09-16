@@ -32,11 +32,12 @@ pub struct SimplexResult {
 /// tightened when hunting a numerical failure instead of guessing.
 ///
 /// `max_kernel_rows` is a hard ceiling on the size the kernel will attempt. It
-/// exists because the basis inverse is dense: `m` rows cost `m²` doubles, so the
-/// bound rows this milestone adds for finite upper bounds can turn a model with a
-/// few hundred rows into a kernel problem of tens of thousands of rows, and the
-/// allocation that follows is not a slow solve but a dead process. A refused run
-/// is a fact the caller can act on; a crash is not.
+/// exists because the basis inverse used to be dense — `m` rows cost `m²` doubles,
+/// and a bound expressed as a row could turn a model with a few hundred rows into a
+/// kernel problem of tens of thousands of rows, where the allocation that follows is
+/// not a slow solve but a dead process. A refused run is a fact the caller can act
+/// on; a crash is not. Bounds are bounds now, so the ceiling mostly guards against
+/// runs that cannot be honoured rather than against allocation.
 pub(all) struct SimplexOptions {
   max_iterations : Int
   refactorize_every : Int
@@ -104,11 +105,16 @@ pub(all) struct SimplexOptions {
   /// `TooLarge` and nothing is allocated.
   ///
   /// This was 4000 while the kernel carried a dense basis inverse, because `m²`
-  /// doubles is what an inverse costs and MIPLIB's fast0507 reaches 63 490 kernel
-  /// rows. With sparse factors the memory is `O(nnz + fill)` instead, so the
-  /// ceiling is a coarse guard against a hopeless run rather than a real limit:
-  /// what decides now is time. `max_factor_entries` is the sharper bound, and it
-  /// is on fill, which is the part that is not knowable in advance.
+  /// doubles is what an inverse costs a run. With sparse factors the memory is
+  /// `O(nnz + fill)` instead, so the ceiling is a coarse guard against a hopeless
+  /// run rather than a real limit, and `max_factor_entries` is the sharper bound on
+  /// the part that is not knowable in advance — fill.
+  ///
+  /// What still inflates the kernel row count is a free variable with a finite upper
+  /// bound: a difference of two columns has no per-column bound, so that one stays an
+  /// explicit row. Finite upper bounds on ordinary variables used to add a row each,
+  /// and on `fast0507` that turned 489 rows into 63 490; the pivot count follows the
+  /// row count, so it was also the reason the instance did not finish.
   max_kernel_rows : Int
 } derive(Debug)
 

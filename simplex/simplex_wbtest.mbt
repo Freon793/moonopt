@@ -211,6 +211,70 @@ test "kernel refuses a problem over the row limit instead of allocating" {
 }
 
 ///|
+/// A non-basic variable resting at its upper bound is part of the solution.
+///
+/// This is the invariant the bounded-variable kernel adds: before, a finite upper
+/// bound was a row and the variable's value lived in the row's slack. Now the
+/// variable sits at one end of its range and the flag that says which end has to
+/// reach `values()`, or a solution would silently lose a variable that does have a
+/// value.
+test "kernel: a non-basic variable at its upper bound is reported at that bound" {
+  // min x  s.t.  x <= 1,  0 <= x <= 1. The constraint becomes an ordinary row with a
+  // slack column, the bound stays a bound, so the kernel has one row and two
+  // columns: x (bounded above by one, cost one) and the row's slack.
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let x = model.add_var("x", lb=0.0, ub=1.0)
+  model.set_objective([(x, 1.0)])
+  model.add_constraint([(x, 1.0)], @model.Rel::LessEqual, 1.0)
+  let problem = match from_model_with(model, false) {
+    Ok(problem) => problem
+    Err(reason) => fail("kernel refused the model: " + reason)
+  }
+  assert_eq(problem.nrows, 1)
+  let state = State::new(problem, SimplexOptions::default())
+  // The slack of the row is basic at one and `x` is non-basic at its lower bound.
+  // Moving `x` to its upper bound is exactly the move a bound buys: as a row it
+  // would have been a pivot through the row's slack.
+  state.enter_sigma = 1.0
+  state.apply_flip(0, [1.0], 1.0)
+  let values = state.values()
+  assert_true(@core.approx_eq(values[0], 1.0, rel=0.0, abs=1.0e-9))
+  // The slack only moves by the round-off the degeneracy perturbation leaves behind
+  // (a `1e-12` nudge of the right hand side), so the tolerance is that scale and not
+  // a machine epsilon.
+  assert_true(@core.approx_eq(values[1], 0.0, rel=0.0, abs=1.0e-9))
+}
+
+///|
+/// The ratio test has to read both bounds: a basic variable can stop a step by
+/// falling to zero *or* by rising to its own upper bound, and the second limit is
+/// new. `max x + y` with `x + y <= 4`, `x <= 3`, `y <= 1` puts the optimum at
+/// (3, 1), where both variables sit on their upper bounds.
+test "model path: an optimum that sits on two upper bounds" {
+  let model = @model.Model::new(@model.Sense::Maximize)
+  let x = model.add_var("x", lb=0.0, ub=3.0)
+  let y = model.add_var("y", lb=0.0, ub=1.0)
+  model.set_objective([(x, 1.0), (y, 1.0)])
+  model.add_constraint([(x, 1.0), (y, 1.0)], @model.Rel::LessEqual, 4.0)
+  let result = match solve_model(model) {
+    Ok(ok) => ok
+    Err(reason) => fail("kernel refused the model: " + reason)
+  }
+  assert_eq(result.status, Optimal)
+  assert_true(@core.approx_eq(result.objective, 4.0, rel=1.0e-9, abs=1.0e-9))
+  assert_true(result.values[0] <= 3.0 + 1.0e-9)
+  assert_true(result.values[1] <= 1.0 + 1.0e-9)
+  assert_true(
+    @core.approx_eq(
+      result.values[0] + result.values[1],
+      4.0,
+      rel=1.0e-9,
+      abs=1.0e-9,
+    ),
+  )
+}
+
+///|
 /// The stall window is a guard on the *run*, never on its answer. It used to be
 /// `2m + 50` pivots, which on a kernel problem of tens of thousands of rows asks
 /// for more consecutive unimproved pivots than the default iteration cap allows,
@@ -253,15 +317,42 @@ test "the stall window changes the run, not the answer" {
 }
 
 ///|
-/// Every finite upper bound becomes an explicit kernel row, so a model whose
-/// constraint count is small can still exceed the limit. Twenty bounded variables
-/// and one constraint is twenty-one kernel rows, which is the same mechanism that
-/// took a 635 row instance to 63 644 rows.
-test "model path: bound rows count against the kernel row limit" {
+/// A finite upper bound is a bound, not a row. It used to be an explicit row, so
+/// this model — twenty bounded variables and one constraint — was twenty-one kernel
+/// rows, and it is the same mechanism that took MIPLIB's 507 constraint `fast0507`
+/// to 63 490 rows. The pivot count follows the kernel row count, so those rows were
+/// the instance: with bounded-variable pivoting the kernel problem is the one
+/// constraint, and a ceiling of exactly one row is enough to solve it.
+test "model path: a finite upper bound costs no kernel row" {
   let model = @model.Model::new(@model.Sense::Minimize)
   let vars : Array[Int] = []
   for j = 0; j < 20; j = j + 1 {
     vars.push(model.add_var("x" + j.to_string(), lb=0.0, ub=1.0))
+  }
+  model.set_objective([(vars[0], 1.0)])
+  model.add_constraint([(vars[0], 1.0)], @model.Rel::GreaterEqual, 0.5)
+  let result = match
+    solve_model_with(model, SimplexOptions::with_max_kernel_rows(1)) {
+    Ok(ok) => ok
+    Err(reason) => fail("kernel refused the model: " + reason)
+  }
+  assert_eq(result.status, Optimal)
+  assert_true(@core.approx_eq(result.objective, 0.5, rel=1.0e-9, abs=1.0e-9))
+}
+
+///|
+/// A model row count is still not a kernel row count, and the ceiling still counts
+/// the latter. What inflates it now is a free variable with a finite upper bound:
+/// `x` free with `x ≤ ub` has to be a difference of two columns, and a difference
+/// has no per-column bound, so that one stays an explicit row. Eight of those plus
+/// one constraint is nine kernel rows.
+test "model path: kernel rows can still exceed the model's rows" {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let vars : Array[Int] = []
+  for j = 0; j < 8; j = j + 1 {
+    vars.push(
+      model.add_var("f" + j.to_string(), lb=-@model.infinite_bound, ub=10.0),
+    )
   }
   model.set_objective([(vars[0], 1.0)])
   model.add_constraint([(vars[0], 1.0)], @model.Rel::GreaterEqual, 0.5)
@@ -271,7 +362,7 @@ test "model path: bound rows count against the kernel row limit" {
     Err(reason) => fail("kernel refused the model: " + reason)
   }
   assert_eq(result.status, TooLarge)
-  assert_true(result.message.contains("21 rows"))
+  assert_true(result.message.contains("9 rows"))
 }
 
 ///|

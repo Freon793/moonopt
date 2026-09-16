@@ -27,6 +27,7 @@ pub struct KernelProblem {
   structural : Int
   matrix : @core.SparseMatrix
   rhs : Array[Double]
+  upper : Array[Double]
   cost : Array[Double]
   is_artificial : Array[Bool]
   var_columns : Array[Array[(Int, Double)]]

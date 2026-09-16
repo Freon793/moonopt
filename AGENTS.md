@@ -31,13 +31,20 @@ You can browse and install extra skills here:
     differential tests. Deliberately simple; it is not the shipped solver.
   - `simplex/`: the sparse revised simplex kernel. Sparse CSC columns, a **sparse LU
     basis factorization** (`P·B = L·U`, row pivoting with a relative threshold) with
-    product-form eta updates and periodic refactorization, Phase I and II, Harris
-    ratio test with a feasibility guard and a Bland fallback, a pivot stability
-    check that rebuilds stale factors before pivoting, one recovery attempt with
-    Bland's rule after a numerical failure, a row ceiling and a fill budget that
-    refuse a problem worth refusing, and a residual self-check before it will
-    report `Optimal`. `lu.mbt` holds the factorization; its factors are verified
-    against a dense reference that lives in the test file, not in the kernel.
+    product-form eta updates and periodic refactorization, **bounded-variable
+    pivoting** (both bounds in the ratio test, non-basic variables resting at either
+    end, and a flip to the other bound when the variable's own range limits the
+    step), Phase I and II, Harris ratio test with a feasibility guard and a Bland
+    fallback, a pivot stability check that rebuilds stale factors before pivoting,
+    one recovery attempt with Bland's rule after a numerical failure, a row ceiling
+    and a fill budget that refuse a problem worth refusing, and a residual
+    self-check before it will report `Optimal`. `lu.mbt` holds the factorization;
+    its factors are verified against a dense reference that lives in the test file,
+    not in the kernel. A pivot step is passed in by the ratio test rather than
+    recomputed from the pivot row: with two bounds per variable, which bound a
+    leaving variable came to rest on decides the step, and guessing it from the rate
+    is how a step of the wrong sign (or the size of an unbounded column's sentinel)
+    gets into the state.
   - `presolve/`: model reduction and postsolve. Empty rows and columns, rows the
     bounds already settle, singleton rows turned into bounds, implied bounds, and
     fixed-variable elimination with an objective offset; `reconstruct` maps a
@@ -74,10 +81,14 @@ You can browse and install extra skills here:
     row ceiling (`TooLarge`) for "would this run have any chance of finishing", and
     a fill budget (`max_factor_entries`) for the one quantity a sparse
     factorization cannot predict in advance. A model's row count is not a proxy for
-    the kernel's row count: every finite upper bound becomes an explicit row, so a
-    507 constraint instance reaches 63 516 kernel rows. Before the basis was
-    factored sparsely, that number was an allocation of tens of gigabytes and an
-    access violation on the native backend rather than a slow solve.
+    the kernel's row count: a free variable with a finite upper bound has to be a
+    difference of two columns, and a difference has no per-column bound, so it stays
+    an explicit row. Before the basis was factored sparsely, a large kernel row
+    count was an allocation of tens of gigabytes and an access violation on the
+    native backend rather than a slow solve; finite upper bounds used to cost a row
+    each as well, and on one 507 constraint instance that inflated the kernel to
+    63 516 rows. Bounds are bounds now, and removing those rows cut the cost of a
+    pivot by an order of magnitude — the pivot count follows the row count.
 
 - Keep the public surface small. Anything that appears in a `.mbti` is a
   contract.

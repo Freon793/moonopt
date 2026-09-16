@@ -3,12 +3,20 @@
 ///
 /// Shape of one iteration: compute the duals `y = c_Bᵀ B⁻¹`, price the
 /// non-basic columns with `rⱼ = cⱼ − y·Aⱼ` (walking the sparse column), pick an
-/// improving column, form `d = B⁻¹ Aⱼ`, run the ratio test, pivot. The basis
-/// inverse is updated by the product-form row operation and rebuilt from the
-/// basis columns every `refactorize_every` pivots.
+/// improving column, form `d = B⁻¹ Aⱼ`, run the ratio test, then either pivot or —
+/// when the entering variable reaches its own other bound first — flip it without
+/// touching the basis. The basis inverse is updated by the product-form row
+/// operation and rebuilt from the basis columns every `refactorize_every` pivots.
 ///
-/// Termination: no column with a reduced cost below `−tol` means optimal; an
-/// entering column with no positive `d` entry means unbounded; hitting the
+/// Variables carry both bounds. A non-basic variable sits at one of them, which is
+/// why a finite upper bound is a bound here and not an extra row: on the instances
+/// this kernel is measured against, turning bounds into rows multiplied the row
+/// count by 130 and the pivot count follows the row count. The ratio test therefore
+/// has two kinds of limits — a basic variable falling to zero, and a basic variable
+/// rising to its own upper bound — plus the entering variable's own range.
+///
+/// Termination: no column that can improve in the direction its bound allows means
+/// optimal; an entering column with no limit at all means unbounded; hitting the
 /// iteration cap or a singular refactorization is reported as its own status.
 /// When progress stalls the pricing switches to Bland's rule, which guarantees
 /// termination on degenerate problems instead of cycling.
@@ -103,8 +111,22 @@ priv struct State {
   /// Scratch for the triangular solves. The solvers permute the vector they are
   /// handed, so they need somewhere to do it that is not the caller's buffer.
   solve_scratch : Array[Double]
+  /// Scratch for the right hand side with the variables pinned at their upper
+  /// bounds moved to the other side of `B x_B = b`.
+  rhs_buffer : Array[Double]
   /// Values of the basic variables.
   xb : Array[Double]
+  /// `true` for a non-basic column standing at its upper bound instead of at zero.
+  /// Every column's lower bound is zero (the model's lower bounds were absorbed
+  /// into `var_offset`), so one flag per column decides which end of its range it
+  /// occupies; a basic column is never at either end by this bookkeeping — its value
+  /// is in `xb`.
+  at_upper : Array[Bool]
+  /// Direction the entering column moves in this iteration: `+1` when it is at its
+  /// lower bound and increases, `-1` when it is at its upper bound and decreases.
+  /// The ratio test and the pivot both need it, and it is decided by the pricing
+  /// step that chose the column.
+  mut enter_sigma : Double
   /// The right hand side the run is solved against.
   ///
   /// This is `problem.rhs` plus the degeneracy perturbation, and it is what every
@@ -161,7 +183,10 @@ fn State::new(problem : KernelProblem, options : SimplexOptions) -> State {
     direction_buffer: Array::make(m, 0.0),
     basic_cost_buffer: Array::make(m, 0.0),
     solve_scratch: Array::make(m, 0.0),
+    rhs_buffer: Array::make(m, 0.0),
     xb: solve_rhs.copy(),
+    at_upper: Array::make(n, false),
+    enter_sigma: 1.0,
     solve_rhs,
     basis,
     is_basic,
@@ -274,36 +299,53 @@ fn State::reduced_cost(
 }
 
 ///|
-/// Picks the entering column.
+/// Picks the entering column and the direction it moves in.
 ///
-/// Dantzig (most negative reduced cost) by default, Bland (smallest index) when
-/// the run has stalled — Bland's rule is what makes termination certain on
+/// Dantzig (largest improvement rate `|rⱼ|`) by default, Bland (smallest index)
+/// when the run has stalled — Bland's rule is what makes termination certain on
 /// degenerate problems, at the price of more iterations.
+///
+/// Which direction a column can move in is decided by the bound it sits at: a
+/// non-basic variable at its lower bound may increase, and that is worth doing when
+/// `rⱼ < 0`; one at its upper bound may decrease, which is worth doing when
+/// `rⱼ > 0`. A column whose range is empty cannot move either way and is not a
+/// candidate at all — pricing it would produce a step of zero and no progress.
 ///
 /// Pricing walks the raw CSC arrays: an earlier version asked for a freshly
 /// allocated `(row, value)` list per column, which dominated the runtime on the
 /// larger instances (a few million short-lived arrays for one solve).
 fn State::choose_entering(self : State, duals : Array[Double]) -> Int {
-  let threshold = -self.options.reduced_cost_tolerance
+  let tolerance = self.options.reduced_cost_tolerance
+  let upper = self.problem.upper
   let pointers = self.problem.matrix.col_pointers()
   let rows = self.problem.matrix.row_indices()
   let values = self.problem.matrix.values_view()
   let mut best = -1
-  let mut best_reduced = 0.0
+  let mut best_magnitude = 0.0
   for j = 0; j < self.n; j = j + 1 {
     if self.is_basic[j] || self.forbid[j] {
       continue
     }
+    let cap = upper[j]
+    if kernel_has_upper(cap) && cap <= 0.0 {
+      continue
+    }
     let reduced = self.reduced_cost(j, duals, pointers, rows, values)
-    if reduced < threshold {
+    // The improvement rate of the direction this column is allowed to move in.
+    let magnitude = if self.at_upper[j] { reduced } else { -reduced }
+    if magnitude > tolerance {
       if self.bland {
+        self.enter_sigma = if self.at_upper[j] { -1.0 } else { 1.0 }
         return j
       }
-      if best < 0 || reduced < best_reduced {
+      if best < 0 || magnitude > best_magnitude {
         best = j
-        best_reduced = reduced
+        best_magnitude = magnitude
       }
     }
+  }
+  if best >= 0 {
+    self.enter_sigma = if self.at_upper[best] { -1.0 } else { 1.0 }
   }
   best
 }
@@ -412,11 +454,23 @@ fn State::drive_artificials_out(self : State) -> Unit {
       if self.is_basic[j] || self.problem.is_artificial[j] {
         continue
       }
+      // The pivot below is degenerate — the artificial sits at zero, so the
+      // entering column takes value zero. That is only consistent with a column
+      // resting at its lower bound; one standing at its upper bound would have to
+      // jump to zero to enter, which this step does not do.
+      if self.at_upper[j] {
+        continue
+      }
       let entry = self.tableau_entry(j, weights)
       if @core.fabs(entry) > tolerance {
-        // Rebuild the full direction only for the column that will be pivoted.
+        // Rebuild the full direction only for the column that will be pivoted. The
+        // step is zero by construction: the artificial sits at zero and the entering
+        // column takes its place there. Letting the pivot work the step out from the
+        // direction instead is how an artificial — a column with no upper bound —
+        // gets handed a step the size of that sentinel.
+        self.enter_sigma = 1.0
         let d = self.direction(j)
-        self.pivot(r, j, d)
+        self.pivot(r, j, d, 0.0)
         break
       }
     }
@@ -424,24 +478,58 @@ fn State::drive_artificials_out(self : State) -> Unit {
 }
 
 ///|
-/// Harris two-pass ratio test.
+/// Where one iteration's step is limited.
+priv struct StepLimit {
+  /// Row that limits the step, or `-1` when no basic variable does.
+  row : Int
+  /// Movement of the entering variable, in its own units and always `>= 0`. It is
+  /// the flip distance when `flip` is set; a pivot recomputes its own step from the
+  /// leaving row, which the band may have moved off the strict minimum.
+  step : Double
+  /// `true` when the entering variable reaches its other bound before any row
+  /// stops it. Then the basis does not change: the variable flips from one end of
+  /// its range to the other.
+  flip : Bool
+  /// `true` when neither a row nor the entering variable's own range limits the
+  /// step, i.e. the objective is unbounded along this direction.
+  unbounded : Bool
+}
+
+///|
+/// Bounded-variable ratio test (Harris, two passes).
 ///
-/// Pass one takes the smallest ratio over positive `d` entries; pass two picks,
-/// among the rows whose ratio is within a *relative* band of that minimum, the one
-/// with the largest pivot element. That second pass is what keeps the basis
-/// well-conditioned: it prefers a numerically strong pivot over the
-/// mathematically exact one.
+/// `d = B⁻¹ Aⱼ` and the entering variable moves by `step` in the direction its
+/// bound allows, so basic value `i` changes by `−step · σ · dᵢ` where `σ` is the
+/// direction of the step. Two kinds of row limit follow from that, and both are
+/// needed once variables have two bounds:
+///
+/// - the rate `σ·dᵢ` is positive: basic value `i` falls, and it may not go below
+///   zero — ratio `xbᵢ / (σ·dᵢ)`;
+/// - the rate is negative: basic value `i` rises, and it may not go above its own
+///   upper bound — ratio `(uᵢ − xbᵢ) / (−σ·dᵢ)`.
+///
+/// Pass one takes the strict minimum over both kinds and over the entering
+/// variable's own range. If the entering variable's range is smaller than the row
+/// minimum by more than the band, the step is a **flip**: no basis change, the
+/// variable goes from one bound to the other, and every basic value moves along.
+/// Otherwise pass two picks, among the rows whose ratio is within a relative band
+/// of the minimum, the one with the largest pivot element — that second pass is
+/// what keeps the basis well-conditioned.
 ///
 /// The band is deliberately relative (`1e-9·|ratio|`) rather than the feasibility
 /// tolerance. A band of `1e-7·(1+|ratio|)` lets the step overshoot by `1e-7·ratio`,
 /// and that overshoot is multiplied by the pivot element when the basic values are
 /// updated: with ratios and pivots around 1e5, a "tiny" relative allowance became
 /// an absolute violation of tens on MIPLIB's noswot.
-///
-/// Returns the leaving row, or `-1` when no row limits the step (unbounded).
-fn State::ratio_test(self : State, d : Array[Double]) -> Int {
+fn State::ratio_test(
+  self : State,
+  column : Int,
+  d : Array[Double],
+) -> StepLimit {
   let tolerance = self.options.pivot_tolerance
   let feasibility = self.options.feasibility_tolerance
+  let sigma = self.enter_sigma
+  let upper = self.problem.upper
   // A basic variable that drifted slightly negative counts as zero, and it may
   // not limit the step: letting it do so takes the step backwards and leaves a
   // basis that is infeasible by far more than the round-off it started from.
@@ -453,41 +541,102 @@ fn State::ratio_test(self : State, d : Array[Double]) -> Int {
   let mut ratio_min = 0.0
   let mut strict_row = -1
   for i = 0; i < self.m; i = i + 1 {
-    if d[i] > tolerance && self.xb[i] > -feasibility {
-      let ratio = self.xb[i] / d[i]
-      if strict_row < 0 || ratio < ratio_min {
-        ratio_min = ratio
-        strict_row = i
+    let rate = sigma * d[i]
+    if rate > tolerance {
+      if self.xb[i] > -feasibility {
+        let ratio = self.xb[i] / rate
+        if strict_row < 0 || ratio < ratio_min {
+          ratio_min = ratio
+          strict_row = i
+        }
+      }
+    } else if rate < -tolerance {
+      let cap = upper[self.basis[i]]
+      if kernel_has_upper(cap) && self.xb[i] < cap + feasibility {
+        let ratio = (cap - self.xb[i]) / -rate
+        if strict_row < 0 || ratio < ratio_min {
+          ratio_min = ratio
+          strict_row = i
+        }
       }
     }
   }
-  if strict_row < 0 {
-    return -1
+  // The entering variable's own range: from the end it sits at to the other one,
+  // which is `uⱼ` in both directions because its lower bound is zero.
+  let own_cap = upper[column]
+  let own_ratio = if kernel_has_upper(own_cap) { own_cap } else { 1.0e30 }
+  let row_ratio = if strict_row < 0 { 1.0e30 } else { ratio_min }
+  if own_ratio >= 1.0e30 && row_ratio >= 1.0e30 {
+    return { row: -1, step: 0.0, flip: false, unbounded: true, }
   }
-  let band = 1.0e-9 * @core.fabs(ratio_min) + tolerance
-  let relaxed = ratio_min + band
+  let band = 1.0e-9 * @core.fabs(row_ratio) + tolerance
+  if own_ratio < row_ratio - band {
+    return { row: -1, step: own_ratio, flip: true, unbounded: false, }
+  }
+  let leave = self.choose_leaving_row(sigma, d, row_ratio, band, strict_row)
+  if leave.0 < 0 {
+    return { row: -1, step: 0.0, flip: false, unbounded: true, }
+  }
+  { row: leave.0, step: leave.1, flip: false, unbounded: false, }
+}
+
+///|
+/// Harris's second pass: among the rows within the band of the strict minimum
+/// ratio, pick the one whose pivot element is largest; ties go to the smallest
+/// basis index when Bland's rule is active. Falls back to the strict row when the
+/// preferred one would overshoot feasibility.
+///
+/// Returns the leaving row and the step that follows from it, or `(-1, 0.0)` when
+/// no row can limit the step. The step belongs to the return value because the row
+/// it comes from decides it: a basic variable stops the step by falling to zero or
+/// by rising to its own upper bound, and the two read different numbers off the
+/// same row. A caller that recomputed it from the row alone would have to guess
+/// which of the two it was looking at.
+fn State::choose_leaving_row(
+  self : State,
+  sigma : Double,
+  d : Array[Double],
+  row_ratio : Double,
+  band : Double,
+  strict_row : Int,
+) -> (Int, Double) {
+  let tolerance = self.options.pivot_tolerance
+  let feasibility = self.options.feasibility_tolerance
+  let upper = self.problem.upper
+  let relaxed = row_ratio + band
   let mut leave = -1
   let mut best_pivot = 0.0
+  let mut leave_rate = 0.0
   for i = 0; i < self.m; i = i + 1 {
-    if d[i] > tolerance && self.xb[i] > -feasibility {
-      let ratio = self.xb[i] / d[i]
-      if ratio <= relaxed {
-        let better = if leave < 0 {
-          true
-        } else if self.bland {
-          self.basis[i] < self.basis[leave]
-        } else {
-          d[i] > best_pivot
-        }
-        if better {
-          leave = i
-          best_pivot = d[i]
-        }
+    let rate = sigma * d[i]
+    let mut ratio = 0.0
+    let mut limits = false
+    if rate > tolerance {
+      if self.xb[i] > -feasibility {
+        ratio = self.xb[i] / rate
+        limits = true
+      }
+    } else if rate < -tolerance {
+      let cap = upper[self.basis[i]]
+      if kernel_has_upper(cap) && self.xb[i] < cap + feasibility {
+        ratio = (cap - self.xb[i]) / -rate
+        limits = true
       }
     }
-  }
-  if leave < 0 {
-    return strict_row
+    if limits && ratio <= relaxed {
+      let better = if leave < 0 {
+        true
+      } else if self.bland {
+        self.basis[i] < self.basis[leave]
+      } else {
+        @core.fabs(rate) > best_pivot
+      }
+      if better {
+        leave = i
+        best_pivot = @core.fabs(rate)
+        leave_rate = rate
+      }
+    }
   }
   // Harris's preference is only safe if the step it implies keeps every basic
   // value feasible. Simulating the step costs one pass over the rows, and it is
@@ -495,51 +644,116 @@ fn State::ratio_test(self : State, d : Array[Double]) -> Int {
   // overshoot of the band is multiplied by the pivot element, so with ratios and
   // rows in the 1e5 range a relative allowance of 1e-9 still moved a basic value
   // by tens on MIPLIB's noswot.
-  if leave != strict_row {
-    let step = self.xb[leave] / d[leave]
-    let mut keeps_feasibility = true
-    for i = 0; i < self.m; i = i + 1 {
-      if i != leave {
-        let candidate = self.xb[i] - d[i] * step
-        if candidate < -feasibility * (1.0 + @core.fabs(self.xb[i])) {
-          keeps_feasibility = false
-        }
+  if strict_row < 0 {
+    return (-1, 0.0)
+  }
+  if leave < 0 || leave == strict_row {
+    return (strict_row, self.row_step(strict_row, sigma * d[strict_row]))
+  }
+  let chosen = self.row_step(leave, leave_rate)
+  for i = 0; i < self.m; i = i + 1 {
+    if i != leave {
+      let candidate = self.xb[i] - chosen * sigma * d[i]
+      if candidate < -feasibility * (1.0 + @core.fabs(self.xb[i])) {
+        return (strict_row, self.row_step(strict_row, sigma * d[strict_row]))
+      }
+      let cap = upper[self.basis[i]]
+      if kernel_has_upper(cap) &&
+        candidate > cap + feasibility * (1.0 + @core.fabs(cap)) {
+        return (strict_row, self.row_step(strict_row, sigma * d[strict_row]))
       }
     }
-    if !keeps_feasibility {
-      return strict_row
-    }
   }
-  leave
+  (leave, chosen)
+}
+
+///|
+/// How far the entering variable travels before row `row` stops it, given the rate
+/// at which that row's basic value moves.
+///
+/// A positive rate means the basic value falls and hits zero; a negative rate means
+/// it rises and hits its own upper bound. Reading `xb / rate` in both cases is how a
+/// step of the wrong sign gets into the state, and with a bound that is the
+/// infinite sentinel the "rise" reading is not a step at all.
+fn State::row_step(self : State, row : Int, rate : Double) -> Double {
+  if rate > 0.0 {
+    self.xb[row] / rate
+  } else {
+    (self.problem.upper[self.basis[row]] - self.xb[row]) / -rate
+  }
 }
 
 ///|
 /// Updates the basis inverse and the basic values for a pivot on `(row, column)`.
+///
+/// `step` is how far the entering variable travels, in the direction its bound
+/// allows, and it comes from the ratio test's chosen row. The leaving variable lands
+/// on one of its own bounds — zero when its rate was positive, its upper bound when
+/// the rate was negative — and the end it lands on is what decides which end it
+/// occupies as a non-basic variable. Which of the two it is, is read off the value it
+/// came to rest on rather than off the rate: a degenerate pivot rests where it
+/// already was, and that is a bound too.
 fn State::pivot(
   self : State,
   row : Int,
   column : Int,
   d : Array[Double],
+  step : Double,
 ) -> Unit {
-  let pivot = d[row]
-  // Basic values: the entering variable takes the ratio, the others move along d.
-  let entering_value = self.xb[row] / pivot
+  let sigma = self.enter_sigma
+  let rate = sigma * d[row]
+  let leaving = self.basis[row]
+  let cap = self.problem.upper[leaving]
+  // Basic values: the entering variable takes the step, the others move along d.
   for i = 0; i < self.m; i = i + 1 {
     if i != row {
-      self.xb[i] = self.xb[i] - d[i] * entering_value
+      self.xb[i] = self.xb[i] - step * sigma * d[i]
       // Absorb the drift the ratio test always leaves behind.
       if self.xb[i] < 0.0 && self.xb[i] > -self.options.feasibility_tolerance {
         self.xb[i] = 0.0
       }
     }
   }
-  self.xb[row] = entering_value
+  let resting = self.xb[row] - step * rate
+  self.xb[row] = if sigma > 0.0 {
+    step
+  } else {
+    self.problem.upper[column] - step
+  }
   // Product-form update: the pivot becomes one sparse eta instead of an O(m²)
   // row operation on an explicit inverse.
   self.etas.push(Eta::from_direction(row, d))
-  self.is_basic[self.basis[row]] = false
+  self.is_basic[leaving] = false
+  self.at_upper[leaving] = kernel_has_upper(cap) && resting > 0.5 * cap
   self.basis[row] = column
   self.is_basic[column] = true
+  self.at_upper[column] = false
+  self.iterations = self.iterations + 1
+}
+
+///|
+/// Moves the entering variable from one bound to the other without changing the
+/// basis.
+///
+/// This is what `x ≤ 1` on a 0/1 column costs when it is a bound rather than a
+/// row: the variable travels its whole range in one step, every basic value moves
+/// along, and the basis — and therefore the factorization — is untouched. It is
+/// also why bounds are worth having: as rows, the same move needed a pivot, and on
+/// an instance where every column is bounded those pivots are the run.
+fn State::apply_flip(
+  self : State,
+  column : Int,
+  d : Array[Double],
+  step : Double,
+) -> Unit {
+  let sigma = self.enter_sigma
+  for i = 0; i < self.m; i = i + 1 {
+    self.xb[i] = self.xb[i] - step * sigma * d[i]
+    if self.xb[i] < 0.0 && self.xb[i] > -self.options.feasibility_tolerance {
+      self.xb[i] = 0.0
+    }
+  }
+  self.at_upper[column] = !self.at_upper[column]
   self.iterations = self.iterations + 1
 }
 
@@ -575,9 +789,36 @@ fn State::refactorize(self : State) -> Bool {
       // refactorizing: the eta list stays short and the drift gets discarded.
       self.etas = []
       // Basic values of the fresh factors, from the right hand side the run is
-      // solved against.
+      // solved against — with the variables pinned at their upper bounds moved
+      // across the equation, because `B x_B = b` only holds for the non-basic
+      // variables that sit at zero:
+      //
+      //   B x_B = b − Σ_{j non-basic at its upper bound} uⱼ · Aⱼ
       for i = 0; i < m; i = i + 1 {
-        self.xb[i] = self.solve_rhs[i]
+        self.rhs_buffer[i] = self.solve_rhs[i]
+      }
+      let pointers = self.problem.matrix.col_pointers()
+      let rows = self.problem.matrix.row_indices()
+      let coefficients = self.problem.matrix.values_view()
+      let upper = self.problem.upper
+      for j = 0; j < self.n; j = j + 1 {
+        if self.is_basic[j] || !self.at_upper[j] {
+          continue
+        }
+        let value = upper[j]
+        if value == 0.0 {
+          continue
+        }
+        let mut k = pointers[j]
+        let end = pointers[j + 1]
+        while k < end {
+          self.rhs_buffer[rows[k]] = self.rhs_buffer[rows[k]] -
+            value * coefficients[k]
+          k = k + 1
+        }
+      }
+      for i = 0; i < m; i = i + 1 {
+        self.xb[i] = self.rhs_buffer[i]
       }
       match self.lu {
         Some(lu) => lu.solve_into(self.xb, self.solve_scratch)
@@ -640,10 +881,13 @@ fn State::iterate(self : State) -> Int {
       return 0
     }
     let d = self.direction(entering)
-    let mut leaving = self.ratio_test(d)
-    if leaving < 0 {
+    let limit = self.ratio_test(entering, d)
+    if limit.unbounded {
       return 1
     }
+    let mut leave = limit.row
+    let mut step = limit.step
+    let mut flip = limit.flip
     // Pivot stability. The ratio test picks the leaving row from the tableau
     // direction, so a pivot that is negligible compared with the rest of the
     // direction means the direction itself is unreliable — the product-form
@@ -652,17 +896,24 @@ fn State::iterate(self : State) -> Int {
     // refactorization then fails on it. Rebuilding the inverse and redoing the
     // choice costs one factorization; the pivot that comes out of the rebuilt
     // inverse is accepted even if it is still small, because at that point the
-    // direction is as accurate as this code can make it.
-    if self.weak_pivot(d, leaving) {
+    // direction is as accurate as this code can make it. A flip has no pivot to
+    // check and needs no rebuild.
+    if !flip && self.weak_pivot(d, leave) {
       if self.refactorize() {
-        let retried = self.ratio_test(self.direction(entering))
-        if retried < 0 {
+        let retried = self.ratio_test(entering, self.direction(entering))
+        if retried.unbounded {
           return 1
         }
-        leaving = retried
+        leave = retried.row
+        step = retried.step
+        flip = retried.flip
       }
     }
-    self.pivot(leaving, entering, d)
+    if flip {
+      self.apply_flip(entering, d, step)
+    } else {
+      self.pivot(leave, entering, d, step)
+    }
     // Stall detection: switch to Bland's rule when the objective stops moving.
     let objective = self.kernel_objective()
     let improved = if self.saw_objective {
@@ -691,8 +942,12 @@ fn State::iterate(self : State) -> Int {
 }
 
 ///|
-/// Kernel column values of the current basis (nonbasic columns are zero, and
-/// tiny negative values are clamped so the caller never sees `-1e-17`).
+/// Kernel column values of the current basis (tiny negative basic values are
+/// clamped so the caller never sees `-1e-17`).
+///
+/// A non-basic column is at one end of its range, and that end is part of the
+/// solution: the ones at their upper bound used to be invisible here because the
+/// bound was a row whose slack carried the difference.
 fn State::values(self : State) -> Array[Double] {
   let values : Array[Double] = Array::make(self.n, 0.0)
   for i = 0; i < self.m; i = i + 1 {
@@ -702,6 +957,12 @@ fn State::values(self : State) -> Array[Double] {
       0.0
     } else {
       value
+    }
+  }
+  let upper = self.problem.upper
+  for j = 0; j < self.n; j = j + 1 {
+    if self.at_upper[j] && !self.is_basic[j] {
+      values[j] = upper[j]
     }
   }
   values
@@ -876,7 +1137,15 @@ fn solve_once(
       values: [],
       objective: 0.0,
       iterations: state.iterations,
-      message: "iteration limit reached before optimality was proven",
+      // Same reasoning as Phase I: a run that stops short should say how far it
+      // got, measured. The kernel-sense objective is what the loop was reducing;
+      // mapping it back to the caller's model would be a claim about a solution
+      // that does not exist yet.
+      message: "iteration limit reached before optimality was proven (kernel objective " +
+      state.kernel_objective().to_string() +
+      " after " +
+      state.iterations.to_string() +
+      " pivots)",
     }
   }
   if code == 3 {

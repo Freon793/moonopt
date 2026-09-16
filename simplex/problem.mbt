@@ -1,24 +1,27 @@
 ///|
 /// Standard-form construction.
 ///
-/// The kernel only understands `min cᵀx, A x = b, x ≥ 0`. Everything else the
+/// The kernel only understands `min cᵀx, A x = b, l ≤ x ≤ u`. Everything else the
 /// model layer allows is mapped onto that here, and each transformation is
 /// written down because two of them move the objective constant:
 ///
 /// | model level construct | kernel level transformation |
 /// | --- | --- |
 /// | `x ≥ lb` with finite `lb` | substitute `x = lb + y` (`y ≥ 0`): the column's coefficients times `lb` are subtracted from the row right hand sides, and `c·lb` is added to the objective constant |
-/// | unbounded below | split `x = p − n` into two non-negative columns with opposite coefficients and costs |
-/// | `x ≤ ub` with finite `ub` | add an explicit row `Σ sign·y ≤ ub − offset` |
+/// | `x ≤ ub` with finite `ub` | **column upper bound** `y ≤ ub − lb` — the kernel's ratio test handles both bounds, so a bound does not cost a row |
+/// | `ub < lb` (contradictory bounds) | the old explicit row `Σ sign·y ≤ ub − lb`, whose negative right hand side makes the run report `Infeasible` instead of handing the kernel a negative range |
+/// | unbounded below | split `x = p − n` into two non-negative columns with opposite coefficients and costs; if `ub` is finite as well, the pair gets an explicit row `p − n ≤ ub`, because a difference of two columns has no per-column bound |
 /// | `a·x ≤ b` | slack column `+1`, non-negative |
 /// | `a·x ≥ b` | surplus column `−1` plus an artificial column `+1` |
 /// | `a·x = b` | artificial column `+1` |
 /// | row with negative right hand side | the whole row is negated and `≤` / `≥` swapped, so every right hand side is non-negative and a slack or artificial basis always exists |
 /// | `maximize` | costs and the objective constant are negated; the sign back to the model's sense is kept in `model_sign` |
 ///
-/// Free-variable splits and bound rows are the honest cost of not having
-/// bounded-variable pivoting yet: they are exact, but they grow the matrix. A
-/// bounded-variable ratio test (bound flipping) removes the bound rows later.
+/// Upper bounds used to be rows too, and on `fast0507` that turned 489 model rows
+/// into 63 490 kernel rows. The pivot count follows the kernel's row count, not the
+/// column count (measured: a covering LP of 20 / 40 / 120 / 240 rows takes
+/// 57 / 137 / 632 / 2 220 pivots at any column count), so those 63 009 extra rows
+/// were the whole cost of the instance.
 
 ///|
 /// The standard-form problem handed to the kernel.
@@ -30,6 +33,14 @@ pub struct KernelProblem {
   structural : Int
   matrix : @core.SparseMatrix
   rhs : Array[Double]
+  /// Upper bound of every kernel column, in kernel column order. A column's lower
+  /// bound is zero for all of them (the model's lower bounds were absorbed into
+  /// `var_offset`), so one array is enough. `@model.infinite_bound` means the column
+  /// has no upper bound.
+  ///
+  /// Bounds live here rather than in extra rows: the ratio test reads them both
+  /// ways, and a nonbasic variable may sit at either end of its range.
+  upper : Array[Double]
   cost : Array[Double]
   is_artificial : Array[Bool]
   /// Reconstruction of a model variable from kernel columns:
@@ -78,6 +89,14 @@ fn is_unbounded_above(value : Double) -> Bool {
 }
 
 ///|
+/// `true` when a kernel column has an upper bound this kernel has to respect.
+/// Shared with the iteration loop, which asks the same question of every column it
+/// prices and of every basic column it limits.
+fn kernel_has_upper(value : Double) -> Bool {
+  !is_unbounded_above(value)
+}
+
+///|
 /// Builds the kernel problem for `min cᵀx` subject to `rows` and `x ≥ 0`.
 ///
 /// This is the shape the reference solver in `oracle` accepts as well, which is
@@ -90,9 +109,11 @@ pub fn KernelProblem::from_standard(
   // Model variables are the first `num_vars` columns, one column each.
   let var_columns : Array[Array[(Int, Double)]] = []
   let var_offset : Array[Double] = []
+  let structural_upper : Array[Double] = []
   for j = 0; j < num_vars; j = j + 1 {
     var_columns.push([(j, 1.0)])
     var_offset.push(0.0)
+    structural_upper.push(@model.infinite_bound)
   }
   let row_entries : Array[Array[(Int, Double)]] = []
   let row_rels : Array[@model.Rel] = []
@@ -110,7 +131,8 @@ pub fn KernelProblem::from_standard(
     row_rhs.push(rhs)
   }
   assemble(
-    num_vars, cost, 0.0, 1.0, var_columns, var_offset, row_entries, row_rels, row_rhs,
+    num_vars, cost, 0.0, 1.0, var_columns, var_offset, structural_upper, row_entries,
+    row_rels, row_rhs,
   )
 }
 
@@ -136,8 +158,12 @@ pub fn from_model_with(
   // Pass 1: decide a kernel representation for every model variable.
   let var_columns : Array[Array[(Int, Double)]] = []
   let var_offset : Array[Double] = []
+  // Upper bound of each structural column, in column order. Only the explicit row
+  // case (below) leaves it at infinity.
+  let structural_upper : Array[Double] = []
   let mut next_column = 0
-  // Bound rows are collected as (linear form over kernel columns, ub).
+  // Row form of an upper bound, used only where a column bound cannot express it:
+  // a split pair `p − n ≤ ub`, or bounds that contradict each other.
   let bound_rows : Array[(Array[(Int, Double)], Double)] = []
   for j = 0; j < nvars; j = j + 1 {
     let variable = model.get_var(j)
@@ -153,7 +179,11 @@ pub fn from_model_with(
       next_column = next_column + 2
       var_columns.push([(positive, 1.0), (negative, -1.0)])
       var_offset.push(0.0)
+      structural_upper.push(@model.infinite_bound)
+      structural_upper.push(@model.infinite_bound)
       if !is_unbounded_above(variable.ub) {
+        // A difference of two columns has no per-column bound, so this one stays a
+        // row. Splits are the rare case; bounds are the common one.
         bound_rows.push(([(positive, 1.0), (negative, -1.0)], variable.ub))
       }
     } else {
@@ -161,7 +191,16 @@ pub fn from_model_with(
       next_column = next_column + 1
       var_columns.push([(column, 1.0)])
       var_offset.push(variable.lb)
-      if !is_unbounded_above(variable.ub) {
+      if is_unbounded_above(variable.ub) {
+        structural_upper.push(@model.infinite_bound)
+      } else if variable.ub >= variable.lb {
+        // The ordinary case: `x ≤ ub` becomes the column bound `y ≤ ub − lb`.
+        structural_upper.push(variable.ub - variable.lb)
+      } else {
+        // Contradictory bounds are not a negative range to hand the kernel — they
+        // are an infeasibility to prove. Keeping the row form means the run still
+        // reports it, with the same right hand side it always did.
+        structural_upper.push(@model.infinite_bound)
         bound_rows.push(([(column, 1.0)], variable.ub - variable.lb))
       }
     }
@@ -234,6 +273,7 @@ pub fn from_model_with(
       model_sign,
       var_columns,
       var_offset,
+      structural_upper,
       row_entries,
       row_rels,
       row_rhs,
@@ -244,6 +284,10 @@ pub fn from_model_with(
 ///|
 /// Shared assembly: normalises row signs, adds slack / surplus / artificial
 /// columns, and packs the matrix in CSC form.
+///
+/// `structural_upper` gives the upper bound of each structural column; the columns
+/// this function adds (slacks, surpluses, artificials) are all unbounded above,
+/// which is what a slack variable is.
 fn assemble(
   structural : Int,
   structural_cost : Array[Double],
@@ -251,6 +295,7 @@ fn assemble(
   model_sign : Double,
   var_columns : Array[Array[(Int, Double)]],
   var_offset : Array[Double],
+  structural_upper : Array[Double],
   row_entries : Array[Array[(Int, Double)]],
   row_rels : Array[@model.Rel],
   row_rhs : Array[Double],
@@ -345,12 +390,22 @@ fn assemble(
     cost.push(extra_cost[k])
     is_artificial.push(extra_artificial[k])
   }
+  // Bounds in kernel column order: the structural ones the caller supplied, then
+  // one unbounded entry per column added above.
+  let upper : Array[Double] = []
+  for j = 0; j < structural; j = j + 1 {
+    upper.push(structural_upper[j])
+  }
+  for k = 0; k < extra_columns.length(); k = k + 1 {
+    upper.push(@model.infinite_bound)
+  }
   {
     nrows: m,
     ncols,
     structural,
     matrix: @core.SparseMatrix::from_columns(m, columns),
     rhs,
+    upper,
     cost,
     is_artificial,
     var_columns,
