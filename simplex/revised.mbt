@@ -676,7 +676,13 @@ fn State::iterate(self : State) -> Int {
       self.stalled = 0
     } else {
       self.stalled = self.stalled + 1
-      if self.stalled > 2 * self.m + 50 {
+      // A fixed window, not `2m + 50`: what a stall means does not depend on how
+      // many rows the kernel problem happens to have, and a window that grows with
+      // `m` is unreachable on exactly the large problems that need it — it asked
+      // for 127 030 consecutive unimproved pivots on fast0507, whose default
+      // iteration cap is 20 000, so the fallback could not fire at all.
+      if self.options.stall_window > 0 &&
+        self.stalled > self.options.stall_window {
         self.bland = true
       }
     }
@@ -734,6 +740,7 @@ fn solve_problem(
     pivot_tolerance: options.pivot_tolerance,
     pivot_relative_tolerance: options.pivot_relative_tolerance,
     start_with_bland: true,
+    stall_window: options.stall_window,
     degeneracy_perturbation: options.degeneracy_perturbation,
     max_factor_entries: options.max_factor_entries,
     reduced_cost_tolerance: options.reduced_cost_tolerance,
@@ -796,7 +803,20 @@ fn solve_once(
         values: [],
         objective: 0.0,
         iterations: state.iterations,
-        message: "iteration limit reached during Phase I",
+        // The measured progress belongs in the message: Phase I's objective is the
+        // artificial sum, and a caller that only sees "iteration limit" cannot tell
+        // a run that was closing in on feasibility from one that was stuck. The
+        // reported `objective` stays zero on purpose — a partially minimised
+        // artificial sum is not an objective value of the caller's model, and
+        // printing it as one is how a run that was converging by 0.8 units per
+        // pivot got read as "stuck at 13" for a whole round of work.
+        message: "iteration limit reached during Phase I (artificial sum " +
+        state.artificial_sum().to_string() +
+        " after " +
+        state.iterations.to_string() +
+        " pivots, bland=" +
+        state.bland.to_string() +
+        ")",
       }
     }
     if code == 3 {

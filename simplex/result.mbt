@@ -55,6 +55,26 @@ pub(all) struct SimplexOptions {
   /// the kernel uses it for the recovery attempt after a numerically singular
   /// basis, where a different path is the whole point.
   start_with_bland : Bool
+  /// Number of consecutive pivots that may leave the objective (numerically)
+  /// unchanged before pricing switches to Bland's rule. Zero disables the switch.
+  ///
+  /// This is a **fixed** count on purpose, and it is counted in pivots, not in
+  /// rows. The rule used to be `2m + 50`, which reads like a generous anti-cycling
+  /// guard and is one on small models — but `m` is the kernel's row count, and the
+  /// kernel adds one row per finite upper bound, so the real instances here reach
+  /// tens of thousands of rows. Against the default cap of 20 000 iterations the
+  /// old rule could only ever fire on `m < 9 975`: on a 63 490-row problem it asked
+  /// for 127 030 consecutive unimproved pivots, which is a guard that cannot fire
+  /// rather than a guard that does not need to. What a stall means does not change
+  /// with the row count, so neither should the window.
+  ///
+  /// The default is deliberately far above the stalls real runs show: measured over
+  /// the whole 1000-row manifest, the longest run of unimproved pivots anywhere is
+  /// 91 (danoint's Phase I), and fast0507's Phase I — the run this rule was
+  /// suspected of breaking — never goes past 6 in 6 000 pivots. Bland's rule is a
+  /// termination guarantee, not a fast path: firing it early costs iterations,
+  /// never firing it costs an answer.
+  stall_window : Int
   /// Relative size of the perturbation added to the right hand side before the run
   /// starts. This is the classical answer to degeneracy, and degeneracy — not
   /// scaling — is what breaks this kernel on the hard instance: noswot's
@@ -109,6 +129,7 @@ pub fn SimplexOptions::default() -> SimplexOptions {
     pivot_tolerance: 1.0e-9,
     pivot_relative_tolerance: 1.0e-8,
     start_with_bland: false,
+    stall_window: 500,
     degeneracy_perturbation: 1.0e-12,
     max_factor_entries: 20000000,
     reduced_cost_tolerance: 1.0e-9,
@@ -128,6 +149,7 @@ pub fn SimplexOptions::relaxed() -> SimplexOptions {
     pivot_tolerance: base.pivot_tolerance,
     pivot_relative_tolerance: base.pivot_relative_tolerance,
     start_with_bland: base.start_with_bland,
+    stall_window: base.stall_window,
     degeneracy_perturbation: base.degeneracy_perturbation,
     max_factor_entries: base.max_factor_entries,
     reduced_cost_tolerance: base.reduced_cost_tolerance,
@@ -149,6 +171,7 @@ pub fn SimplexOptions::with_max_iterations(
     pivot_tolerance: base.pivot_tolerance,
     pivot_relative_tolerance: base.pivot_relative_tolerance,
     start_with_bland: base.start_with_bland,
+    stall_window: base.stall_window,
     degeneracy_perturbation: base.degeneracy_perturbation,
     max_factor_entries: base.max_factor_entries,
     reduced_cost_tolerance: base.reduced_cost_tolerance,
@@ -174,11 +197,35 @@ pub fn SimplexOptions::limit_iterations(
     pivot_tolerance: self.pivot_tolerance,
     pivot_relative_tolerance: self.pivot_relative_tolerance,
     start_with_bland: self.start_with_bland,
+    stall_window: self.stall_window,
     degeneracy_perturbation: self.degeneracy_perturbation,
     max_factor_entries: self.max_factor_entries,
     reduced_cost_tolerance: self.reduced_cost_tolerance,
     relax_integrality: self.relax_integrality,
     max_kernel_rows: self.max_kernel_rows,
+  }
+}
+
+///|
+/// Options with an explicit stall window. Used by the tests to drive the Bland
+/// fallback on a problem small enough to solve instantly: the window is a control
+/// on the run, and the run's answer has to be the same whether the fallback fires
+/// at the first stall or never.
+pub fn SimplexOptions::with_stall_window(stall_window : Int) -> SimplexOptions {
+  let base = SimplexOptions::default()
+  {
+    max_iterations: base.max_iterations,
+    refactorize_every: base.refactorize_every,
+    feasibility_tolerance: base.feasibility_tolerance,
+    pivot_tolerance: base.pivot_tolerance,
+    pivot_relative_tolerance: base.pivot_relative_tolerance,
+    start_with_bland: base.start_with_bland,
+    stall_window,
+    degeneracy_perturbation: base.degeneracy_perturbation,
+    max_factor_entries: base.max_factor_entries,
+    reduced_cost_tolerance: base.reduced_cost_tolerance,
+    relax_integrality: base.relax_integrality,
+    max_kernel_rows: base.max_kernel_rows,
   }
 }
 
@@ -196,6 +243,7 @@ pub fn SimplexOptions::with_max_kernel_rows(
     pivot_tolerance: base.pivot_tolerance,
     pivot_relative_tolerance: base.pivot_relative_tolerance,
     start_with_bland: base.start_with_bland,
+    stall_window: base.stall_window,
     degeneracy_perturbation: base.degeneracy_perturbation,
     max_factor_entries: base.max_factor_entries,
     reduced_cost_tolerance: base.reduced_cost_tolerance,

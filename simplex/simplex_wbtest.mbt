@@ -211,6 +211,48 @@ test "kernel refuses a problem over the row limit instead of allocating" {
 }
 
 ///|
+/// The stall window is a guard on the *run*, never on its answer. It used to be
+/// `2m + 50` pivots, which on a kernel problem of tens of thousands of rows asks
+/// for more consecutive unimproved pivots than the default iteration cap allows,
+/// so the Bland fallback could not fire at all — in exactly the case it exists
+/// for. It is a fixed count now, and this test pins the property that matters:
+/// firing at every stall, at the default, and never has to give the same answer.
+test "the stall window changes the run, not the answer" {
+  // A degenerate problem: three rows share the same optimum face, so a run over it
+  // has plenty of pivots that do not move the objective.
+  //   min -x - y - z  s.t.  x + y <= 1, x + z <= 1, y + z <= 1, x + y + z <= 2
+  let cost : Array[Double] = [-1.0, -1.0, -1.0]
+  let rows : Array[(Array[Double], @model.Rel, Double)] = [
+    ([1.0, 1.0, 0.0], @model.Rel::LessEqual, 1.0),
+    ([1.0, 0.0, 1.0], @model.Rel::LessEqual, 1.0),
+    ([0.0, 1.0, 1.0], @model.Rel::LessEqual, 1.0),
+    ([1.0, 1.0, 1.0], @model.Rel::LessEqual, 2.0),
+  ]
+  let baseline = solve_standard_with(3, cost, rows, SimplexOptions::default())
+  assert_eq(baseline.status, Optimal)
+  // Summing the three pair constraints gives `2(x+y+z) <= 3`, so the best is 1.5
+  // at (0.5, 0.5, 0.5), and the all-pairs total row is slack there.
+  assert_true(@core.approx_eq(baseline.objective, -1.5, rel=1.0e-9, abs=1.0e-9))
+  for window in [0, 1, 10, 500] {
+    let result = solve_standard_with(
+      3,
+      cost,
+      rows,
+      SimplexOptions::with_stall_window(window),
+    )
+    assert_eq(result.status, Optimal)
+    assert_true(
+      @core.approx_eq(
+        result.objective,
+        baseline.objective,
+        rel=1.0e-9,
+        abs=1.0e-9,
+      ),
+    )
+  }
+}
+
+///|
 /// Every finite upper bound becomes an explicit kernel row, so a model whose
 /// constraint count is small can still exceed the limit. Twenty bounded variables
 /// and one constraint is twenty-one kernel rows, which is the same mechanism that

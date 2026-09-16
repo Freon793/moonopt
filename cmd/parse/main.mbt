@@ -164,6 +164,13 @@ fn presolve_line(before_rows : Int, reduced : @presolve.ReducedModel) -> String 
 
 ///|
 /// Prints the kernel's outcome for a solved problem.
+///
+/// The objective is printed only when the run actually produced one. Every other
+/// status returns an empty solution and a zero objective, and a zero is not a
+/// measurement — for a presolved run the honest-looking number was the reduction's
+/// own objective offset, so a Phase I that was converging at 0.8 units per pivot
+/// was read as "stuck at 13" for a whole round of work. An unmeasured field is
+/// printed as `-`.
 fn report_solve_result(result : @simplex.SimplexResult) -> Unit {
   let status = match result.status {
     @simplex.SimplexStatus::Optimal => "optimal"
@@ -177,7 +184,11 @@ fn report_solve_result(result : @simplex.SimplexResult) -> Unit {
     "       solve=" +
     status +
     " obj=" +
-    result.objective.to_string() +
+    (if result.status == @simplex.SimplexStatus::Optimal {
+      result.objective.to_string()
+    } else {
+      "-"
+    }) +
     " iters=" +
     result.iterations.to_string() +
     (if result.message == "" { "" } else { " (" + result.message + ")" }),
@@ -192,6 +203,11 @@ fn report_solve_result(result : @simplex.SimplexResult) -> Unit {
 /// from unreduced runs made a 162 000 difference on flugpl look like a wrong
 /// answer when it was only a wrong label; the reduction was right and the
 /// reconstruction check now proves it every time.
+///
+/// The mapping is only applied to a run that solved the reduced model. A failed run
+/// has no objective to map, and `ReducedModel::objective(0.0)` would hand back the
+/// reduction's own offset dressed up as a result — which is exactly how fast0507's
+/// Phase I came to be reported as "13" at 500, 1200 and 4000 iterations.
 fn report_solve_result_scaled(
   result : @simplex.SimplexResult,
   presolved : @presolve.ReducedModel,
@@ -208,7 +224,11 @@ fn report_solve_result_scaled(
     "       solve=" +
     status +
     " obj=" +
-    presolved.objective(result.objective).to_string() +
+    (if result.status == @simplex.SimplexStatus::Optimal {
+      presolved.objective(result.objective).to_string()
+    } else {
+      "-"
+    }) +
     " iters=" +
     result.iterations.to_string() +
     (if result.message == "" { "" } else { " (" + result.message + ")" }),
