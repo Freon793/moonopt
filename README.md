@@ -54,8 +54,8 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
   证书可序列化为 JSON 再从文件独立复核；
 - `cmd/parse`：模型文件巡检 CLI（格式判定、规模统计与校验结论、`--manifest` 批量模式、
   `--solve` / `--relax` / `--presolve` / `--max-rows` / `--max-iterations` 求解开关、
-  `--verify` / `--certificate` 证书校验、失败返回非零退出码）；
-- CLI 与两个可运行示例，`moon test` 118 个测试全绿，CI 覆盖 Linux/macOS/Windows 与 wasm-gc/js 目标。
+  `--verify` / `--certificate` 证书校验、`--reoptimize` 热启动实测、失败返回非零退出码）；
+- CLI 与两个可运行示例，`moon test` 122 个测试全绿，CI 覆盖 Linux/macOS/Windows 与 wasm-gc/js 目标。
 
 **当前内核的能力边界（明确写出来，不夸大）**：
 
@@ -63,7 +63,8 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 | --- | --- |
 | 连续变量、任意有限上下界、自由变量 | 整数 / 0-1 变量（M5；当前可用 `SimplexOptions::relaxed()` 求 LP 松弛） |
 | `≤`、`≥`、`=` 任意混合，含负右端项 | — |
-| min / max | 对偶单纯形热启动（M3 剩余部分） |
+| min / max | — |
+| **对偶单纯形热启动**：`SimplexBasis` + `solve_model_with_basis`，改界后重解不再重建 Phase I（实测真实实例枢轴数 1–49 vs 冷启 21–1008） | 化简模型上的热启动（基与化简后模型同构时才能用） |
 | **证书与独立校验器**（`verify`）：最优性（原始/对偶可行性、互补松弛、对偶间隙）、Farkas 不可行射线、无界射线 + 可行起点、证书 JSON、`cmd/parse --verify` / `--certificate` | 化简模型的乘子回映（证书现在只对**内核收到的模型**成立，即 `--verify` 走不化简的路径） |
 | MPS / LP 文件读入与写出（M2） | MPS 的 `SC`/`SI` 半连续界、完整 `SOS` / `MARKER` 语义 |
 | presolve：空行/列消元、冗余行、singleton 转界、隐式界收紧、固定变量消元 + 解还原（`solve` 默认开启，`--presolve`） | 系数强化、对偶固定、变量/行的重复与支配检测；整数模型不经化简（保持内核的拒绝语义） |

@@ -14,6 +14,17 @@
 /// normalization that caused them.
 
 ///|
+/// The basis the run is standing on, in the form a later run can start from.
+fn State::basis_snapshot(self : State) -> SimplexBasis {
+  {
+    nrows: self.m,
+    ncols: self.n,
+    basis: self.basis.copy(),
+    at_upper: self.at_upper.copy(),
+  }
+}
+
+///|
 /// Number of model rows this kernel problem corresponds to, which is the length of a
 /// certificate's `duals`.
 fn State::model_row_count(self : State) -> Int {
@@ -36,7 +47,21 @@ fn State::model_row_count(self : State) -> Int {
 /// multipliers, and the verifier accounts for a variable's bounds through its reduced
 /// costs rather than through a row, so leaving them out is what makes the two agree.
 fn State::model_duals(self : State) -> Array[Double] {
-  let kernel = self.duals()
+  self.model_row_multipliers(self.duals())
+}
+
+///|
+/// Maps a vector of kernel-row multipliers onto the model's rows, in the convention
+/// `verify` documents.
+///
+/// Used for both halves of a certificate: the dual solution of an optimal run, and the
+/// Farkas ray of an infeasible one. They are different vectors of the same space — one
+/// proves optimality, the other proves that no point is feasible — and they need the
+/// same sign bookkeeping, which is why this is one function.
+fn State::model_row_multipliers(
+  self : State,
+  kernel : Array[Double],
+) -> Array[Double] {
   let out : Array[Double] = Array::make(self.model_row_count(), 0.0)
   for r = 0; r < self.m; r = r + 1 {
     let source = self.problem.row_source[r]
@@ -46,6 +71,26 @@ fn State::model_duals(self : State) -> Array[Double] {
     out[source] = self.problem.row_dual_factor[r] * kernel[r]
   }
   out
+}
+
+///|
+/// The Farkas ray of a run that concluded the model is infeasible.
+///
+/// The dual simplex stops when a basic value outside its bounds cannot be brought back
+/// by any column. The row of the basis inverse that failed to find one is the ray: with
+/// the sign that makes its inner product with the right hand side positive, it satisfies
+/// exactly the conditions the verifier checks — its coefficient on every column either
+/// points at a bound that exists, or at zero.
+fn State::farkas_ray(self : State) -> Array[Double] {
+  if self.dual_ray_row < 0 {
+    return []
+  }
+  let weights = self.inverse_row(self.dual_ray_row)
+  let scaled : Array[Double] = Array::make(self.m, 0.0)
+  for i = 0; i < self.m; i = i + 1 {
+    scaled[i] = self.dual_ray_sign * weights[i]
+  }
+  self.model_row_multipliers(scaled)
 }
 
 ///|

@@ -14,9 +14,13 @@ pub fn solve_model(@model.Model) -> Result[SimplexResult, String]
 
 pub fn solve_model_with(@model.Model, SimplexOptions) -> Result[SimplexResult, String]
 
+pub fn solve_model_with_basis(@model.Model, SimplexOptions, SimplexBasis) -> Result[SimplexResult, String]
+
 pub fn solve_standard(Int, Array[Double], Array[(Array[Double], @model.Rel, Double)]) -> SimplexResult
 
 pub fn solve_standard_with(Int, Array[Double], Array[(Array[Double], @model.Rel, Double)], SimplexOptions) -> SimplexResult
+
+pub fn solve_standard_with_basis(Int, Array[Double], Array[(Array[Double], @model.Rel, Double)], SimplexOptions, SimplexBasis) -> SimplexResult
 
 // Errors
 
@@ -42,6 +46,13 @@ pub fn KernelProblem::from_model(@model.Model) -> Result[Self, String]
 pub fn KernelProblem::from_standard(Int, Array[Double], Array[(Array[Double], @model.Rel, Double)]) -> Self
 pub fn KernelProblem::slack_row_map(Self) -> Array[Int]
 pub fn KernelProblem::solution(Self, Array[Double]) -> Array[Double]
+
+pub struct SimplexBasis {
+  nrows : Int
+  ncols : Int
+  basis : Array[Int]
+  at_upper : Array[Bool]
+} derive(@debug.Debug)
 
 pub(all) struct SimplexOptions {
   max_iterations : Int
@@ -74,6 +85,7 @@ pub struct SimplexResult {
   message : String
   duals : Array[Double]
   ray : Array[Double]
+  basis : SimplexBasis?
 } derive(@debug.Debug)
 
 pub(all) enum SimplexStatus {

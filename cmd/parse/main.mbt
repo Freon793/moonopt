@@ -147,6 +147,9 @@ pub(all) struct SolveFlags {
   /// Path of a certificate to read and check against the model, without solving.
   /// Empty means there is none.
   certificate_path : String
+  /// Solve, tighten one bound, and reoptimize from the basis the first solve left
+  /// behind — the measurement behind "a warm start is cheaper".
+  reoptimize : Bool
 }
 
 ///|
@@ -371,6 +374,161 @@ fn report_solve_result_scaled(
 }
 
 ///|
+/// Status as text, so the report lines read the same for every status.
+fn status_name(status : @simplex.SimplexStatus) -> String {
+  match status {
+    @simplex.SimplexStatus::Optimal => "optimal"
+    @simplex.SimplexStatus::Infeasible => "infeasible"
+    @simplex.SimplexStatus::Unbounded => "unbounded"
+    @simplex.SimplexStatus::IterationLimit => "iteration-limit"
+    @simplex.SimplexStatus::NumericalFailure => "numerical-failure"
+    @simplex.SimplexStatus::TooLarge => "too-large"
+  }
+}
+
+///|
+/// Solves the model, tightens one bound, and solves again twice: once from the basis
+/// the first solve left behind, once from scratch. Prints both runs' pivot counts.
+///
+/// This exists because "a warm start is cheaper" is a claim, and the way to keep such a
+/// claim honest is to measure it on real instances instead of assuming it. The shape of
+/// the run is also the shape reoptimization takes inside a branch and bound tree: a
+/// bound changes and the same model is solved again.
+fn reoptimize_report(model : @model.Model, flags : SolveFlags) -> Bool {
+  let options = (if flags.relax {
+    @simplex.SimplexOptions::relaxed()
+  } else {
+    @simplex.SimplexOptions::default()
+  }).limit_iterations(
+    if flags.max_iterations > 0 {
+      flags.max_iterations
+    } else {
+      20000
+    },
+  )
+  let first = match @simplex.solve_model_with(model, options) {
+    Err(reason) => {
+      println("       solve=refused(" + reason + ")")
+      return false
+    }
+    Ok(result) => result
+  }
+  println(
+    "       cold1=" +
+    status_name(first.status) +
+    " iters=" +
+    first.iterations.to_string(),
+  )
+  let basis = match first.basis {
+    Some(value) => value
+    None => {
+      println(
+        "       reoptimize=no(the first run reached no verdict, so it has no basis)",
+      )
+      return false
+    }
+  }
+  // Tighten a bound the optimum actually uses, which is the change a branch makes: a
+  // bound that the solution already respects would leave the basis optimal and the
+  // measurement would say nothing about reoptimizing.
+  let mut changed = -1
+  let mut binding = false
+  for j = 0; j < model.num_vars() && j < first.values.length(); j = j + 1 {
+    let variable = model.get_var(j)
+    if variable.ub < 1.0e29 {
+      let lowered = variable.lb + (variable.ub - variable.lb) * 0.5
+      if lowered > variable.lb && first.values[j] > lowered + 1.0e-7 {
+        model.set_var_bounds(j, variable.lb, lowered)
+        changed = j
+        binding = true
+        break
+      }
+    }
+  }
+  if changed < 0 {
+    // Nothing the optimum uses has a bound to halve, so take any finite bound and say
+    // so: the run is still a reoptimization, it just is not a binding change.
+    for j = 0; j < model.num_vars(); j = j + 1 {
+      let variable = model.get_var(j)
+      if variable.ub < 1.0e29 {
+        let lowered = variable.lb + (variable.ub - variable.lb) * 0.5
+        if lowered > variable.lb {
+          model.set_var_bounds(j, variable.lb, lowered)
+          changed = j
+          break
+        }
+      }
+    }
+  }
+  if changed < 0 && model.num_vars() > 0 {
+    let variable = model.get_var(0)
+    if variable.lb <= 1.0 {
+      model.set_var_bounds(0, variable.lb, 1.0)
+      changed = 0
+    }
+  }
+  if changed < 0 {
+    println("       reoptimize=no(there is no bound to tighten)")
+    return false
+  }
+  println(
+    "       tightened: variable " +
+    changed.to_string() +
+    (if binding { " (binding: the optimum used it)" } else { " (not binding)" }),
+  )
+  let warm = match @simplex.solve_model_with_basis(model, options, basis) {
+    Ok(result) => result
+    Err(reason) => {
+      println("       warm=refused(" + reason + ")")
+      return false
+    }
+  }
+  let cold = match @simplex.solve_model_with(model, options) {
+    Ok(result) => result
+    Err(reason) => {
+      println("       cold2=refused(" + reason + ")")
+      return false
+    }
+  }
+  let agrees = warm.status == cold.status &&
+    @core.approx_eq(warm.objective, cold.objective, rel=1.0e-7, abs=1.0e-7)
+  let warm_verdict = @verify.verify(model, certificate_of(warm))
+  let cold_verdict = @verify.verify(model, certificate_of(cold))
+  println(
+    "       warm=" +
+    status_name(warm.status) +
+    " iters=" +
+    warm.iterations.to_string() +
+    " verify=" +
+    (if warm_verdict.accepted {
+      "accepted"
+    } else {
+      "REJECTED(" + warm_verdict.reason + ")"
+    }) +
+    " | cold2=" +
+    status_name(cold.status) +
+    " iters=" +
+    cold.iterations.to_string() +
+    " verify=" +
+    (if cold_verdict.accepted {
+      "accepted"
+    } else {
+      "REJECTED(" + cold_verdict.reason + ")"
+    }) +
+    (if agrees {
+      " (agree)"
+    } else {
+      " (DISAGREE: obj " +
+      warm.objective.to_string() +
+      " vs " +
+      cold.objective.to_string() +
+      ")"
+    }),
+  )
+  agrees
+}
+
+///|
 /// Solves a parsed model and prints the outcome.
 ///
 /// The row limit is explicit because no one wants to start a run that cannot
@@ -386,6 +544,9 @@ fn report_solve_result_scaled(
 fn solve_and_report(model : @model.Model, flags : SolveFlags) -> Bool {
   if flags.verify {
     return verify_model(model, flags)
+  }
+  if flags.reoptimize {
+    return reoptimize_report(model, flags)
   }
   report_solution(model, flags)
   true
@@ -548,6 +709,7 @@ fn main {
   let mut max_rows = 200
   let mut max_iterations = 0
   let mut verify_enabled = false
+  let mut reoptimize_enabled = false
   let mut certificate_path = ""
   let mut index = 1
   while index < args.length() {
@@ -559,6 +721,12 @@ fn main {
     }
     if argument == "--verify" {
       verify_enabled = true
+      solve_enabled = true
+      index = index + 1
+      continue
+    }
+    if argument == "--reoptimize" {
+      reoptimize_enabled = true
       solve_enabled = true
       index = index + 1
       continue
@@ -655,6 +823,7 @@ fn main {
     max_iterations,
     verify: verify_enabled,
     certificate_path,
+    reoptimize: reoptimize_enabled,
   }
   for path in files {
     if !inspect(path, flags) {

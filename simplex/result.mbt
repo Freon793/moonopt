@@ -13,6 +13,21 @@ pub(all) enum SimplexStatus {
 } derive(Debug, Eq)
 
 ///|
+/// A basis, in the form a later run can start from.
+///
+/// `basis[row]` is the column that is basic in that row and `at_upper[column]` says
+/// whether a non-basic column rests at its upper bound instead of at zero. The row and
+/// column counts travel with it because a basis only means anything for the problem it
+/// came from: a warm start whose shape does not match is refused and the run falls back
+/// to a cold start, rather than pivoting on columns that are not there.
+pub struct SimplexBasis {
+  nrows : Int
+  ncols : Int
+  basis : Array[Int]
+  at_upper : Array[Bool]
+} derive(Debug)
+
+///|
 /// What a kernel run produced.
 ///
 /// `values` is empty unless the status is `Optimal` or `Unbounded` (where it is the
@@ -41,6 +56,11 @@ pub struct SimplexResult {
   message : String
   duals : Array[Double]
   ray : Array[Double]
+  /// The basis the run ended on, so a later run over the same columns can start from
+  /// it and reoptimize with the dual simplex instead of rebuilding Phase I. Set only
+  /// when the run reached a verdict, because only then is the basis a statement about
+  /// the model rather than about where the run gave up.
+  basis : SimplexBasis?
 } derive(Debug)
 
 ///|

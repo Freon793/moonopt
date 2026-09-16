@@ -147,6 +147,11 @@ priv struct State {
   /// this is the recession direction a certificate reports.
   mut ray_column : Int
   mut ray_sigma : Double
+  /// Row of the basis inverse that could not be brought back into feasibility during a
+  /// dual simplex run, and the sign that turns that row into a Farkas ray. `-1` means
+  /// the dual simplex did not make that statement.
+  mut dual_ray_row : Int
+  mut dual_ray_sign : Double
   /// The right hand side the run is solved against.
   ///
   /// This is `problem.rhs` plus the degeneracy perturbation, and it is what every
@@ -212,6 +217,8 @@ fn State::new(problem : KernelProblem, options : SimplexOptions) -> State {
     gain_cursor: 0,
     ray_column: -1,
     ray_sigma: 1.0,
+    dual_ray_row: -1,
+    dual_ray_sign: 1.0,
     solve_rhs,
     basis,
     is_basic,
@@ -227,6 +234,57 @@ fn State::new(problem : KernelProblem, options : SimplexOptions) -> State {
   // identity, so this always succeeds; the flag still records the outcome because
   // everything afterwards depends on it being true.
   state.factorized = state.refactorize()
+  state
+}
+
+///|
+/// Creates the state on a basis handed in by a previous run, for reoptimization.
+///
+/// The basis is trusted only as far as its shape: the caller has to have come from a
+/// kernel problem with the same number of rows and columns, and the entry checks
+/// nothing else. Whether it is *dual feasible* — the property the dual simplex needs
+/// — is `dual_feasible`'s question, asked by the caller before the run starts,
+/// because a basis that is not dual feasible belongs in the cold path rather than in
+/// the middle of this one.
+///
+/// The basic values are recomputed from the right hand side rather than carried over:
+/// a bound change is exactly what a warm start is for, and it changes the values.
+fn State::new_with_basis(
+  problem : KernelProblem,
+  options : SimplexOptions,
+  basis : SimplexBasis,
+) -> State {
+  let state = State::new(problem, options)
+  // The starting state marks the cold basis (slacks and artificials) as basic, and every
+  // one of those flags has to come off before the warm basis goes in. Leaving them on
+  // makes columns that are *not* in this basis invisible to pricing and to the dual
+  // feasibility check — the two places that decide whether a run may call its answer
+  // optimal — and the run then reports a point no certificate can justify. (A warm start
+  // on dcmulti did exactly that before this line existed: 36 pivots, "optimal", and a
+  // verifier refusal on the duals.)
+  for j = 0; j < state.n; j = j + 1 {
+    state.is_basic[j] = false
+    state.at_upper[j] = false
+  }
+  for i = 0; i < state.m; i = i + 1 {
+    let column = basis.basis[i]
+    state.basis[i] = column
+    state.is_basic[column] = true
+  }
+  for j = 0; j < state.n; j = j + 1 {
+    state.at_upper[j] = basis.at_upper[j]
+  }
+  // A column that is basic is not at a bound; the flag only means something for the
+  // non-basic ones and the two arrays come from different runs.
+  for i = 0; i < state.m; i = i + 1 {
+    state.at_upper[state.basis[i]] = false
+  }
+  if state.refactorize() {
+    // The factorized path recomputes the basic values from the (possibly re-bounded)
+    // right hand side, which is the whole reason a warm start is cheap.
+  } else {
+    state.factorized = false
+  }
   state
 }
 
@@ -1191,6 +1249,7 @@ fn solve_problem(
     iterations: second.iterations,
     duals: second.duals,
     ray: second.ray,
+    basis: second.basis,
     message: "recovered from a numerical failure by restarting with Bland's rule (" +
     first.message +
     ")",
@@ -1217,6 +1276,7 @@ fn solve_once(
       iterations: 0,
       duals: [],
       ray: [],
+      basis: None,
       message: "kernel problem has " +
       problem.nrows.to_string() +
       " rows, above the " +
@@ -1242,6 +1302,7 @@ fn solve_once(
         iterations: state.iterations,
         duals: [],
         ray: [],
+        basis: None,
         // The measured progress belongs in the message: Phase I's objective is the
         // artificial sum, and a caller that only sees "iteration limit" cannot tell
         // a run that was closing in on feasibility from one that was stuck. The
@@ -1266,6 +1327,7 @@ fn solve_once(
         iterations: state.iterations,
         duals: [],
         ray: [],
+        basis: None,
         message: "basis became numerically singular during Phase I",
       }
     }
@@ -1287,6 +1349,7 @@ fn solve_once(
         // point satisfies the rows, which the residual above only measures.
         duals: state.model_duals(),
         ray: [],
+        basis: None,
         message: "no feasible point exists (scaled row residual " +
         phase1_scaled.to_string() +
         ", raw " +
@@ -1317,6 +1380,7 @@ fn solve_once(
       iterations: state.iterations,
       duals: [],
       ray: state.model_ray(),
+      basis: None,
       message: "the objective is unbounded on the feasible set",
     }
   }
@@ -1328,6 +1392,7 @@ fn solve_once(
       iterations: state.iterations,
       duals: [],
       ray: [],
+      basis: None,
       // Same reasoning as Phase I: a run that stops short should say how far it
       // got, measured. The kernel-sense objective is what the loop was reducing;
       // mapping it back to the caller's model would be a claim about a solution
@@ -1347,10 +1412,24 @@ fn solve_once(
       iterations: state.iterations,
       duals: [],
       ray: [],
+      basis: None,
       message: "basis became numerically singular",
     }
   }
-  let mut kernel_values = state.values()
+  state.finish_optimal()
+}
+
+///|
+/// Turns a basis that has been brought back to feasibility into the run's result.
+///
+/// Shared by the cold path and the warm start: whatever a run did to get here, the
+/// answer leaves through the same self-check, so a reoptimization cannot report an
+/// optimum the cold path would have refused. The residual is measured against the
+/// **unperturbed** right hand side, as everywhere else.
+fn State::finish_optimal(self : State) -> SimplexResult {
+  let problem = self.problem
+  let options = self.options
+  let mut kernel_values = self.values()
   // Final self-check: never report an optimum for a point that does not satisfy
   // the rows or the non-negativity requirement, judged against the scale of the
   // numbers involved (see max_scaled_residual).
@@ -1363,8 +1442,8 @@ fn solve_once(
     // The product-form updates are exact in exact arithmetic but accumulate
     // round-off; folding them into a fresh factorization often restores the last
     // digits. Only a violation that survives that is a numerical failure.
-    if state.refactorize() {
-      kernel_values = state.values()
+    if self.refactorize() {
+      kernel_values = self.values()
       let (retry_scaled, retry_raw) = max_scaled_residual(
         problem, kernel_values, false,
       )
@@ -1378,9 +1457,10 @@ fn solve_once(
       status: NumericalFailure,
       values: [],
       objective: 0.0,
-      iterations: state.iterations,
+      iterations: self.iterations,
       duals: [],
       ray: [],
+      basis: None,
       message: "the resulting basis is not feasible (scaled row residual " +
       scaled_residual.to_string() +
       ", raw " +
@@ -1399,12 +1479,15 @@ fn solve_once(
     status: Optimal,
     values: problem.solution(kernel_values),
     objective: problem.model_sign * acc.value(),
-    iterations: state.iterations,
+    iterations: self.iterations,
     // The duals of the final basis are the other half of an optimality proof. They
     // are read after Phase II, so they belong to the costs the run actually
     // minimised.
-    duals: state.model_duals(),
+    duals: self.model_duals(),
     ray: [],
+    // The optimal basis, so a later run over the same columns can reoptimize from it
+    // instead of rebuilding Phase I.
+    basis: Some(self.basis_snapshot()),
     message: "",
   }
 }

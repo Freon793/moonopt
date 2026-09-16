@@ -42,7 +42,14 @@ You can browse and install extra skills here:
     gain** rule (`gain_candidates`): the reduced cost is an improvement rate, so the
     column that enters is chosen by the gain `|r| · step` measured for a bounded
     candidate set (Dantzig's pick, a pool of recently good columns, a rotating window
-    over the column space), because the step is only known after a ratio test.
+    over the column space), because the step is only known after a ratio test. A
+    **bounded-variable dual simplex** (`dual.mbt`) reoptimizes from a basis a previous
+    run left behind: a bound change leaves the reduced costs alone, so the previous
+    optimal basis is still dual feasible and only primal feasibility is missing. Its
+    one invariant — the basis stays dual feasible — is checked once at the end, and a
+    violation hands the problem to the cold path instead of reporting an answer. A warm
+    start is otherwise trusted only for its shape and its dual feasibility, because
+    "faster" must never mean "a different answer".
     `lu.mbt` holds the factorization;
     its factors are verified against a dense reference that lives in the test file,
     not in the kernel. A pivot step is passed in by the ratio test rather than
