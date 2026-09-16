@@ -51,7 +51,7 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 - `cmd/parse`：模型文件巡检 CLI（格式判定、规模统计与校验结论、`--manifest` 批量模式、
   `--solve` / `--relax` / `--presolve` / `--max-rows` / `--max-iterations` 求解开关、
   失败返回非零退出码）；
-- CLI 与两个可运行示例，`moon test` 92 个测试全绿，CI 覆盖 Linux/macOS/Windows 与 wasm-gc/js 目标。
+- CLI 与两个可运行示例，`moon test` 93 个测试全绿，CI 覆盖 Linux/macOS/Windows 与 wasm-gc/js 目标。
 
 **当前内核的能力边界（明确写出来，不夸大）**：
 
@@ -62,7 +62,7 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 | min / max | 对偶单纯形热启动（M3 剩余部分） |
 | MPS / LP 文件读入与写出（M2） | MPS 的 `SC`/`SI` 半连续界、完整 `SOS` / `MARKER` 语义 |
 | presolve：空行/列消元、冗余行、singleton 转界、隐式界收紧、固定变量消元 + 解还原（`solve` 默认开启，`--presolve`） | 系数强化、对偶固定、变量/行的重复与支配检测；整数模型不经化简（保持内核的拒绝语义） |
-| 内核行数 ≤ 200000 的模型（`SimplexOptions::max_kernel_rows`；基用**稀疏 LU** 因子分解，内存 `O(nnz+fill)`） | 填充量由 `max_factor_entries` 预算约束；再往上走真正的限制是时间而不是内存 |
+| 内核行数 ≤ 200000 的模型（`SimplexOptions::max_kernel_rows`；基用**稀疏 LU** 因子分解，内存 `O(nnz+fill)`） | 填充量由 `max_factor_entries` 预算约束；再往上走真正的限制是枢轴数与每次枢轴的实际增益，在"每个有限上界一行"的大实例上尤其明显（见 `bench/README.md`） |
 
 **两个行数上限不要混淆**：`cmd/parse --max-rows N` 限制的是**模型约束数**（超过即
 `solve=skipped`）；内核自己的门禁 `max_kernel_rows` 限制的是**内核行数**，而内核行数 =
@@ -75,8 +75,12 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 内存从 `O(m²)` 变成 `O(nnz + fill)`，`max_kernel_rows` 默认因此从 4000 抬到 **200000**。
 填充量（fill）是稀疏分解里唯一无法事先预测的量，所以另有 `max_factor_entries`（默认 2×10⁷）
 作为预算：超预算就让分解失败，而不是无上限分配。实测：`30n20b8`（presolve 后 11591 行）
-**16 秒求到最优**，`fast0507`（63490 行）**不再被拒绝**、能跑，但 Phase I 在 500 次迭代
-（61 秒）内没有收敛 —— 对这类实例，限制已经从"内存"换成了"时间"。
+**16 秒求到最优**；`danoint` 在默认 20000 迭代上限下 **3716 次枢轴、11.7 秒求到最优**
+（目标值 `62.6372804184694`，重建解在原模型上可行）；`fast0507`（63490 行）**不再被拒绝**、
+能跑，但它离收敛还差一个量级以上的枢轴数 —— 限制既不是内存也不是停滞，而是每次枢轴的实际增益：
+实测 Phase I 的人工和从 489 起单调下降（500 / 1500 / 6000 次枢轴时分别是 267.9 / 151.6 / 17.4，
+约 ×0.78 每 500 枢轴），**没有停滞** —— 这条边界的原因与量级见
+[`bench/README.md`](bench/README.md) 与 [`docs/roadmap.md`](docs/roadmap.md)。
 
 **公开入口的默认路径**（`solve` / `solve_with`）：先化简（`presolve`，默认开启），再交给内核算，
 然后把解还原回原变量。还原结果必须**同时**通过三项检查才以 `Optimal` 返回 —— 原模型的行、
