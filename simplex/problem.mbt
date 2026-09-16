@@ -55,6 +55,23 @@ pub struct KernelProblem {
   /// artificial column of a `≥` or `=` row. Every right hand side is
   /// non-negative by construction, so this basis is feasible for Phase I.
   initial_basis : Array[Int]
+  /// For each kernel row, the model constraint it came from, or `-1` when this
+  /// package invented the row (the row form of a free variable's upper bound, or of
+  /// bounds that contradict each other).
+  ///
+  /// The kernel's duals live on its own rows, so a certificate stated against the
+  /// model needs this map: a row that is not a model row has no dual to report.
+  row_source : Array[Int]
+  /// Multiplier that turns the kernel's dual for that row into a multiplier of the
+  /// model row's oriented form, which is the convention certificates use. Zero on an
+  /// invented row.
+  ///
+  /// The kernel works on normalized rows (a `≤` row is a slack, a `≥` row a surplus,
+  /// a negative right hand side negates the row), and each of those choices moves a
+  /// sign: `y_model = ± y_kernel`. Deriving it here, next to the normalization that
+  /// caused it, is the only place it can be got right; a reader of a certificate
+  /// should not have to redo it.
+  row_dual_factor : Array[Double]
 } derive(Debug)
 
 ///|
@@ -97,6 +114,29 @@ fn kernel_has_upper(value : Double) -> Bool {
 }
 
 ///|
+/// The multiplier that turns the kernel's dual for a row into a multiplier of the
+/// model row's oriented form (the convention `verify` documents), or zero when the
+/// row is not a model row.
+///
+/// `sign` is `-1` when the kernel row is the negation of the model row. Starting from
+/// the identity that makes both sides describe the same reduced costs,
+/// `cⱼ − y_kernel·(sign·aᵢⱼ) = cⱼ + y_model·aᵢⱼ` for a `≤` model row and
+/// `cⱼ − y_model·aᵢⱼ` for a `≥` or `=` model row, gives the table below. The kernel's
+/// convention for its own rows (a slack forces `y ≤ 0` on a `≤` row, a surplus
+/// `y ≥ 0` on a `≥` one) is what makes the two agree rather than cancel.
+fn dual_factor(source : Int, rel : @model.Rel, sign : Double) -> Double {
+  if source < 0 {
+    0.0
+  } else {
+    match rel {
+      @model.Rel::LessEqual => -sign
+      @model.Rel::GreaterEqual => sign
+      @model.Rel::Equal => sign
+    }
+  }
+}
+
+///|
 /// Builds the kernel problem for `min cᵀx` subject to `rows` and `x ≥ 0`.
 ///
 /// This is the shape the reference solver in `oracle` accepts as well, which is
@@ -118,6 +158,8 @@ pub fn KernelProblem::from_standard(
   let row_entries : Array[Array[(Int, Double)]] = []
   let row_rels : Array[@model.Rel] = []
   let row_rhs : Array[Double] = []
+  // The standard-form entry point has no model rows: its rows *are* the caller's.
+  let row_sources : Array[Int] = []
   for i = 0; i < rows.length(); i = i + 1 {
     let (coefficients, rel, rhs) = rows[i]
     let entries : Array[(Int, Double)] = []
@@ -129,10 +171,11 @@ pub fn KernelProblem::from_standard(
     row_entries.push(entries)
     row_rels.push(rel)
     row_rhs.push(rhs)
+    row_sources.push(i)
   }
   assemble(
     num_vars, cost, 0.0, 1.0, var_columns, var_offset, structural_upper, row_entries,
-    row_rels, row_rhs,
+    row_rels, row_rhs, row_sources,
   )
 }
 
@@ -212,6 +255,9 @@ pub fn from_model_with(
   let row_entries : Array[Array[(Int, Double)]] = []
   let row_rels : Array[@model.Rel] = []
   let row_rhs : Array[Double] = []
+  // Which model row each kernel row came from; the rows this package adds below are
+  // not model rows and get -1.
+  let row_sources : Array[Int] = []
   let mut objective_constant = 0.0
   let model_objective = model.objective()
   for i = 0; i < model.num_constraints(); i = i + 1 {
@@ -236,6 +282,7 @@ pub fn from_model_with(
     }
     row_entries.push(entries)
     row_rels.push(constraint.rel)
+    row_sources.push(i)
     row_rhs.push(adjusted_rhs)
   }
   for k = 0; k < model_objective.length(); k = k + 1 {
@@ -248,6 +295,7 @@ pub fn from_model_with(
     row_entries.push(entries)
     row_rels.push(@model.Rel::LessEqual)
     row_rhs.push(ub)
+    row_sources.push(-1)
   }
   // Pass 3: objective in kernel columns, negated for a maximisation.
   let kernel_cost : Array[Double] = Array::make(structural, 0.0)
@@ -277,6 +325,7 @@ pub fn from_model_with(
       row_entries,
       row_rels,
       row_rhs,
+      row_sources,
     ),
   )
 }
@@ -299,13 +348,17 @@ fn assemble(
   row_entries : Array[Array[(Int, Double)]],
   row_rels : Array[@model.Rel],
   row_rhs : Array[Double],
+  row_sources : Array[Int],
 ) -> KernelProblem {
   let m = row_entries.length()
   // Row sign normalisation: every right hand side becomes non-negative, which is
-  // what guarantees a starting basis of slacks and artificials.
+  // what guarantees a starting basis of slacks and artificials. The sign is kept so a
+  // dual solution can be mapped back: a negated row's multiplier is the negation of
+  // the model row's.
   let rels : Array[@model.Rel] = []
   let rhs : Array[Double] = []
   let rows : Array[Array[(Int, Double)]] = []
+  let dual_factors : Array[Double] = []
   for i = 0; i < m; i = i + 1 {
     let rel = row_rels[i]
     let value = row_rhs[i]
@@ -318,6 +371,7 @@ fn assemble(
       }
       rows.push(negated)
       rhs.push(-value)
+      dual_factors.push(dual_factor(row_sources[i], rel, -1.0))
       rels.push(
         match rel {
           @model.Rel::LessEqual => @model.Rel::GreaterEqual
@@ -328,6 +382,7 @@ fn assemble(
     } else {
       rows.push(row_entries[i])
       rhs.push(value)
+      dual_factors.push(dual_factor(row_sources[i], rel, 1.0))
       rels.push(rel)
     }
   }
@@ -413,6 +468,8 @@ fn assemble(
     objective_constant,
     model_sign,
     initial_basis: initial_basis_column,
+    row_source: row_sources,
+    row_dual_factor: dual_factors,
   }
 }
 

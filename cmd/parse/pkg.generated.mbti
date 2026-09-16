@@ -12,6 +12,8 @@ pub(all) struct SolveFlags {
   presolve : Bool
   max_rows : Int
   max_iterations : Int
+  verify : Bool
+  certificate_path : String
 }
 
 // Type aliases

@@ -21,12 +21,23 @@
 /// `--presolve` reduces the model before the kernel sees it and prints what the
 /// reduction did, followed by the reconstructed solution's violations against the
 /// original rows — the reduction is only useful if the way back is correct.
+///
+/// `--verify` runs the same solve and then has the independent verifier check the
+/// certificate the kernel produced: primal feasibility, the multipliers' signs and
+/// dual feasibility, complementary slackness, and the duality gap. It prints the
+/// certificate as JSON too, so the check can be repeated somewhere else with
+/// `--certificate`, which reads a certificate from a file and checks it without
+/// solving anything. A refuted certificate exits non-zero.
 
 ///|
 /// Prints the usage line.
 fn print_usage() -> Unit {
   println("usage: moon run cmd/parse -- <file> [<file> ...]")
   println("       moon run cmd/parse -- --manifest <list-file>")
+  println("       moon run cmd/parse -- <file> --verify")
+  println(
+    "       moon run cmd/parse -- <file> --certificate <certificate.json>",
+  )
 }
 
 ///|
@@ -130,6 +141,130 @@ pub(all) struct SolveFlags {
   /// Zero means the kernel's own default; anything else bounds the run so a large
   /// instance can be sampled instead of waited on.
   max_iterations : Int
+  /// Check the run's certificate with the independent verifier instead of only
+  /// reporting the status.
+  verify : Bool
+  /// Path of a certificate to read and check against the model, without solving.
+  /// Empty means there is none.
+  certificate_path : String
+}
+
+///|
+/// Turns a kernel result into the certificate `verify` reads.
+fn certificate_of(result : @simplex.SimplexResult) -> @verify.Certificate {
+  let claim = match result.status {
+    @simplex.SimplexStatus::Optimal => @verify.Claim::Optimal
+    @simplex.SimplexStatus::Infeasible => @verify.Claim::Infeasible
+    @simplex.SimplexStatus::Unbounded => @verify.Claim::Unbounded
+    _ => @verify.Claim::Optimal
+  }
+  {
+    claim,
+    values: result.values,
+    duals: result.duals,
+    ray: result.ray,
+    objective: result.objective,
+  }
+}
+
+///|
+/// Reads a certificate from a file, or reports why it could not.
+fn read_certificate(path : String) -> @verify.Certificate? {
+  let content = match read_text(path) {
+    Some(text) => text
+    None => return None
+  }
+  match @verify.Certificate::from_json(content) {
+    Some(certificate) => Some(certificate)
+    None => {
+      println("       certificate=unreadable(" + path + ")")
+      None
+    }
+  }
+}
+
+///|
+/// Checks a certificate against the model, printing the verifier's own measurements.
+///
+/// Returns `true` when it was accepted. This is the point of a certificate: the status
+/// a solver reports is a claim, and this prints the measurement that decides it.
+fn verify_and_report(
+  model : @model.Model,
+  certificate : @verify.Certificate,
+) -> Bool {
+  let verdict = @verify.verify(model, certificate)
+  println(
+    "       verify=" +
+    (if verdict.accepted { "accepted" } else { "REJECTED" }) +
+    (if verdict.reason == "" { "" } else { " (" + verdict.reason + ")" }),
+  )
+  for item in verdict.checks {
+    println(
+      "         " +
+      (if item.ok { "ok  " } else { "FAIL" }) +
+      " " +
+      item.name +
+      " = " +
+      item.measured.to_string() +
+      (if item.tolerance > 0.0 {
+        " (tolerance " + item.tolerance.to_string() + ")"
+      } else {
+        ""
+      }),
+    )
+  }
+  verdict.accepted
+}
+
+///|
+/// The certificate path of one model: check a certificate read from a file, or solve
+/// and check what the kernel produced.
+///
+/// A certificate belongs to the model it was stated against, so this path does not
+/// presolve: a reduced model's multipliers are not the original model's, and checking
+/// one against the other would be a comparison of two different problems.
+fn verify_model(model : @model.Model, flags : SolveFlags) -> Bool {
+  if flags.certificate_path != "" {
+    let certificate = match read_certificate(flags.certificate_path) {
+      Some(value) => value
+      None => return false
+    }
+    return verify_and_report(model, certificate)
+  }
+  let options = (if flags.relax {
+    @simplex.SimplexOptions::relaxed()
+  } else {
+    @simplex.SimplexOptions::default()
+  }).limit_iterations(
+    if flags.max_iterations > 0 {
+      flags.max_iterations
+    } else {
+      20000
+    },
+  )
+  let result = match @simplex.solve_model_with(model, options) {
+    Err(reason) => {
+      println("       solve=refused(" + reason + ")")
+      return false
+    }
+    Ok(result) => result
+  }
+  report_solve_result(result)
+  match result.status {
+    @simplex.SimplexStatus::Optimal
+    | @simplex.SimplexStatus::Infeasible
+    | @simplex.SimplexStatus::Unbounded => {
+      let certificate = certificate_of(result)
+      println("       certificate=" + certificate.to_json())
+      verify_and_report(model, certificate)
+    }
+    _ => {
+      // Nothing to prove: the run reached no verdict, so there is no certificate to
+      // check, and saying so is the honest output.
+      println("       certificate=none(the run did not reach a verdict)")
+      false
+    }
+  }
 }
 
 ///|
@@ -248,7 +383,18 @@ fn report_solve_result_scaled(
 /// checked against the *original* rows before the outcome is printed. A reduction
 /// that is wrong is worse than no reduction, so the check is part of the report
 /// rather than something the caller has to remember to do.
-fn solve_and_report(model : @model.Model, flags : SolveFlags) -> Unit {
+fn solve_and_report(model : @model.Model, flags : SolveFlags) -> Bool {
+  if flags.verify {
+    return verify_model(model, flags)
+  }
+  report_solution(model, flags)
+  true
+}
+
+///|
+/// The plain solve path: report the kernel's outcome, with the reduction in front of
+/// it when `--presolve` is on.
+fn report_solution(model : @model.Model, flags : SolveFlags) -> Unit {
   if model.num_constraints() > flags.max_rows {
     println(
       "       solve=skipped(rows=" +
@@ -362,8 +508,10 @@ fn inspect(path : String, flags : SolveFlags) -> Bool {
   match parsed {
     Ok(model) => {
       report(path, model, if is_lp { "lp" } else { "mps" })
-      if flags.enabled {
-        solve_and_report(model, flags)
+      if flags.enabled && !solve_and_report(model, flags) {
+        // A certificate the verifier refused is a failure of the run, not of the file:
+        // the exit code has to say so or a pipeline would treat it as a clean answer.
+        return false
       }
       true
     }
@@ -399,6 +547,8 @@ fn main {
   let mut presolve_enabled = false
   let mut max_rows = 200
   let mut max_iterations = 0
+  let mut verify_enabled = false
+  let mut certificate_path = ""
   let mut index = 1
   while index < args.length() {
     let argument = args[index]
@@ -406,6 +556,23 @@ fn main {
       solve_enabled = true
       index = index + 1
       continue
+    }
+    if argument == "--verify" {
+      verify_enabled = true
+      solve_enabled = true
+      index = index + 1
+      continue
+    }
+    if argument == "--certificate" {
+      if index + 1 < args.length() {
+        certificate_path = args[index + 1]
+        verify_enabled = true
+        solve_enabled = true
+        index = index + 2
+        continue
+      }
+      print_usage()
+      @sys.exit(2)
     }
     if argument == "--relax" {
       relax = true
@@ -486,6 +653,8 @@ fn main {
     presolve: presolve_enabled,
     max_rows,
     max_iterations,
+    verify: verify_enabled,
+    certificate_path,
   }
   for path in files {
     if !inspect(path, flags) {

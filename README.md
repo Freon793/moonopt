@@ -8,7 +8,7 @@
 presolve/postsolve、可复用的分支切割框架，以及**可被第三方独立校验**的最优性（对偶可行解）、
 不可行性（Farkas）与无界（射线）证书。纯 MoonBit 实现，无 FFI 依赖。
 
-> 状态：**v0.1.0-dev**，`M1`（基础层与模型层）、`M2`（标准模型输入）已落地，`M3` 进行中
+> 状态：**v0.1.0-dev**，`M1`（基础层与模型层）、`M2`（标准模型输入）已落地，`M3` 进行中（完成标准已满足），`M4`（证书与独立校验器）已完成
 > （稀疏修正单纯形、**稀疏 LU 基分解**、性能测量与优化、比值检验的可行性守卫、退化扰动、
 > 内核规模与填充预算门禁、presolve/postsolve 与公开契约的默认化简路径均已完成；
 > 对偶单纯形与 DeVex 定价待完成）：
@@ -22,7 +22,7 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 > 尚未发布到 mooncakes.io。
 > 里程碑划分、范围闸门与明确**不做**的内容见 [`docs/roadmap.md`](docs/roadmap.md)。
 
-## 当前能力（M1、M2 与 M3 进行中）
+## 当前能力（M1、M2 已落地；M3 完成标准已满足；M4 已完成）
 
 已经可用并且有测试覆盖的部分：
 
@@ -49,18 +49,22 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 - `moonopt`：公开入口 `solve` / `solve_with`，返回 `SolveStatus` + `Solution`
   （状态、变量取值、目标值、迭代数、失败原因）；非法模型返回 `NotSolved` 并带原因；
   **默认先化简再求解并把解还原回原变量**（`SolveOptions { presolve: false }` 可关掉）；
+- `verify`：**独立于求解路径的校验器** —— 原始可行性、对偶可行性、互补松弛、对偶间隙，
+  以及 Farkas 不可行射线与无界射线（+ 可行起点）；只依赖 `core`/`model`，
+  证书可序列化为 JSON 再从文件独立复核；
 - `cmd/parse`：模型文件巡检 CLI（格式判定、规模统计与校验结论、`--manifest` 批量模式、
   `--solve` / `--relax` / `--presolve` / `--max-rows` / `--max-iterations` 求解开关、
-  失败返回非零退出码）；
-- CLI 与两个可运行示例，`moon test` 98 个测试全绿，CI 覆盖 Linux/macOS/Windows 与 wasm-gc/js 目标。
+  `--verify` / `--certificate` 证书校验、失败返回非零退出码）；
+- CLI 与两个可运行示例，`moon test` 118 个测试全绿，CI 覆盖 Linux/macOS/Windows 与 wasm-gc/js 目标。
 
 **当前内核的能力边界（明确写出来，不夸大）**：
 
 | 支持 | 暂不支持（返回 `NotSolved` + 原因，绝不返回可疑解） |
 | --- | --- |
 | 连续变量、任意有限上下界、自由变量 | 整数 / 0-1 变量（M5；当前可用 `SimplexOptions::relaxed()` 求 LP 松弛） |
-| `≤`、`≥`、`=` 任意混合，含负右端项 | 证书与 `verify` 独立校验器（M4） |
+| `≤`、`≥`、`=` 任意混合，含负右端项 | — |
 | min / max | 对偶单纯形热启动（M3 剩余部分） |
+| **证书与独立校验器**（`verify`）：最优性（原始/对偶可行性、互补松弛、对偶间隙）、Farkas 不可行射线、无界射线 + 可行起点、证书 JSON、`cmd/parse --verify` / `--certificate` | 化简模型的乘子回映（证书现在只对**内核收到的模型**成立，即 `--verify` 走不化简的路径） |
 | MPS / LP 文件读入与写出（M2） | MPS 的 `SC`/`SI` 半连续界、完整 `SOS` / `MARKER` 语义 |
 | presolve：空行/列消元、冗余行、singleton 转界、隐式界收紧、固定变量消元 + 解还原（`solve` 默认开启，`--presolve`） | 系数强化、对偶固定、变量/行的重复与支配检测；整数模型不经化简（保持内核的拒绝语义） |
 | 内核行数 ≤ 200000 的模型（`SimplexOptions::max_kernel_rows`；基用**稀疏 LU** 因子分解，内存 `O(nnz+fill)`） | 填充量由 `max_factor_entries` 预算约束；再往上走真正的限制是枢轴数与每次枢轴的实际增益，在"每个有限上界一行"的大实例上尤其明显（见 `bench/README.md`） |
@@ -234,7 +238,7 @@ format/           MPS 与 LP 格式读写、解析错误定位
 oracle/           参考实现：稠密两阶段单纯形（差分测试对照基准，非交付求解器）
 simplex/          稀疏修正单纯形内核（M3 进行中：对偶单纯形待补）
 presolve/         模型化简与解还原（M3；公开接口可单独使用）
-verify/           证书校验器（M4）
+verify/           独立校验器：最优性、Farkas、无界射线 + 证书 JSON（M4，不依赖 simplex）
 mip/              分支定界与割平面（M5，受范围闸门约束）
 cmd/main/         示例 CLI 与演示输出
 cmd/parse/        模型文件巡检 CLI（解析报告使用）

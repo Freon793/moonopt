@@ -29,7 +29,7 @@ keywords = [
 
 preferred_target = "wasm"
 
-description = "Optimization kernels for MoonBit: standard MPS/LP model interop, sparse revised and dual simplex, presolve, branch-and-cut, and independently checkable optimality certificates."
+description = "Optimization kernels for MoonBit: standard MPS/LP model interop, a sparse revised simplex with presolve, and independently checkable optimality, infeasibility and unboundedness certificates."
 
 import {
   "moonbitlang/x@0.5.5",

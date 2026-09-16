@@ -35,6 +35,8 @@ pub struct KernelProblem {
   objective_constant : Double
   model_sign : Double
   initial_basis : Array[Int]
+  row_source : Array[Int]
+  row_dual_factor : Array[Double]
 } derive(@debug.Debug)
 pub fn KernelProblem::from_model(@model.Model) -> Result[Self, String]
 pub fn KernelProblem::from_standard(Int, Array[Double], Array[(Array[Double], @model.Rel, Double)]) -> Self
@@ -70,6 +72,8 @@ pub struct SimplexResult {
   objective : Double
   iterations : Int
   message : String
+  duals : Array[Double]
+  ray : Array[Double]
 } derive(@debug.Debug)
 
 pub(all) enum SimplexStatus {

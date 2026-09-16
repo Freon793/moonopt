@@ -37,13 +37,20 @@ test "kernel detects infeasibility" {
 }
 
 ///|
-test "kernel detects unboundedness" {
+/// An unboundedness verdict is a proof, not just a status: the run reports the
+/// feasible point it was standing on and the direction it could travel forever from
+/// there. (The public `Solution` still reports no values for this status; the pair is
+/// there for a certificate to be checked against.)
+test "kernel detects unboundedness and reports where the ray starts" {
   // min -x  s.t.  x >= 1
   let result = solve_standard(1, [-1.0], [
     ([1.0], @model.Rel::GreaterEqual, 1.0),
   ])
   assert_eq(result.status, Unbounded)
-  assert_eq(result.values.length(), 0)
+  assert_eq(result.values.length(), 1)
+  assert_true(result.values[0] >= 1.0 - 1.0e-7)
+  assert_eq(result.ray.length(), 1)
+  assert_true(result.ray[0] > 0.5)
 }
 
 ///|

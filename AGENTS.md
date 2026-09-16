@@ -58,8 +58,18 @@ You can browse and install extra skills here:
     the reduction's bookkeeping. Every reduction must be proved before it fires,
     and a model presolve proves infeasible or unbounded is reported as such rather
     than handed to the kernel.
-  - `verify/`, `mip/`:
-    added milestone by milestone, see `docs/roadmap.md`.
+  - `verify/`: the **independent** checker for a claimed answer. Primal feasibility,
+    dual feasibility, complementary slackness and the duality gap for an optimality
+    claim; a Farkas ray for an infeasibility claim; a feasible point plus a recession
+    direction for an unboundedness claim; certificates as JSON. It imports
+    `core`, `model` and `moonbitlang/core/string` and **never** `simplex` — that the
+    checker shares nothing with the solver is the point, and `verify/moon.pkg` is
+    where a reviewer checks it. The multiplier convention and the weak-duality
+    derivation are documented in `verify/verify.mbt`; a producer has to use that
+    convention, and the kernel's mapping onto it lives in `simplex/certificate.mbt`.
+  - `mip/`:
+    added milestone by milestone, see `docs/roadmap.md`. The M3+M4 completion
+    standards are met, so the scope gate for this milestone is open.
   - `cmd/main/`: demo CLI. `cmd/parse/`: model file inspection CLI. `examples/`:
     runnable examples. `bench/`: data policy, fetch and report scripts, reports.
     `docs/`: design notes, technical roadmap and the ecosystem survey that

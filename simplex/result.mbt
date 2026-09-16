@@ -15,14 +15,32 @@ pub(all) enum SimplexStatus {
 ///|
 /// What a kernel run produced.
 ///
-/// `values` is empty unless the status is `Optimal`; `objective` is in the
-/// caller's own sense (a maximisation comes back as a maximised value).
+/// `values` is empty unless the status is `Optimal` or `Unbounded` (where it is the
+/// feasible point a recession direction starts from); `objective` is in the caller's
+/// own sense (a maximisation comes back as a maximised value) and is only meaningful
+/// for `Optimal`.
+///
+/// `duals` and `ray` are the run's **certificate** — the numbers an independent
+/// checker needs to confirm the verdict instead of taking its word for it:
+///
+/// - `Optimal`: `values` plus `duals` (row multipliers) is an optimality proof.
+/// - `Infeasible`: `duals` is a Farkas ray, which proves no point can satisfy the
+///   rows — a measured residual says how infeasible the best attempt was, which is
+///   not the same statement.
+/// - `Unbounded`: `values` is a feasible point and `ray` a direction that improves
+///   the objective forever from it.
+///
+/// Both arrays are in the convention `verify` documents, are stated against the
+/// **model the kernel was handed** (not the kernel's internal normal form), and are
+/// empty when the run has nothing to prove.
 pub struct SimplexResult {
   status : SimplexStatus
   values : Array[Double]
   objective : Double
   iterations : Int
   message : String
+  duals : Array[Double]
+  ray : Array[Double]
 } derive(Debug)
 
 ///|

@@ -1,0 +1,5 @@
+import {
+  "Freon793/moonopt/core",
+  "Freon793/moonopt/model",
+  "moonbitlang/core/string",
+}

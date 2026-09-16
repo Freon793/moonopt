@@ -1,0 +1,49 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Freon793/moonopt/verify"
+
+import {
+  "Freon793/moonopt/model",
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn verify(@model.Model, Certificate, tolerance? : Double) -> Verdict
+
+// Errors
+
+// Types and methods
+pub(all) struct Certificate {
+  claim : Claim
+  values : Array[Double]
+  duals : Array[Double]
+  ray : Array[Double]
+  objective : Double
+} derive(@debug.Debug)
+pub fn Certificate::empty(Claim) -> Self
+pub fn Certificate::from_json(String) -> Self?
+pub fn Certificate::to_json(Self) -> String
+
+pub(all) struct Check {
+  name : String
+  ok : Bool
+  measured : Double
+  tolerance : Double
+} derive(@debug.Debug)
+
+pub(all) enum Claim {
+  Optimal
+  Infeasible
+  Unbounded
+} derive(Eq, @debug.Debug)
+
+pub(all) struct Verdict {
+  accepted : Bool
+  claim : Claim
+  checks : Array[Check]
+  reason : String
+} derive(@debug.Debug)
+pub fn Verdict::to_text(Self) -> String
+
+// Type aliases
+
+// Traits

@@ -5,4 +5,5 @@ import {
 
 import {
   "Freon793/moonopt/oracle",
+  "Freon793/moonopt/verify",
 } for "test"

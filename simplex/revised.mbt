@@ -141,6 +141,12 @@ priv struct State {
   gain_pool_gains : Array[Double]
   /// Where the rotating window over the column space stands.
   mut gain_cursor : Int
+  /// Column that entered when the run concluded the objective is unbounded, and the
+  /// direction it moved in (`+1` increasing, `-1` decreasing). `-1` means no such
+  /// verdict was reached. Together with the direction buffer still holding `B⁻¹aⱼ`,
+  /// this is the recession direction a certificate reports.
+  mut ray_column : Int
+  mut ray_sigma : Double
   /// The right hand side the run is solved against.
   ///
   /// This is `problem.rhs` plus the degeneracy perturbation, and it is what every
@@ -204,6 +210,8 @@ fn State::new(problem : KernelProblem, options : SimplexOptions) -> State {
     gain_pool: Array::make(gain_pool_size, -1),
     gain_pool_gains: Array::make(gain_pool_size, 0.0),
     gain_cursor: 0,
+    ray_column: -1,
+    ray_sigma: 1.0,
     solve_rhs,
     basis,
     is_basic,
@@ -1041,6 +1049,11 @@ fn State::iterate(self : State) -> Int {
     let d = self.direction(entering)
     let limit = self.ratio_test(entering, d)
     if limit.unbounded {
+      // The direction buffer still holds `B⁻¹aⱼ` and nothing else runs before the
+      // result is built, so recording which column entered is enough to reconstruct
+      // the recession direction a certificate needs.
+      self.ray_column = entering
+      self.ray_sigma = self.enter_sigma
       return 1
     }
     let mut leave = limit.row
@@ -1176,6 +1189,8 @@ fn solve_problem(
     values: second.values,
     objective: second.objective,
     iterations: second.iterations,
+    duals: second.duals,
+    ray: second.ray,
     message: "recovered from a numerical failure by restarting with Bland's rule (" +
     first.message +
     ")",
@@ -1200,6 +1215,8 @@ fn solve_once(
       values: [],
       objective: 0.0,
       iterations: 0,
+      duals: [],
+      ray: [],
       message: "kernel problem has " +
       problem.nrows.to_string() +
       " rows, above the " +
@@ -1223,6 +1240,8 @@ fn solve_once(
         values: [],
         objective: 0.0,
         iterations: state.iterations,
+        duals: [],
+        ray: [],
         // The measured progress belongs in the message: Phase I's objective is the
         // artificial sum, and a caller that only sees "iteration limit" cannot tell
         // a run that was closing in on feasibility from one that was stuck. The
@@ -1245,6 +1264,8 @@ fn solve_once(
         values: [],
         objective: 0.0,
         iterations: state.iterations,
+        duals: [],
+        ray: [],
         message: "basis became numerically singular during Phase I",
       }
     }
@@ -1262,6 +1283,10 @@ fn solve_once(
         values: [],
         objective: 0.0,
         iterations: state.iterations,
+        // The duals of the Phase I optimum are a Farkas ray: they certify that no
+        // point satisfies the rows, which the residual above only measures.
+        duals: state.model_duals(),
+        ray: [],
         message: "no feasible point exists (scaled row residual " +
         phase1_scaled.to_string() +
         ", raw " +
@@ -1284,9 +1309,14 @@ fn solve_once(
   if code == 1 {
     return {
       status: Unbounded,
-      values: [],
+      // An unboundedness proof is a feasible point *plus* a direction that leaves it
+      // improving forever, and the run is standing on the feasible point when the
+      // ratio test finds nothing that limits the step.
+      values: problem.solution(state.values()),
       objective: 0.0,
       iterations: state.iterations,
+      duals: [],
+      ray: state.model_ray(),
       message: "the objective is unbounded on the feasible set",
     }
   }
@@ -1296,6 +1326,8 @@ fn solve_once(
       values: [],
       objective: 0.0,
       iterations: state.iterations,
+      duals: [],
+      ray: [],
       // Same reasoning as Phase I: a run that stops short should say how far it
       // got, measured. The kernel-sense objective is what the loop was reducing;
       // mapping it back to the caller's model would be a claim about a solution
@@ -1313,6 +1345,8 @@ fn solve_once(
       values: [],
       objective: 0.0,
       iterations: state.iterations,
+      duals: [],
+      ray: [],
       message: "basis became numerically singular",
     }
   }
@@ -1345,6 +1379,8 @@ fn solve_once(
       values: [],
       objective: 0.0,
       iterations: state.iterations,
+      duals: [],
+      ray: [],
       message: "the resulting basis is not feasible (scaled row residual " +
       scaled_residual.to_string() +
       ", raw " +
@@ -1364,6 +1400,11 @@ fn solve_once(
     values: problem.solution(kernel_values),
     objective: problem.model_sign * acc.value(),
     iterations: state.iterations,
+    // The duals of the final basis are the other half of an optimality proof. They
+    // are read after Phase II, so they belong to the costs the run actually
+    // minimised.
+    duals: state.model_duals(),
+    ray: [],
     message: "",
   }
 }
