@@ -135,6 +135,108 @@ fn random_case(
 }
 
 ///|
+/// A random LP that is feasible *by construction*, with numbers chosen to be awkward:
+/// every variable carries a finite upper bound, the box sits far from the origin, and the
+/// coefficients are in the thousands.
+///
+/// Feasibility is not a guess here: a point `x0` is picked inside the box, and each row's
+/// right hand side is computed from it (exactly for an equality, with slack for an
+/// inequality), so a solution is known to exist whatever the coefficients turn out to be.
+/// That is what makes this a test of the *infeasibility* verdict rather than of the
+/// optimum: the kernel has no excuse to call this model infeasible, and the tolerance
+/// arithmetic is what it has to get right.
+fn feasible_model_by_construction(seed : Int) -> @model.Model {
+  let rng = Lcg::new(seed)
+  let variables = 2 + rng.below(4)
+  let lower : Array[Double] = []
+  let upper : Array[Double] = []
+  let point : Array[Double] = []
+  for j = 0; j < variables; j = j + 1 {
+    let lo = rng.between(1, 9) * 10000.0
+    let hi = lo + rng.between(1, 9) * 1000.0
+    lower.push(lo)
+    upper.push(hi)
+    point.push((lo + hi) / 2.0)
+  }
+  let model = @model.Model::new(@model.Sense::Minimize)
+  for j = 0; j < variables; j = j + 1 {
+    model.add_var("x" + j.to_string(), lb=lower[j], ub=upper[j]) |> ignore
+  }
+  let cost : Array[(Int, Double)] = []
+  for j = 0; j < variables; j = j + 1 {
+    cost.push((j, rng.between(-4000, 4000)))
+  }
+  model.set_objective(cost)
+  for i = 0; i < 2 + rng.below(3); i = i + 1 {
+    let coefficients : Array[Double] = []
+    let mut total = 0.0
+    for j = 0; j < variables; j = j + 1 {
+      let coefficient = rng.between(-900, 900)
+      coefficients.push(coefficient)
+      total = total + coefficient * point[j]
+    }
+    let rel = match rng.below(3) {
+      0 => @model.Rel::LessEqual
+      1 => @model.Rel::GreaterEqual
+      _ => @model.Rel::Equal
+    }
+    let slack = rng.between(1, 9) * 1000.0
+    let rhs = match rel {
+      @model.Rel::LessEqual => total + slack
+      @model.Rel::GreaterEqual => total - slack
+      @model.Rel::Equal => total
+    }
+    let terms : Array[(Int, Double)] = []
+    for j = 0; j < variables; j = j + 1 {
+      if coefficients[j] != 0.0 {
+        terms.push((j, coefficients[j]))
+      }
+    }
+    model.add_constraint(terms, rel, rhs)
+  }
+  model
+}
+
+///|
+/// A feasible model must never be reported infeasible.
+///
+/// This is the invariant behind the Phase I verdict, and it is the one a tolerance makes
+/// easy to break: a measured violation a little above the feasibility tolerance is not a
+/// proof that no point satisfies the rows — it is a measurement at the edge of what the
+/// kernel can resolve. A branch and bound node of MIPLIB's `misc07` measured 1.0949e-7
+/// against a 1e-7 tolerance and was called infeasible, while an outside solver found its
+/// optimum (1647.857142857); pruning that node could have made the search report an
+/// optimum that is not one. The verdict now needs a violation clearly beyond the tolerance
+/// (see `infeasibility_margin`), and this test holds the other end of it: a model that is
+/// feasible by construction — awkward coefficients, large offsets, equality rows — must
+/// not come back `Infeasible`.
+test "a model that is feasible by construction is never called infeasible" {
+  let mut optimal = 0
+  for sample = 0; sample < 40; sample = sample + 1 {
+    let model = feasible_model_by_construction(10000 + sample)
+    let result = match solve_model(model) {
+      Ok(value) => value
+      Err(reason) => fail("kernel refused the model: " + reason)
+    }
+    if result.status == @simplex.SimplexStatus::Infeasible {
+      fail(
+        "sample " +
+        sample.to_string() +
+        ": a feasible model was called infeasible (" +
+        result.message +
+        ")",
+      )
+    }
+    if result.status == @simplex.SimplexStatus::Optimal {
+      optimal = optimal + 1
+    }
+  }
+  // A numerical failure is not a wrong verdict, but a corpus that only produced those
+  // would be testing nothing, so the count has to be most of the list.
+  assert_true(optimal > 30)
+}
+
+///|
 /// Checks a candidate solution directly against the row data, independently of
 /// either solver.
 fn is_feasible(

@@ -74,26 +74,6 @@ fn State::model_row_multipliers(
 }
 
 ///|
-/// The Farkas ray of a run that concluded the model is infeasible.
-///
-/// The dual simplex stops when a basic value outside its bounds cannot be brought back
-/// by any column. The row of the basis inverse that failed to find one is the ray: with
-/// the sign that makes its inner product with the right hand side positive, it satisfies
-/// exactly the conditions the verifier checks — its coefficient on every column either
-/// points at a bound that exists, or at zero.
-fn State::farkas_ray(self : State) -> Array[Double] {
-  if self.dual_ray_row < 0 {
-    return []
-  }
-  let weights = self.inverse_row(self.dual_ray_row)
-  let scaled : Array[Double] = Array::make(self.m, 0.0)
-  for i = 0; i < self.m; i = i + 1 {
-    scaled[i] = self.dual_ray_sign * weights[i]
-  }
-  self.model_row_multipliers(scaled)
-}
-
-///|
 /// The recession direction of an unbounded verdict, one entry per model variable.
 ///
 /// In kernel columns the direction is a single vector: the entering column moves by

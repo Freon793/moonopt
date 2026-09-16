@@ -117,19 +117,57 @@ fn primal_checks(
 }
 
 ///|
+/// The size of the prices a reduced cost is measured against: the largest objective
+/// coefficient in the model, or `1` when there is none (a Farkas ray works with `c = 0`,
+/// and then the row data is what its multipliers are judged against).
+fn cost_scale(cost : Array[Double]) -> Double {
+  let mut scale = 1.0
+  for j = 0; j < cost.length(); j = j + 1 {
+    let magnitude = @core.fabs(cost[j])
+    if magnitude > scale {
+      scale = magnitude
+    }
+  }
+  scale
+}
+
+///|
 /// The sign conditions on the row multipliers: non-negative on the oriented form of
 /// a `≤` or `≥` row, free on an equality.
+///
+/// The violation is measured as the *effect* a wrong sign can have, not as the raw
+/// number: a multiplier of `-3.7e-7` on a row whose coefficients are tens moves a reduced
+/// cost by at most a few parts in `1e6`, which is round-off against prices of that size —
+/// and judging it against its own magnitude (as `raw / (1 + |y|)`, which this used to do,
+/// comes to for a small multiplier) refused an otherwise sound certificate on a branch and
+/// bound node of `noswot`. The multiplier is multiplied by the largest coefficient of its
+/// own row and compared with the size of the cost vector, so the two sides of the
+/// comparison have the units of a reduced cost. For a Farkas ray there is no cost vector,
+/// and the same expression reduces to judging the ray against the row it acts on.
 fn multiplier_sign_violation(
   model : @model.Model,
   duals : Array[Double],
+  cost_scale : Double,
 ) -> Double {
   let mut worst = 0.0
   for i = 0; i < model.num_constraints() && i < duals.length(); i = i + 1 {
-    if model.constraint(i).rel == @model.Rel::Equal {
+    let constraint = model.constraint(i)
+    if constraint.rel == @model.Rel::Equal {
       continue
     }
     let raw = @core.fmax(0.0, -duals[i])
-    let scaled = raw / (1.0 + @core.fabs(duals[i]))
+    if raw <= 0.0 {
+      continue
+    }
+    let mut row_scale = 1.0
+    for term in constraint.terms {
+      let (_, coefficient) = term
+      let magnitude = @core.fabs(coefficient)
+      if magnitude > row_scale {
+        row_scale = magnitude
+      }
+    }
+    let scaled = raw * row_scale / cost_scale
     if scaled > worst {
       worst = scaled
     }
@@ -364,7 +402,7 @@ fn verify_optimal(
   for item in primal_checks(model, x, tolerance) {
     checks.push(item)
   }
-  let signs = multiplier_sign_violation(model, y)
+  let signs = multiplier_sign_violation(model, y, cost_scale(cost))
   checks.push(check("dual signs", signs <= tolerance, signs, tolerance))
   let duals_ok = dual_feasibility_violation(model, cost, y, tolerance)
   checks.push(
@@ -435,9 +473,9 @@ fn verify_infeasible(
     return conclude(Claim::Infeasible, checks)
   }
   let y = certificate.duals
-  let signs = multiplier_sign_violation(model, y)
-  checks.push(check("ray signs", signs <= tolerance, signs, tolerance))
   let zero_cost : Array[Double] = Array::make(model.num_vars(), 0.0)
+  let signs = multiplier_sign_violation(model, y, cost_scale(zero_cost))
+  checks.push(check("ray signs", signs <= tolerance, signs, tolerance))
   let r = reduced_costs(model, zero_cost, y)
   // A reduced cost the box cannot absorb makes the "minimum over the box" infinite
   // in the wrong direction, which is not a proof of anything.

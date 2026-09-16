@@ -90,8 +90,10 @@ test "a warm start detects infeasibility after a bound is tightened" {
     Err(reason) => fail("kernel refused the model: " + reason)
   }
   assert_eq(warm.status, @simplex.SimplexStatus::Infeasible)
-  // The dual simplex's own infeasibility statement is a Farkas ray, and it has to hold
-  // up under the same independent check as any other certificate.
+  // The verdict comes from the cold path: the dual simplex's own "no column can bring
+  // this row back" is a statement about its basis, not a proof about the model, and it
+  // produced a false "infeasible" on two MIPLIB instances (see `solve_from_basis`).
+  // Whatever the path, the certificate has to hold up under the independent check.
   let verdict = @verify.verify(model, certificate_of(warm))
   if !verdict.accepted {
     fail(

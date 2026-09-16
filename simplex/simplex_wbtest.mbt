@@ -426,9 +426,48 @@ test "model path: the default row limit does not interfere with small models" {
 }
 
 ///|
-/// A step is a distance travelled in the direction the entering column moves, so the
-/// ratio test may never return a negative one.
+/// The warm path is not allowed to make an infeasibility claim.
 ///
+/// "No column can bring this infeasible row back" is a statement about the basis the dual
+/// simplex is standing on, and the tableau it reads it from can be wrong: on branch and
+/// bound nodes of MIPLIB's `blend2` and `noswot` it stopped with "infeasible" on models a
+/// cold solve then solved to optimality (7.727699757815 and -39.830059908477, both
+/// confirmed by an outside solver). A warm start may be slower than a claim, never more
+/// confident than one, so `solve_from_basis` hands the verdict to the cold path — and this
+/// pins that by calling it directly on a model whose tightened bounds make it infeasible.
+test "the warm path refuses to declare infeasibility" {
+  // min x + y  s.t.  x + y ≥ 4, 0 ≤ x, y ≤ 2 — feasible at (2, 2).
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let x = model.add_var("x", lb=0.0, ub=2.0)
+  let y = model.add_var("y", lb=0.0, ub=2.0)
+  model.set_objective([(x, 1.0), (y, 1.0)])
+  model.add_constraint([(x, 1.0), (y, 1.0)], @model.Rel::GreaterEqual, 4.0)
+  let first = match solve_model(model) {
+    Ok(value) => value
+    Err(reason) => fail("kernel refused the model: " + reason)
+  }
+  let basis = match first.basis {
+    Some(value) => value
+    None => fail("no basis")
+  }
+  // Tighten both bounds so `x + y ≥ 4` can no longer hold.
+  model.set_var_bounds(x, 0.0, 1.0)
+  model.set_var_bounds(y, 0.0, 1.0)
+  let problem = match KernelProblem::from_model(model) {
+    Ok(value) => value
+    Err(reason) => fail("kernel refused the model: " + reason)
+  }
+  let warm = solve_from_basis(problem, SimplexOptions::default(), basis)
+  assert_true(warm is None)
+  // And the verdict is still available, from the path that can justify it.
+  let cold = match solve_model(model) {
+    Ok(value) => value
+    Err(reason) => fail("kernel refused the model: " + reason)
+  }
+  assert_eq(cold.status, Infeasible)
+}
+
+///|
 /// The case that broke this was a basic value a few 1e-10 *outside* its bounds — the
 /// round-off every long run carries. Read as a distance, "already past the bound it is
 /// moving toward" came out negative, and because the strict pass compares against a
@@ -467,3 +506,7 @@ test "the ratio test never returns a negative step" {
   assert_eq(state.row_step(0, 1.0), 0.0)
   assert_true(state.row_step(0, -1.0) >= 0.0)
 }
+
+///|
+/// A step is a distance travelled in the direction the entering column moves, so the
+/// ratio test may never return a negative one.

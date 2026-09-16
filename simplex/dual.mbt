@@ -257,19 +257,21 @@ fn solve_from_basis(
     return Some(state.finish_optimal())
   }
   if code == 1 {
-    // No column can bring an infeasible row back: the model has no feasible point.
-    // The dual solution at that point is what proves it, and it is the same Farkas ray
-    // shape the cold path reports.
-    return Some({
-      status: Infeasible,
-      values: [],
-      objective: 0.0,
-      iterations: state.iterations,
-      duals: state.farkas_ray(),
-      ray: [],
-      basis: None,
-      message: "no feasible point exists (no column can bring an infeasible row back)",
-    })
+    // No column can bring an infeasible row back — but that statement is only as good as
+    // the tableau it was read from, and this path produced it for a *feasible* model: on
+    // branch and bound nodes of MIPLIB's `blend2` and `noswot` the dual simplex stopped
+    // with "infeasible", and a cold solve of the very same model returned an optimum
+    // (7.727699757815066 and -39.830059908477025, both confirmed by an outside solver),
+    // with a ray the independent checker refused in one case and could not even sign in
+    // the other.
+    //
+    // Infeasibility is a claim about the *model*, and the run that answers it has to be
+    // able to justify it. The cold path does: Phase I minimises the artificial sum, and
+    // its duals come with a residual measured against the rows. So this verdict is handed
+    // to the cold path instead, exactly as a lost dual-feasibility invariant already is.
+    // The warm start keeps its speedup where it is safe — repairing feasibility — and
+    // gives up the one shortcut whose evidence it cannot produce.
+    return None
   }
   // An iteration limit or a numerical failure is not a basis worth reporting as an
   // answer; the cold path gets its own attempt at the problem.
@@ -305,12 +307,13 @@ fn State::dual_iterate(self : State) -> Int {
     let duals = self.duals()
     let candidate = self.dual_candidate(delta, weights, duals)
     if candidate.column < 0 {
-      // Nothing can bring this row back, which is the dual simplex's own statement of
-      // infeasibility: no point satisfies the rows. The row that failed is the proof —
-      // see `farkas_ray` — and the sign that makes its inner product with the right
-      // hand side positive is the sign of the bound the value missed.
-      self.dual_ray_row = row
-      self.dual_ray_sign = if below { -1.0 } else { 1.0 }
+      // Nothing can bring this row back. That is the dual simplex's own statement of
+      // infeasibility, and it is the one verdict this path is not allowed to make: it is
+      // a claim about the model, not about this basis, and the caller hands it to the cold
+      // path (see `solve_from_basis`) rather than reporting it. The row that failed used
+      // to be recorded here as a Farkas ray; that machinery is gone with the verdict it
+      // supported, because a ray nothing validates is what produced a false "infeasible"
+      // on two MIPLIB instances.
       return 1
     }
     let column = candidate.column

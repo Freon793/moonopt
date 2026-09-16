@@ -147,11 +147,6 @@ priv struct State {
   /// this is the recession direction a certificate reports.
   mut ray_column : Int
   mut ray_sigma : Double
-  /// Row of the basis inverse that could not be brought back into feasibility during a
-  /// dual simplex run, and the sign that turns that row into a Farkas ray. `-1` means
-  /// the dual simplex did not make that statement.
-  mut dual_ray_row : Int
-  mut dual_ray_sign : Double
   /// The right hand side the run is solved against.
   ///
   /// This is `problem.rhs` plus the degeneracy perturbation, and it is what every
@@ -217,8 +212,6 @@ fn State::new(problem : KernelProblem, options : SimplexOptions) -> State {
     gain_cursor: 0,
     ray_column: -1,
     ray_sigma: 1.0,
-    dual_ray_row: -1,
-    dual_ray_sign: 1.0,
     solve_rhs,
     basis,
     is_basic,
@@ -1346,15 +1339,41 @@ fn solve_once(
         message: "basis became numerically singular during Phase I",
       }
     }
-    // Feasibility is decided by measuring, not by trusting the bookkeeping. The
-    // scaled residual carries the decision: the artificial sum is reported for
-    // diagnosis, but scaled it would say the same thing less precisely.
+    // Feasibility is decided by measuring, not by trusting the bookkeeping.
+    //
+    // The measurement is taken against the right hand side the run actually solved, which
+    // is `solve_rhs` — the model's own right hand side plus the degeneracy perturbation.
+    //
+    // The verdict is drawn only when the violation is *clearly* beyond the tolerance, and
+    // that margin is the point of this branch rather than a detail. A tolerance is the size
+    // at which a measurement stops meaning anything: the ratio test's band and the clamping
+    // of round-off negative basic values both let the equality system be violated by up to
+    // about the tolerance times a row's coefficients, so a point that is feasible can
+    // measure a residual a little above the tolerance. Reporting *infeasible* there is not
+    // a conservative mistake — it prunes a feasible node out of a branch and bound tree and
+    // can make the tree claim an optimum that is not one. A branch and bound node of
+    // `misc07` measured 1.0949e-7 against a 1e-7 tolerance with an artificial sum of 6e-9,
+    // and the model is feasible: with the margin in place the node solves to 1647.8571326,
+    // which is the optimum an outside solver finds (1647.857142857).
+    //
+    // The caller's model is still measured against the unperturbed right hand side: a point
+    // only gets reported as an answer if it survives that (`finish_optimal`), so relaxing
+    // the question here cannot turn into a relaxed answer there.
     let phase1_values = state.values()
-    let (phase1_scaled, phase1_raw) = max_scaled_residual(
-      problem, phase1_values, false,
+    let (phase1_scaled, _) = max_scaled_residual(
+      problem,
+      phase1_values,
+      false,
+      state.solve_rhs,
+    )
+    let (phase1_model_scaled, phase1_raw) = max_scaled_residual(
+      problem,
+      phase1_values,
+      false,
+      problem.rhs,
     )
     let artificial_sum = state.artificial_sum()
-    if phase1_scaled > options.feasibility_tolerance {
+    if phase1_scaled > infeasibility_margin * options.feasibility_tolerance {
       return {
         status: Infeasible,
         values: [],
@@ -1366,7 +1385,7 @@ fn solve_once(
         ray: [],
         basis: None,
         message: "no feasible point exists (scaled row residual " +
-        phase1_scaled.to_string() +
+        phase1_model_scaled.to_string() +
         ", raw " +
         phase1_raw.to_string() +
         ", artificial sum " +
@@ -1449,7 +1468,7 @@ fn State::finish_optimal(self : State) -> SimplexResult {
   // the rows or the non-negativity requirement, judged against the scale of the
   // numbers involved (see max_scaled_residual).
   let tolerance = options.feasibility_tolerance
-  let measured = max_scaled_residual(problem, kernel_values, false)
+  let measured = max_scaled_residual(problem, kernel_values, false, problem.rhs)
   let mut scaled_residual = measured.0
   let mut raw_residual = measured.1
   let mut negativity = max_negativity(kernel_values)
@@ -1460,7 +1479,10 @@ fn State::finish_optimal(self : State) -> SimplexResult {
     if self.refactorize() {
       kernel_values = self.values()
       let (retry_scaled, retry_raw) = max_scaled_residual(
-        problem, kernel_values, false,
+        problem,
+        kernel_values,
+        false,
+        problem.rhs,
       )
       scaled_residual = retry_scaled
       raw_residual = retry_raw
@@ -1508,6 +1530,16 @@ fn State::finish_optimal(self : State) -> SimplexResult {
 }
 
 ///|
+/// How far past the feasibility tolerance a measured violation has to be before Phase I is
+/// allowed to call a model infeasible.
+///
+/// Not a tuning knob but a statement about resolution: the tolerance is the size at which
+/// this kernel stops being able to tell a violation from round-off, so a verdict that says
+/// "no point satisfies these rows" has to be drawn from a measurement clearly above it. The
+/// comment at the Phase I decision has the instance that made this concrete.
+let infeasibility_margin : Double = 10.0
+
+///|
 /// Largest *scaled* row residual over the real columns.
 ///
 /// A residual is judged against the scale of the row it belongs to:
@@ -1520,14 +1552,23 @@ fn State::finish_optimal(self : State) -> SimplexResult {
 /// hundreds, or whose terms sum to tens, is round-off, not infeasibility; a raw
 /// residual of 3.9e-5 against a right hand side of order one is infeasibility.
 ///
+/// How far past the tolerance such a measurement has to be before Phase I may call a model
+/// infeasible is a separate question, and `infeasibility_margin` is where it is answered.
+///
 /// Artificial columns are excluded on purpose: an artificial variable sitting in
 /// the basis would absorb exactly the amount by which its row is violated, so
 /// including them would make the check vacuous. Slacks and surplus columns are
 /// real columns and stay in the measurement.
+///
+/// `reference` is the right hand side the deviation is measured against: the model's own
+/// for an answer that is about to be reported, and the perturbed one the run solved for the
+/// Phase I verdict. The two are not interchangeable — a verdict about feasibility belongs
+/// to the system the run actually solved — and the comment at that decision says why.
 fn max_scaled_residual(
   problem : KernelProblem,
   values : Array[Double],
   include_artificial : Bool,
+  reference : Array[Double],
 ) -> (Double, Double) {
   let signed : Array[Double] = Array::make(problem.nrows, 0.0)
   let magnitude : Array[Double] = Array::make(problem.nrows, 0.0)
@@ -1554,7 +1595,7 @@ fn max_scaled_residual(
   let mut worst = 0.0
   let mut raw = 0.0
   for i = 0; i < problem.nrows; i = i + 1 {
-    let deviation = @core.fabs(signed[i] - problem.rhs[i])
+    let deviation = @core.fabs(signed[i] - reference[i])
     if deviation > raw {
       raw = deviation
     }

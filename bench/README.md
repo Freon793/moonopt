@@ -37,9 +37,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -MaxRow
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-mip-objectives.ps1
 ```
 
-**`mip-report.md` 目前不存在，而且是脚本主动拒绝写的**：分支定界在 `blend2` / `misc07` / `noswot`
-上各遇到一个节点的不可行证书被独立校验器拒绝（内核的**结论**正确、**证书**不成立，见 `CHANGELOG.md`
-的 Known defect）。报告是证据，把一次带着被拒证书的运行写成完整报告，就是拿不可靠的数字当结论。
+**`mip-report.md` 目前不存在，而且是脚本主动拒绝写的**：32 个实例里 `noswot` 仍有一个节点的
+最优性证书被独立校验器拒绝（`dual signs failed: 2.14e-6`，见 `CHANGELOG.md` 的 Known defect）。
+报告是证据，把一次带着被拒证书的运行写成完整报告，就是拿不可靠的数字当结论。
 单个实例的证据仍然可以拿（`--mip` 会逐条打印节点数、校验计数、目标值与独立复核结果），
 但它写在 CHANGELOG / roadmap 里，而不是伪装成一份全清单报告。
 
