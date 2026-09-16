@@ -8,6 +8,13 @@
 /// touching the basis. The basis inverse is updated by the product-form row
 /// operation and rebuilt from the basis columns every `refactorize_every` pivots.
 ///
+/// The column to enter is chosen by measured gain (`|rⱼ| · step`) when
+/// `gain_candidates` is set: the reduced cost alone is a rate, and on the instance
+/// this was measured against the largest rates belonged to columns that were blocked
+/// at once. The gain needs a ratio test to know, so it is measured for a bounded
+/// candidate set per iteration — the Dantzig pick, a pool of recently good columns,
+/// and a rotating window over the column space.
+///
 /// Variables carry both bounds. A non-basic variable sits at one of them, which is
 /// why a finite upper bound is a bound here and not an extra row: on the instances
 /// this kernel is measured against, turning bounds into rows multiplied the row
@@ -127,6 +134,13 @@ priv struct State {
   /// The ratio test and the pivot both need it, and it is decided by the pricing
   /// step that chose the column.
   mut enter_sigma : Double
+  /// Columns whose measured gain was the best in recent iterations, re-measured
+  /// every iteration when `gain_candidates` pricing is on. `-1` is an empty slot.
+  gain_pool : Array[Int]
+  /// The gain each pool slot showed when it was last measured.
+  gain_pool_gains : Array[Double]
+  /// Where the rotating window over the column space stands.
+  mut gain_cursor : Int
   /// The right hand side the run is solved against.
   ///
   /// This is `problem.rhs` plus the degeneracy perturbation, and it is what every
@@ -187,6 +201,9 @@ fn State::new(problem : KernelProblem, options : SimplexOptions) -> State {
     xb: solve_rhs.copy(),
     at_upper: Array::make(n, false),
     enter_sigma: 1.0,
+    gain_pool: Array::make(gain_pool_size, -1),
+    gain_pool_gains: Array::make(gain_pool_size, 0.0),
+    gain_cursor: 0,
     solve_rhs,
     basis,
     is_basic,
@@ -857,6 +874,139 @@ fn State::weak_pivot(self : State, d : Array[Double], leaving : Int) -> Bool {
 }
 
 ///|
+/// How many columns the gain-priced rule remembers between iterations.
+let gain_pool_size : Int = 4
+
+///|
+/// The actual gain of pivoting on `column`: `|r| · step`, where `step` is what the
+/// ratio test allows. A negative value means the column cannot move in the direction
+/// its bound allows.
+///
+/// This is the quantity Dantzig pricing approximates by the reduced cost alone, and
+/// the two differ by the whole step. Measuring it costs one direction and one ratio
+/// test — the same work a pivot does — so it is measured for a bounded candidate set
+/// per iteration rather than for every column.
+///
+/// Uses the shared direction buffer, so the caller must not expect the direction it
+/// had before the call: the iteration recomputes its pivot's direction afterwards.
+fn State::candidate_gain(
+  self : State,
+  column : Int,
+  duals : Array[Double],
+  pointers : ArrayView[Int],
+  rows : ArrayView[Int],
+  values : ArrayView[Double],
+) -> Double {
+  let cap = self.problem.upper[column]
+  if kernel_has_upper(cap) && cap <= 0.0 {
+    return -1.0
+  }
+  let at_upper = self.at_upper[column]
+  let reduced = self.reduced_cost(column, duals, pointers, rows, values)
+  let magnitude = if at_upper { reduced } else { -reduced }
+  if magnitude <= self.options.reduced_cost_tolerance {
+    return -1.0
+  }
+  self.enter_sigma = if at_upper { -1.0 } else { 1.0 }
+  let limit = self.ratio_test(column, self.direction(column))
+  if limit.unbounded {
+    // An unlimited step is as good as a gain gets; the pivot will report it.
+    return 1.0e30
+  }
+  magnitude * limit.step
+}
+
+///|
+/// Picks the entering column by measured gain instead of by reduced cost alone.
+///
+/// The candidates are bounded per iteration on purpose. Measuring a gain costs a
+/// direction and a ratio test, so measuring every column would cost a solve per
+/// column; the set is instead:
+///
+/// - the column Dantzig would have picked (the pricing pass already found it),
+/// - the columns that showed the best measured gains recently, re-measured so a
+///   column that has since become basic or stopped moving drops out,
+/// - a rotating window over the column space, which is how a good column is
+///   *discovered* in the first place.
+///
+/// Returns the winner; the pool and the window cursor are updated as a side effect.
+fn State::choose_by_gain(
+  self : State,
+  duals : Array[Double],
+  dantzig : Int,
+) -> Int {
+  let pointers = self.problem.matrix.col_pointers()
+  let rows = self.problem.matrix.row_indices()
+  let values = self.problem.matrix.values_view()
+  let mut best = dantzig
+  let mut best_gain = self.candidate_gain(
+    dantzig, duals, pointers, rows, values,
+  )
+  // The pool: re-measure what was good, and forget what can no longer enter.
+  for k = 0; k < self.gain_pool.length(); k = k + 1 {
+    let j = self.gain_pool[k]
+    if j < 0 || j >= self.n {
+      continue
+    }
+    if self.is_basic[j] || self.forbid[j] {
+      self.gain_pool[k] = -1
+      self.gain_pool_gains[k] = 0.0
+      continue
+    }
+    if j == best {
+      continue
+    }
+    let gain = self.candidate_gain(j, duals, pointers, rows, values)
+    self.gain_pool_gains[k] = gain
+    if gain > best_gain {
+      best_gain = gain
+      best = j
+    }
+  }
+  // The rotating window: every column gets offered eventually.
+  let window = self.options.gain_candidates - self.gain_pool.length()
+  let mut offered = 0
+  let mut offset = 0
+  while offered < window && offset < self.n {
+    let j = (self.gain_cursor + offset) % self.n
+    offset = offset + 1
+    if self.is_basic[j] || self.forbid[j] {
+      continue
+    }
+    offered = offered + 1
+    if j == best {
+      continue
+    }
+    let gain = self.candidate_gain(j, duals, pointers, rows, values)
+    if gain > best_gain {
+      best_gain = gain
+      best = j
+    }
+  }
+  self.gain_cursor = (self.gain_cursor + offset) % self.n
+  // Remember the winner, keeping the pool ordered by the last measured gain.
+  if best_gain > 0.0 && best_gain < 1.0e30 {
+    let mut slot = -1
+    let mut worst = 0.0
+    let mut present = false
+    for k = 0; k < self.gain_pool.length(); k = k + 1 {
+      if self.gain_pool[k] == best {
+        present = true
+        self.gain_pool_gains[k] = best_gain
+      } else if slot < 0 || self.gain_pool_gains[k] < worst {
+        slot = k
+        worst = self.gain_pool_gains[k]
+      }
+    }
+    if !present && slot >= 0 && best_gain > worst {
+      self.gain_pool[slot] = best
+      self.gain_pool_gains[slot] = best_gain
+    }
+  }
+  best
+}
+
+///|
 /// Runs the current phase to optimality.
 ///
 /// Codes: `0` optimal, `1` unbounded, `2` iteration limit, `3` numerical
@@ -879,6 +1029,14 @@ fn State::iterate(self : State) -> Int {
     let entering = self.choose_entering(duals)
     if entering < 0 {
       return 0
+    }
+    // Gain pricing, when enabled, replaces the column Dantzig priced with the one
+    // whose step is worth the most. The direction and the ratio test are redone for
+    // the winner below, so the choice is authoritative rather than inherited.
+    let mut entering = entering
+    if self.options.gain_candidates > 0 {
+      entering = self.choose_by_gain(duals, entering)
+      self.enter_sigma = if self.at_upper[entering] { -1.0 } else { 1.0 }
     }
     let d = self.direction(entering)
     let limit = self.ratio_test(entering, d)
@@ -1002,6 +1160,7 @@ fn solve_problem(
     pivot_relative_tolerance: options.pivot_relative_tolerance,
     start_with_bland: true,
     stall_window: options.stall_window,
+    gain_candidates: options.gain_candidates,
     degeneracy_perturbation: options.degeneracy_perturbation,
     max_factor_entries: options.max_factor_entries,
     reduced_cost_tolerance: options.reduced_cost_tolerance,

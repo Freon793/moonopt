@@ -275,6 +275,40 @@ test "model path: an optimum that sits on two upper bounds" {
 }
 
 ///|
+/// Gain pricing is a control on the *run*, not on its answer: which column enters
+/// changes the path through the vertices, and the optimum a path arrives at has to
+/// be the same one. This pins that at a budget of nothing, of one measured
+/// candidate, and of more than there are columns.
+test "gain pricing changes the run, not the answer" {
+  // min -x - 2y  s.t.  x + y <= 4,  x + 3y <= 6,  x, y >= 0  ->  -5 at (3, 1)
+  let cost : Array[Double] = [-1.0, -2.0]
+  let rows : Array[(Array[Double], @model.Rel, Double)] = [
+    ([1.0, 1.0], @model.Rel::LessEqual, 4.0),
+    ([1.0, 3.0], @model.Rel::LessEqual, 6.0),
+  ]
+  let baseline = solve_standard_with(2, cost, rows, SimplexOptions::default())
+  assert_eq(baseline.status, Optimal)
+  assert_true(@core.approx_eq(baseline.objective, -5.0, rel=1.0e-9, abs=1.0e-9))
+  for budget in [0, 1, 64] {
+    let result = solve_standard_with(
+      2,
+      cost,
+      rows,
+      SimplexOptions::with_gain_candidates(budget),
+    )
+    assert_eq(result.status, Optimal)
+    assert_true(
+      @core.approx_eq(
+        result.objective,
+        baseline.objective,
+        rel=1.0e-9,
+        abs=1.0e-9,
+      ),
+    )
+  }
+}
+
+///|
 /// The stall window is a guard on the *run*, never on its answer. It used to be
 /// `2m + 50` pivots, which on a kernel problem of tens of thousands of rows asks
 /// for more consecutive unimproved pivots than the default iteration cap allows,

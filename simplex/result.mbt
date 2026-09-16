@@ -76,6 +76,24 @@ pub(all) struct SimplexOptions {
   /// termination guarantee, not a fast path: firing it early costs iterations,
   /// never firing it costs an answer.
   stall_window : Int
+  /// Number of columns per iteration whose *actual* objective gain is measured
+  /// before pivoting; zero keeps plain Dantzig pricing.
+  ///
+  /// Dantzig prices by the reduced cost alone, which is the improvement *rate* of a
+  /// column, not the improvement: a column that covers many uncovered rows has the
+  /// largest rate and is often blocked by the first nearly-tight row it meets, so the
+  /// step it can take is tiny. Measured on `fast0507`, the column Dantzig picks had
+  /// `r = −121.1` with a step of `0.00632` (gain `0.76`) while a sample of 24 columns
+  /// already contained one with `r = −6` and a step of `1.0` (gain `6.0`) — the
+  /// Dantzig choice was worth a tenth of what was available, and Phase II crawled at
+  /// `2e-5` per pivot because of it.
+  ///
+  /// The gain `|r| · step` is only known after a ratio test, which costs about as
+  /// much as the pivot itself, so it is measured for a bounded candidate set instead
+  /// of for every column: the Dantzig pick, a few columns that recently showed the
+  /// best gains, and a rotating window over the column space. Set this to the total
+  /// number of measurements per iteration (`0` disables the whole thing).
+  gain_candidates : Int
   /// Relative size of the perturbation added to the right hand side before the run
   /// starts. This is the classical answer to degeneracy, and degeneracy — not
   /// scaling — is what breaks this kernel on the hard instance: noswot's
@@ -136,6 +154,7 @@ pub fn SimplexOptions::default() -> SimplexOptions {
     pivot_relative_tolerance: 1.0e-8,
     start_with_bland: false,
     stall_window: 500,
+    gain_candidates: 32,
     degeneracy_perturbation: 1.0e-12,
     max_factor_entries: 20000000,
     reduced_cost_tolerance: 1.0e-9,
@@ -156,6 +175,7 @@ pub fn SimplexOptions::relaxed() -> SimplexOptions {
     pivot_relative_tolerance: base.pivot_relative_tolerance,
     start_with_bland: base.start_with_bland,
     stall_window: base.stall_window,
+    gain_candidates: base.gain_candidates,
     degeneracy_perturbation: base.degeneracy_perturbation,
     max_factor_entries: base.max_factor_entries,
     reduced_cost_tolerance: base.reduced_cost_tolerance,
@@ -178,6 +198,7 @@ pub fn SimplexOptions::with_max_iterations(
     pivot_relative_tolerance: base.pivot_relative_tolerance,
     start_with_bland: base.start_with_bland,
     stall_window: base.stall_window,
+    gain_candidates: base.gain_candidates,
     degeneracy_perturbation: base.degeneracy_perturbation,
     max_factor_entries: base.max_factor_entries,
     reduced_cost_tolerance: base.reduced_cost_tolerance,
@@ -204,6 +225,7 @@ pub fn SimplexOptions::limit_iterations(
     pivot_relative_tolerance: self.pivot_relative_tolerance,
     start_with_bland: self.start_with_bland,
     stall_window: self.stall_window,
+    gain_candidates: self.gain_candidates,
     degeneracy_perturbation: self.degeneracy_perturbation,
     max_factor_entries: self.max_factor_entries,
     reduced_cost_tolerance: self.reduced_cost_tolerance,
@@ -227,6 +249,32 @@ pub fn SimplexOptions::with_stall_window(stall_window : Int) -> SimplexOptions {
     pivot_relative_tolerance: base.pivot_relative_tolerance,
     start_with_bland: base.start_with_bland,
     stall_window,
+    gain_candidates: base.gain_candidates,
+    degeneracy_perturbation: base.degeneracy_perturbation,
+    max_factor_entries: base.max_factor_entries,
+    reduced_cost_tolerance: base.reduced_cost_tolerance,
+    relax_integrality: base.relax_integrality,
+    max_kernel_rows: base.max_kernel_rows,
+  }
+}
+
+///|
+/// Options with an explicit gain-pricing budget. Used by the tests to pin that the
+/// pricing rule is a control on the *run*: which column enters changes the path, and
+/// the answer has to be the same whether the gain is measured or not.
+pub fn SimplexOptions::with_gain_candidates(
+  gain_candidates : Int,
+) -> SimplexOptions {
+  let base = SimplexOptions::default()
+  {
+    max_iterations: base.max_iterations,
+    refactorize_every: base.refactorize_every,
+    feasibility_tolerance: base.feasibility_tolerance,
+    pivot_tolerance: base.pivot_tolerance,
+    pivot_relative_tolerance: base.pivot_relative_tolerance,
+    start_with_bland: base.start_with_bland,
+    stall_window: base.stall_window,
+    gain_candidates,
     degeneracy_perturbation: base.degeneracy_perturbation,
     max_factor_entries: base.max_factor_entries,
     reduced_cost_tolerance: base.reduced_cost_tolerance,
@@ -250,6 +298,7 @@ pub fn SimplexOptions::with_max_kernel_rows(
     pivot_relative_tolerance: base.pivot_relative_tolerance,
     start_with_bland: base.start_with_bland,
     stall_window: base.stall_window,
+    gain_candidates: base.gain_candidates,
     degeneracy_perturbation: base.degeneracy_perturbation,
     max_factor_entries: base.max_factor_entries,
     reduced_cost_tolerance: base.reduced_cost_tolerance,

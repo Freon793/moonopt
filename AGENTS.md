@@ -38,7 +38,12 @@ You can browse and install extra skills here:
     fallback, a pivot stability check that rebuilds stale factors before pivoting,
     one recovery attempt with Bland's rule after a numerical failure, a row ceiling
     and a fill budget that refuse a problem worth refusing, and a residual
-    self-check before it will report `Optimal`. `lu.mbt` holds the factorization;
+    self-check before it will report `Optimal`. Pricing is Dantzig plus a **measured
+    gain** rule (`gain_candidates`): the reduced cost is an improvement rate, so the
+    column that enters is chosen by the gain `|r| · step` measured for a bounded
+    candidate set (Dantzig's pick, a pool of recently good columns, a rotating window
+    over the column space), because the step is only known after a ratio test.
+    `lu.mbt` holds the factorization;
     its factors are verified against a dense reference that lives in the test file,
     not in the kernel. A pivot step is passed in by the ratio test rather than
     recomputed from the pivot row: with two bounds per variable, which bound a
