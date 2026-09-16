@@ -195,6 +195,24 @@ pub fn Model::add_constraint(
 }
 
 ///|
+/// A copy that can be changed without touching the original.
+///
+/// Used by the branch and bound, where every node is the parent model with one variable's
+/// bound tightened: `set_var_bounds` replaces the entry it is given, so copying the
+/// arrays is enough to keep the parent intact. The terms inside a constraint are shared
+/// rather than copied — nothing in this package mutates them, and a tree of nodes that
+/// copied every row's coefficients would spend its memory on the part of the model that
+/// branching never touches.
+pub fn Model::clone(self : Model) -> Model {
+  {
+    sense: self.sense,
+    objective_terms: self.objective_terms.copy(),
+    vars: self.vars.copy(),
+    constraints: self.constraints.copy(),
+  }
+}
+
+///|
 /// Adds a constraint row carrying a human readable name (used by reports and by
 /// the MPS writer).
 pub fn Model::add_named_constraint(

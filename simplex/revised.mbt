@@ -626,17 +626,25 @@ fn State::ratio_test(
   for i = 0; i < self.m; i = i + 1 {
     let rate = sigma * d[i]
     if rate > tolerance {
-      if self.xb[i] > -feasibility {
-        let ratio = self.xb[i] / rate
-        if strict_row < 0 || ratio < ratio_min {
-          ratio_min = ratio
-          strict_row = i
-        }
+      // A value at or below zero allows no further fall: the limit is zero, not the
+      // negative ratio `xb / rate` would give. Letting a negative ratio into the
+      // strict comparison is how the step comes out backwards — `ratio_min` starts at
+      // zero, so the first negative candidate wins — and a backwards step moves every
+      // basic value away from its bounds at once.
+      let ratio = if self.xb[i] > 0.0 { self.xb[i] / rate } else { 0.0 }
+      if strict_row < 0 || ratio < ratio_min {
+        ratio_min = ratio
+        strict_row = i
       }
     } else if rate < -tolerance {
       let cap = upper[self.basis[i]]
-      if kernel_has_upper(cap) && self.xb[i] < cap + feasibility {
-        let ratio = (cap - self.xb[i]) / -rate
+      if kernel_has_upper(cap) {
+        // Mirror image: a value already at or above its own cap allows no further rise.
+        let ratio = if self.xb[i] < cap {
+          (cap - self.xb[i]) / -rate
+        } else {
+          0.0
+        }
         if strict_row < 0 || ratio < ratio_min {
           ratio_min = ratio
           strict_row = i
@@ -695,14 +703,13 @@ fn State::choose_leaving_row(
     let mut ratio = 0.0
     let mut limits = false
     if rate > tolerance {
-      if self.xb[i] > -feasibility {
-        ratio = self.xb[i] / rate
-        limits = true
-      }
+      // Same clamping as the strict pass: negative ratios are not step limits.
+      ratio = if self.xb[i] > 0.0 { self.xb[i] / rate } else { 0.0 }
+      limits = true
     } else if rate < -tolerance {
       let cap = upper[self.basis[i]]
-      if kernel_has_upper(cap) && self.xb[i] < cap + feasibility {
-        ratio = (cap - self.xb[i]) / -rate
+      if kernel_has_upper(cap) {
+        ratio = if self.xb[i] < cap { (cap - self.xb[i]) / -rate } else { 0.0 }
         limits = true
       }
     }
@@ -759,10 +766,18 @@ fn State::choose_leaving_row(
 /// step of the wrong sign gets into the state, and with a bound that is the
 /// infinite sentinel the "rise" reading is not a step at all.
 fn State::row_step(self : State, row : Int, rate : Double) -> Double {
-  if rate > 0.0 {
+  let step = if rate > 0.0 {
     self.xb[row] / rate
   } else {
     (self.problem.upper[self.basis[row]] - self.xb[row]) / -rate
+  }
+  // A step is a distance travelled in the direction the entering column moves, so it
+  // can never be negative. A basic value marginally outside its bounds would otherwise
+  // read as a negative distance here and be applied as a backwards step.
+  if step > 0.0 {
+    step
+  } else {
+    0.0
   }
 }
 

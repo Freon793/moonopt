@@ -220,6 +220,15 @@ fn row_complementarity_violation(
 ///|
 /// Complementary slackness on the variables: a column with a non-zero reduced cost
 /// has to sit on the bound that reduced cost points at.
+///
+/// Both halves of the product are relative: how large the reduced cost is against the
+/// scale its own objective coefficient and multipliers give, and how far the variable
+/// sits from the bound measured against its own size. The first half used to be an
+/// absolute `1e-7`, while every other measurement in this package is scaled, and that
+/// is how a correct solve of `khb05250` came to be refused: its column 11 carried a
+/// reduced cost of `2.7e-7` against a scale of `5e6` — round-off, five parts in 1e14 —
+/// so the check demanded the variable sit at a bound it had no reason to reach, and
+/// reported a violation of 0.47 for a certificate whose duality gap was 4e-13.
 fn variable_complementarity_violation(
   model : @model.Model,
   x : Array[Double],
@@ -230,27 +239,25 @@ fn variable_complementarity_violation(
   let r = reduced_costs(model, cost, duals)
   let mut worst = 0.0
   for j = 0; j < model.num_vars(); j = j + 1 {
-    if @core.fabs(r[j]) <= tolerance {
+    let relative = @core.fabs(r[j]) / reduced_cost_scale(model, j, cost, duals)
+    if relative <= tolerance {
       continue
     }
     let variable = model.get_var(j)
-    let scale = 1.0 + @core.fabs(x[j])
-    if r[j] > 0.0 {
+    let distance = if r[j] > 0.0 {
       if !has_lower(variable.lb) {
         continue
       }
-      let raw = @core.fmax(0.0, x[j] - variable.lb)
-      if raw / scale > worst {
-        worst = raw / scale
-      }
+      @core.fmax(0.0, x[j] - variable.lb)
     } else {
       if !has_upper(variable.ub) {
         continue
       }
-      let raw = @core.fmax(0.0, variable.ub - x[j])
-      if raw / scale > worst {
-        worst = raw / scale
-      }
+      @core.fmax(0.0, variable.ub - x[j])
+    }
+    let violation = relative * (distance / (1.0 + @core.fabs(x[j])))
+    if violation > worst {
+      worst = violation
     }
   }
   worst

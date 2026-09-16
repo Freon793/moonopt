@@ -15,6 +15,8 @@ pub(all) struct SolveFlags {
   verify : Bool
   certificate_path : String
   reoptimize : Bool
+  mip : Bool
+  max_nodes : Int
 }
 
 // Type aliases

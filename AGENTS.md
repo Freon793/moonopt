@@ -74,9 +74,20 @@ You can browse and install extra skills here:
     where a reviewer checks it. The multiplier convention and the weak-duality
     derivation are documented in `verify/verify.mbt`; a producer has to use that
     convention, and the kernel's mapping onto it lives in `simplex/certificate.mbt`.
-  - `mip/`:
-    added milestone by milestone, see `docs/roadmap.md`. The M3+M4 completion
-    standards are met, so the scope gate for this milestone is open.
+  - `mip/`: branch and bound over the linear kernel, added milestone by milestone,
+    see `docs/roadmap.md`. A node is its parent plus one tightened bound, rebuilt
+    from the root along the chain rather than copied per node; the child is solved
+    warm from the basis its parent ended on (`solve_model_with_basis`), because a
+    bound change leaves the reduced costs alone. The search is best-bound, prunes
+    against the incumbent, and **verifies every relaxation with `@verify` before
+    branching on it** — a refused certificate stops the run as `Unverified` instead
+    of becoming a branch. Only an exhausted tree (or one whose open bounds are all
+    closed against the incumbent) is reported `Optimal`; a node budget ends the run
+    as `NodeLimit` with the incumbent and the bound still open, a relaxation that
+    reached no verdict is counted as open work rather than as a refused claim, and
+    an unbounded relaxation is `UnboundedRelaxation` because an improving ray of the
+    relaxation carries no integrality of its own. A model that fails validation is
+    `Invalid`, never `Infeasible`.
   - `cmd/main/`: demo CLI. `cmd/parse/`: model file inspection CLI. `examples/`:
     runnable examples. `bench/`: data policy, fetch and report scripts, reports.
     `docs/`: design notes, technical roadmap and the ecosystem survey that

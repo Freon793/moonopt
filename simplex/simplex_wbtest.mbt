@@ -424,3 +424,46 @@ test "model path: the default row limit does not interfere with small models" {
   assert_eq(result.status, Optimal)
   assert_true(@core.approx_eq(result.objective, 0.5, rel=1.0e-9, abs=1.0e-9))
 }
+
+///|
+/// A step is a distance travelled in the direction the entering column moves, so the
+/// ratio test may never return a negative one.
+///
+/// The case that broke this was a basic value a few 1e-10 *outside* its bounds — the
+/// round-off every long run carries. Read as a distance, "already past the bound it is
+/// moving toward" came out negative, and because the strict pass compares against a
+/// `ratio_min` that starts at zero the first such row won: the entering variable then
+/// travelled backwards, every basic value moved away from its bounds at once, and the
+/// rows that ended up outside were *skipped* by the guards meant to keep them in. On a
+/// branch and bound node of MIPLIB's `22433` that walked a basic artificial down to -4,
+/// and Phase I reported a feasible model as infeasible; the verifier's refusal of the
+/// Farkas ray is what made it visible.
+test "the ratio test never returns a negative step" {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let x = model.add_var("x", lb=0.0, ub=1.0)
+  let y = model.add_var("y", lb=0.0, ub=1.0)
+  model.set_objective([(x, 1.0), (y, 1.0)])
+  model.add_constraint([(x, 1.0), (y, 1.0)], @model.Rel::LessEqual, 1.0)
+  let problem = match KernelProblem::from_model(model) {
+    Ok(value) => value
+    Err(reason) => fail("kernel refused the model: " + reason)
+  }
+  let state = State::new(problem, SimplexOptions::default())
+  // `x` (kernel column 0, upper bound 1) as the basic column of row 0, sitting a hair
+  // above its own upper bound, with an entering column that pushes it further up.
+  state.basis[0] = 0
+  state.xb[0] = 1.0 + 2.0e-10
+  state.enter_sigma = 1.0
+  let up = state.ratio_test(1, [-1.0])
+  assert_true(up.step >= 0.0)
+  assert_eq(up.step, 0.0)
+  // And the mirror case: a basic value a hair below zero, pushed further down.
+  state.basis[0] = 0
+  state.xb[0] = -2.0e-10
+  let down = state.ratio_test(1, [1.0])
+  assert_true(down.step >= 0.0)
+  // `row_step` is the routine that produced the backward distance, so it is pinned on
+  // its own as well.
+  assert_eq(state.row_step(0, 1.0), 0.0)
+  assert_true(state.row_step(0, -1.0) >= 0.0)
+}

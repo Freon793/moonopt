@@ -12,6 +12,7 @@
 /// moon run cmd/parse -- --manifest <list-file>
 /// moon run cmd/parse -- <file> --solve --max-rows 300
 /// moon run cmd/parse -- <file> --presolve --relax
+/// moon run cmd/parse -- <file> --mip --max-nodes 5000
 /// ```
 ///
 /// A manifest is a text file with one path per line; `#` starts a comment. The
@@ -28,6 +29,11 @@
 /// certificate as JSON too, so the check can be repeated somewhere else with
 /// `--certificate`, which reads a certificate from a file and checks it without
 /// solving anything. A refuted certificate exits non-zero.
+///
+/// `--mip` solves a model with integer variables by branch and bound instead of
+/// reporting a single relaxation: every node's relaxation is verified, and only an
+/// exhausted tree is called optimal. `--max-nodes` bounds the search, and a run that
+/// stops at that bound prints the incumbent together with the bound still open.
 
 ///|
 /// Prints the usage line.
@@ -35,6 +41,7 @@ fn print_usage() -> Unit {
   println("usage: moon run cmd/parse -- <file> [<file> ...]")
   println("       moon run cmd/parse -- --manifest <list-file>")
   println("       moon run cmd/parse -- <file> --verify")
+  println("       moon run cmd/parse -- <file> --mip [--max-nodes <n>]")
   println(
     "       moon run cmd/parse -- <file> --certificate <certificate.json>",
   )
@@ -150,6 +157,11 @@ pub(all) struct SolveFlags {
   /// Solve, tighten one bound, and reoptimize from the basis the first solve left
   /// behind — the measurement behind "a warm start is cheaper".
   reoptimize : Bool
+  /// Branch and bound instead of a single relaxation: for a model with integer
+  /// variables the linear kernel's answer is not the model's answer.
+  mip : Bool
+  /// Node budget for a branch and bound run; zero means the library default.
+  max_nodes : Int
 }
 
 ///|
@@ -545,11 +557,150 @@ fn solve_and_report(model : @model.Model, flags : SolveFlags) -> Bool {
   if flags.verify {
     return verify_model(model, flags)
   }
+  if flags.mip {
+    return mip_report(model, flags)
+  }
   if flags.reoptimize {
     return reoptimize_report(model, flags)
   }
   report_solution(model, flags)
   true
+}
+
+///|
+/// Status as text, so the branch and bound report reads the same way the kernel's does.
+fn mip_status_name(status : @mip.MipStatus) -> String {
+  match status {
+    @mip.MipStatus::Optimal => "optimal"
+    @mip.MipStatus::Infeasible => "infeasible"
+    @mip.MipStatus::NodeLimit => "node-limit"
+    @mip.MipStatus::UnboundedRelaxation => "unbounded-relaxation"
+    @mip.MipStatus::Unverified => "unverified"
+    @mip.MipStatus::Invalid => "invalid"
+  }
+}
+
+///|
+/// The largest distance between an integer variable's value and a whole number. Written
+/// here rather than taken from the search so the report is not the search marking its own
+/// homework.
+fn max_integrality_violation(
+  model : @model.Model,
+  values : Array[Double],
+) -> Double {
+  let mut worst = 0.0
+  for j = 0; j < model.num_vars() && j < values.length(); j = j + 1 {
+    if !model.get_var(j).is_int {
+      continue
+    }
+    let value = values[j]
+    let truncated = Double::from_int(value.to_int())
+    let mut nearest = truncated
+    if value - truncated >= 0.5 {
+      nearest = truncated + 1.0
+    } else if truncated - value >= 0.5 {
+      nearest = truncated - 1.0
+    }
+    let distance = @core.fabs(value - nearest)
+    if distance > worst {
+      worst = distance
+    }
+  }
+  worst
+}
+
+///|
+/// The branch and bound path: solve a model with integer variables and report what the
+/// search proved.
+///
+/// Only `optimal` claims an answer, and it is only reached when the tree is exhausted or
+/// every open node's bound is closed against the incumbent; anything else prints the
+/// incumbent it has together with the bound still open. The point behind an answer is
+/// checked against the original rows and bounds by the presolve package's own routines,
+/// plus an integrality count written for this report, so the line says "checked" rather
+/// than "believed". Presolve is deliberately not applied to an integer model here: the
+/// search's own certificates are stated against the model it was handed, and reducing
+/// that model would leave the two describing different problems.
+fn mip_report(model : @model.Model, flags : SolveFlags) -> Bool {
+  if model.num_constraints() > flags.max_rows {
+    println(
+      "       mip=skipped(rows=" +
+      model.num_constraints().to_string() +
+      " > " +
+      flags.max_rows.to_string() +
+      ")",
+    )
+    return true
+  }
+  if flags.presolve {
+    println(
+      "       mip=presolve-skipped(an integer model goes to the kernel as it is)",
+    )
+  }
+  let options : @mip.MipOptions = {
+    max_nodes: if flags.max_nodes > 0 {
+      flags.max_nodes
+    } else {
+      20000
+    },
+    max_iterations: if flags.max_iterations > 0 {
+      flags.max_iterations
+    } else {
+      20000
+    },
+    tolerance: 1.0e-7,
+    verify_nodes: true,
+    node_solver: None,
+  }
+  let result = @mip.solve_mip(model, options)
+  let mut line = "       mip=" +
+    mip_status_name(result.status) +
+    " nodes=" +
+    result.nodes.to_string() +
+    " verified=" +
+    result.verified.to_string()
+  if result.values.length() > 0 {
+    line = line + " obj=" + result.objective.to_string()
+  }
+  if result.status == @mip.MipStatus::NodeLimit {
+    line = line +
+      " bound=" +
+      result.bound.to_string() +
+      " gap=" +
+      result.gap.to_string()
+  }
+  if result.message != "" {
+    line = line + " (" + result.message + ")"
+  }
+  println(line)
+  let tolerance = 1.0e-7
+  if result.values.length() > 0 {
+    let rows = @presolve.max_row_violation(model, result.values)
+    let bounds = @presolve.max_bound_violation(model, result.values)
+    let integrality = max_integrality_violation(model, result.values)
+    let ok = rows <= tolerance &&
+      bounds <= tolerance &&
+      integrality <= tolerance
+    println(
+      "       point: worst row violation " +
+      rows.to_string() +
+      ", worst bound violation " +
+      bounds.to_string() +
+      ", worst integrality violation " +
+      integrality.to_string() +
+      (if ok {
+        " (feasible and whole)"
+      } else {
+        " (FAILED: the reported point is not an integer point of the model)"
+      }),
+    )
+    if !ok {
+      return false
+    }
+  }
+  // A refused certificate is a failure of the run, not of the file: the exit code has to
+  // say so, exactly as it does on the single relaxation path.
+  result.status != @mip.MipStatus::Unverified
 }
 
 ///|
@@ -710,6 +861,8 @@ fn main {
   let mut max_iterations = 0
   let mut verify_enabled = false
   let mut reoptimize_enabled = false
+  let mut mip_enabled = false
+  let mut max_nodes = 0
   let mut certificate_path = ""
   let mut index = 1
   while index < args.length() {
@@ -730,6 +883,22 @@ fn main {
       solve_enabled = true
       index = index + 1
       continue
+    }
+    if argument == "--mip" {
+      mip_enabled = true
+      solve_enabled = true
+      index = index + 1
+      continue
+    }
+    if argument == "--max-nodes" {
+      if index + 1 < args.length() {
+        match @format.parse_index(args[index + 1]) {
+          Some(value) => max_nodes = value
+          None => ()
+        }
+        index = index + 2
+        continue
+      }
     }
     if argument == "--certificate" {
       if index + 1 < args.length() {
@@ -824,6 +993,8 @@ fn main {
     verify: verify_enabled,
     certificate_path,
     reoptimize: reoptimize_enabled,
+    mip: mip_enabled,
+    max_nodes,
   }
   for path in files {
     if !inspect(path, flags) {

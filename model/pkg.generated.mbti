@@ -29,6 +29,7 @@ pub struct Model {
 pub fn Model::add_constraint(Self, Array[(Int, Double)], Rel, Double) -> Unit
 pub fn Model::add_named_constraint(Self, Array[(Int, Double)], Rel, Double, String) -> Unit
 pub fn Model::add_var(Self, String, lb? : Double, ub? : Double, is_int? : Bool) -> Int
+pub fn Model::clone(Self) -> Self
 pub fn Model::constraint(Self, Int) -> Constraint
 pub fn Model::get_var(Self, Int) -> Var
 pub fn Model::is_valid(Self) -> Bool

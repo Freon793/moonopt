@@ -66,6 +66,35 @@ test "an optimality certificate is accepted" {
 }
 
 ///|
+/// A tiny reduced cost on a large scale is round-off, not a price: the column
+/// complementarity check has to judge it the way every other measurement in this package
+/// judges its own numbers.
+///
+/// `min 2500000·y  s.t.  y ≥ 1,  0 ≤ y ≤ 1` has its optimum at `y = 1` with the multiplier
+/// `2500000`. Taking that multiplier a hair low leaves a reduced cost of `1e-6` — ten
+/// times an absolute `1e-7`, and two parts in 1e13 of the scale the multiplier and the
+/// cost give. Read as a real reduced cost, it demanded that `y` sit at its lower bound and
+/// refused a certificate whose duality gap is 4e-13. This is the shape of that refusal on
+/// MIPLIB's `khb05250`, reduced to one variable.
+test "a round-off reduced cost is not a complementarity violation" {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let y = model.add_var("y", lb=0.0, ub=1.0)
+  model.set_objective([(y, 2500000.0)])
+  model.add_constraint([(y, 1.0)], @model.Rel::GreaterEqual, 1.0)
+  let verdict = @verify.verify(
+    model,
+    certificate(@verify.Claim::Optimal, [1.0], [2499999.999999], [], 2500000.0),
+  )
+  assert_true(verdict.accepted)
+  for item in verdict.checks {
+    assert_true(item.ok)
+  }
+  // The point of the case: this reduced cost is well above any absolute threshold a reader
+  // might reach for, and only its size against the scale makes it round-off.
+  assert_true(@core.fabs(2500000.0 - 2499999.999999) > 1.0e-7)
+}
+
+///|
 test "a feasible but non-optimal point is rejected" {
   let model = two_variable_lp()
   let values = feasible_not_optimal()

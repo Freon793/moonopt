@@ -1,0 +1,64 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Freon793/moonopt/mip"
+
+import {
+  "Freon793/moonopt/model",
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub fn solve_mip(@model.Model, MipOptions) -> MipResult
+
+// Errors
+
+// Types and methods
+pub(all) struct MipOptions {
+  max_nodes : Int
+  max_iterations : Int
+  tolerance : Double
+  verify_nodes : Bool
+  node_solver : ((@model.Model) -> NodeSolution)?
+}
+pub fn MipOptions::default() -> Self
+pub fn MipOptions::with_max_nodes(Int) -> Self
+pub fn MipOptions::with_node_solver(Self, (@model.Model) -> NodeSolution) -> Self
+pub fn MipOptions::without_verification(Self) -> Self
+
+pub struct MipResult {
+  status : MipStatus
+  values : Array[Double]
+  objective : Double
+  bound : Double
+  gap : Double
+  nodes : Int
+  verified : Int
+  message : String
+} derive(@debug.Debug)
+
+pub(all) enum MipStatus {
+  Optimal
+  Infeasible
+  NodeLimit
+  UnboundedRelaxation
+  Unverified
+  Invalid
+} derive(Eq, @debug.Debug)
+
+pub(all) struct NodeSolution {
+  status : NodeStatus
+  values : Array[Double]
+  objective : Double
+  duals : Array[Double]
+  ray : Array[Double]
+}
+
+pub(all) enum NodeStatus {
+  Optimal
+  Infeasible
+  Unbounded
+  Unfinished
+} derive(Eq, @debug.Debug)
+
+// Type aliases
+
+// Traits

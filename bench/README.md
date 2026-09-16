@@ -24,14 +24,24 @@ MIPLIB 2017 —— 它提供同样性质的工业实例，但以纯 MPS（gzip �
 | `fetch-instances.ps1` | 下载实例到 `bench/data/instances/`，生成 `manifest.txt`（相对路径，可移植） |
 | `report-parse.ps1` | 通过 `moon run cmd/parse -- --manifest ...` 解析全部实例，生成 `parse-report.md` |
 | `report-solve.ps1` | 加 `--solve --relax --max-rows N` 求解，生成 `solve-report.md` |
+| `report-mip.ps1` | 加 `--mip --max-nodes N` 做分支定界，生成 `mip-report.md`（**当前拒绝写报告**，见下） |
 | `check-relaxation-bounds.ps1` | 把求解报告里的目标值与 MIPLIB 官方最优值表对拍 |
+| `check-mip-objectives.ps1` | 把分支定界报告里每个 `optimal` 与官方最优值**取等**对拍，并断言 `verified == nodes` |
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/fetch-instances.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-parse.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 1000 -Presolve
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-relaxation-bounds.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -MaxRows 300 -MaxNodes 300 -MaxIterations 5000
+powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-mip-objectives.ps1
 ```
+
+**`mip-report.md` 目前不存在，而且是脚本主动拒绝写的**：分支定界在 `blend2` / `misc07` / `noswot`
+上各遇到一个节点的不可行证书被独立校验器拒绝（内核的**结论**正确、**证书**不成立，见 `CHANGELOG.md`
+的 Known defect）。报告是证据，把一次带着被拒证书的运行写成完整报告，就是拿不可靠的数字当结论。
+单个实例的证据仍然可以拿（`--mip` 会逐条打印节点数、校验计数、目标值与独立复核结果），
+但它写在 CHANGELOG / roadmap 里，而不是伪装成一份全清单报告。
 
 `report-solve.ps1` 用 **native release** 目标运行内核：同一实例在默认 wasm 目标上要慢约 6 倍
 （实测 `mod010`：wasm 119.6s / native debug 203.6s / native release 18.8s），
