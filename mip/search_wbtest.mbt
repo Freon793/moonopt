@@ -45,6 +45,53 @@ test "the dive size counts fractional integers and only those" {
 }
 
 ///|
+/// The dive is what a relaxation with no whole point is offered, and its step budget is
+/// what keeps it from being a way of not searching. Two properties hold whatever the budget
+/// is: the walk never spends more than the budget, and whatever it hands back is a whole
+/// point that satisfies the model. The ordering inside the walk matters for the first
+/// property — a walk that lands on its last step has found a point, so integrality is read
+/// before the budget — and that ordering was a real defect: a two-step walk with a two-step
+/// budget used to come back empty.
+test "the dive never spends more than its budget" {
+  // max x + y  s.t.  x + y <= 3.3, x and y integers in [0, 4]. The relaxation is optimal
+  // all along `x + y = 3.3`, so it stands at `(3.3, 0)` or `(0, 3.3)` — either way one
+  // fractional variable, and rounding it to the nearer whole number leaves the other one
+  // 0.3 short, so the walk needs exactly two relaxations to reach `(3, 0)` or `(0, 3)`.
+  // That is what makes the ordering inside the walk observable: with a budget of one the
+  // walk must report nothing, because the step it could afford did not make the point whole.
+  let model = @model.Model::new(@model.Sense::Maximize)
+  let x = model.add_var("x", ub=4.0, is_int=true)
+  let y = model.add_var("y", ub=4.0, is_int=true)
+  model.set_objective([(x, 1.0), (y, 1.0)])
+  model.add_constraint([(x, 1.0), (y, 1.0)], @model.Rel::LessEqual, 3.3)
+  let options = MipOptions::default()
+  let (start, basis) = kernel_node(model, options, None)
+  assert_eq(start.status, NodeStatus::Optimal)
+  let mut landed_at = -1
+  for budget = 1; budget <= 4; budget = budget + 1 {
+    let dive = dive_for_incumbent(model, options, start, basis, budget)
+    assert_true(dive.relaxations <= budget)
+    assert_true(dive.verified <= dive.relaxations)
+    if dive.values.length() > 0 {
+      if landed_at < 0 {
+        landed_at = budget
+      }
+      // Whole, inside its bounds, and satisfying the row — checked here rather than taken
+      // from the walk's own account of itself.
+      for j = 0; j < model.num_vars(); j = j + 1 {
+        let value = dive.values[j]
+        assert_true(@core.fabs(value - round_of(value)) < 1.0e-6)
+        assert_true(value >= -1.0e-6 && value <= 4.0 + 1.0e-6)
+      }
+      assert_true(dive.values[0] + dive.values[1] <= 3.3 + 1.0e-6)
+    }
+  }
+  // The budget bounds the walk and the walk uses it: one relaxation is not enough for this
+  // model, two are, and landing on the last step still reports the point.
+  assert_eq(landed_at, 2)
+}
+
+///|
 test "the branching variable is the integer one furthest from a whole number" {
   let model = @model.Model::new(@model.Sense::Minimize)
   model.add_var("a", lb=0.0, ub=10.0, is_int=true) |> ignore

@@ -140,6 +140,15 @@ pub(all) struct MipOptions {
   /// thirteen had no integer point at all. It follows the nearer whole side of the most
   /// fractional variable and re-solves, which is a solve per step, so the step count is
   /// the knob that says how much that is worth.
+  ///
+  /// Sixty is measured, not chosen: the walk usually needs more than one step per
+  /// undecided integer, because re-solving can make a *different* variable fractional, so
+  /// the count of fractional variables does not have to fall every step. `pk1` reached one
+  /// fractional variable after thirty steps and landed within sixty; `markshare1` (no
+  /// incumbent at thirty) and `markshare2` landed the same way. The cost is bounded by
+  /// `dive_attempts` launches of at most this many relaxations — two launches of sixty out
+  /// of a three hundred relaxation budget in the report's setting — and what the tree
+  /// loses to that is visible in the report's remaining-open column rather than hidden.
   dive_steps : Int
   /// How many times the heuristic may be launched. A dive that ends infeasible or runs
   /// out of steps found nothing, and another launch from a deeper node starts closer to a
@@ -164,7 +173,7 @@ pub fn MipOptions::default() -> MipOptions {
     max_iterations: 20000,
     tolerance: 1.0e-7,
     verify_nodes: true,
-    dive_steps: 30,
+    dive_steps: 60,
     dive_attempts: 2,
     node_solver: None,
   }

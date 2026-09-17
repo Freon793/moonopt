@@ -574,6 +574,15 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
           //   because a side that comes back infeasible is undone and the other side tried;
           // - `dive_attempts` launches in total, since the budget the walk spends is the
           //   budget the tree does not get.
+          //
+          // A launch gets `dive_steps` steps, not the `2·fractional` the condition above
+          // computes. That number is a lower bound on the work rather than the work: a step
+          // re-solves, and the re-solve can make a *different* variable fractional, so the
+          // count does not have to fall every step. Measured over the public instances, the
+          // walks that land need the larger number — `pk1` was one fractional variable short
+          // of whole after thirty steps and landed within sixty, and `markshare1` and
+          // `markshare2` only produced an incumbent at sixty. What the walk spends is what
+          // the tree does not get, so it stays bounded by `dive_attempts × dive_steps`.
           if options.dive_steps > 0 &&
             dives_launched < options.dive_attempts &&
             !has_incumbent {
@@ -584,7 +593,11 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
             )
             let needed = 2 * fractional
             let remaining = options.max_nodes - solved
-            let budget = if remaining < needed { remaining } else { needed }
+            let budget = if remaining < options.dive_steps {
+              remaining
+            } else {
+              options.dive_steps
+            }
             if needed > 0 &&
               needed <= options.dive_steps &&
               budget > 0 &&

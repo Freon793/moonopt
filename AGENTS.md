@@ -103,11 +103,15 @@ You can browse and install extra skills here:
     nearer whole side of the most fractional variable and re-solves, which lands on a
     feasible whole point because every step is a verified relaxation of a restricted
     model and the walk stops only when nothing is fractional. It is bounded by
-    `dive_steps`/`dive_attempts`, it is started only where the walk is worth starting
-    (depth at least the number of undecided integers), its relaxations count in
-    `nodes`/`verified` and come out of the same budget, and it only ever *offers* an
-    incumbent — it never claims optimality and is never a reason to trust the kernel
-    more than the tree is.
+    `dive_steps`/`dive_attempts`, a launch gets its full `dive_steps` rather than a count
+    derived from the fractional variables (a step re-solves and can leave a *different*
+    variable fractional, so that count is a lower bound rather than the work), it is started
+    only where the walk is worth starting (depth at least the number of undecided integers),
+    its relaxations count in `nodes`/`verified` and come out of the same budget, and it only
+    ever *offers* an incumbent — it never claims optimality and is never a reason to trust
+    the kernel more than the tree is. A variable whose two sides are both infeasible proves
+    the region holds no integer point, which is why the walk gives up there instead of
+    picking another variable.
   - `cmd/main/`: demo CLI. `cmd/parse/`: model file inspection CLI. `examples/`:
     runnable examples. `bench/`: data policy, fetch and report scripts, reports.
     `docs/`: design notes, technical roadmap and the ecosystem survey that
