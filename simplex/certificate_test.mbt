@@ -108,6 +108,65 @@ fn two_variable_lp() -> @model.Model {
 }
 
 ///|
+test "an ill conditioned optimal basis still carries an acceptable certificate" {
+  // Two equations whose normals differ by `1e-9`, with right hand sides that differ by
+  // every bit of that: the vertex is a single point, both rows are tight there and both
+  // variables are positive, so the optimal basis is the two structural columns — a
+  // matrix with a condition number near `1e10`. The multipliers come out of a linear
+  // solve on that basis, and an ill conditioned basis is where the triangular solves
+  // leave a *residual* instead of a small *error*: the computed multipliers then are not
+  // a dual solution at all, and the certificate's sign conditions are decided from
+  // numbers that do not hold. A branch and bound node of `noswot` is exactly this case
+  // with a multiplier that came out `3.7e-7` wrong and negative; the kernel refines the
+  // dual solution (see `State::refine_duals`), so what is asserted here is the property
+  // that makes a certificate a certificate — `Bᵀy = c_B` on the reported basis — next to
+  // the independent checker's own verdict.
+  let eps = 1.0e-9
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let x = model.add_var("x", lb=0.0)
+  let y = model.add_var("y", lb=0.0)
+  // The cost is deliberately not parallel to the rows: the exact multipliers are
+  // `(1/2, 1/2)`, which keeps the elimination from cancelling the round-off away, so an
+  // ill conditioned basis does show up in the numbers below.
+  model.set_objective([(x, 1.0), (y, 1.0 + 0.5 * eps)])
+  model.add_constraint([(x, 1.0), (y, 1.0)], @model.Rel::Equal, 2.0)
+  model.add_constraint([(x, 1.0), (y, 1.0 + eps)], @model.Rel::Equal, 2.0 + eps)
+  let result = match try_solve(model) {
+    Some(result) => result
+    None => fail("kernel refused the model")
+  }
+  assert_eq(result.status, @simplex.SimplexStatus::Optimal)
+  let basis = match result.basis {
+    Some(basis) => basis
+    None => fail("an optimal run reports the basis it stands on")
+  }
+  // The residual below is written for the two structural columns, so the test has to
+  // know the basis is those two and not something equivalent.
+  assert_true(basis.basis[0] == 0 && basis.basis[1] == 1)
+  let multipliers = result.duals
+  let first = 1.0 - (multipliers[0] * 1.0 + multipliers[1] * 1.0)
+  let second = 1.0 +
+    0.5 * eps -
+    (multipliers[0] * 1.0 + multipliers[1] * (1.0 + eps))
+  let residual = @core.fmax(@core.fabs(first), @core.fabs(second))
+  if residual > 1.0e-11 {
+    fail(
+      "the multipliers miss Bᵀy = c_B by " +
+      residual.to_string() +
+      " (y = " +
+      multipliers[0].to_string() +
+      ", " +
+      multipliers[1].to_string() +
+      ")",
+    )
+  }
+  let problem = certificate_problem(model, result)
+  if problem != "" {
+    fail(problem)
+  }
+}
+
+///|
 test "an optimal solve carries a certificate the verifier accepts" {
   let model = two_variable_lp()
   let result = match try_solve(model) {

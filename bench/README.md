@@ -24,7 +24,7 @@ MIPLIB 2017 —— 它提供同样性质的工业实例，但以纯 MPS（gzip �
 | `fetch-instances.ps1` | 下载实例到 `bench/data/instances/`，生成 `manifest.txt`（相对路径，可移植） |
 | `report-parse.ps1` | 通过 `moon run cmd/parse -- --manifest ...` 解析全部实例，生成 `parse-report.md` |
 | `report-solve.ps1` | 加 `--solve --relax --max-rows N` 求解，生成 `solve-report.md` |
-| `report-mip.ps1` | 加 `--mip --max-nodes N` 做分支定界，生成 `mip-report.md`（**当前拒绝写报告**，见下） |
+| `report-mip.ps1` | 加 `--mip --max-nodes N` 做分支定界，生成 `mip-report.md` |
 | `check-relaxation-bounds.ps1` | 把求解报告里的目标值与 MIPLIB 官方最优值表对拍 |
 | `check-mip-objectives.ps1` | 把分支定界报告里每个 `optimal` 与官方最优值**取等**对拍，并断言 `verified == nodes` |
 
@@ -37,11 +37,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -MaxRow
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-mip-objectives.ps1
 ```
 
-**`mip-report.md` 目前不存在，而且是脚本主动拒绝写的**：32 个实例里 `noswot` 仍有一个节点的
-最优性证书被独立校验器拒绝（`dual signs failed: 2.14e-6`，见 `CHANGELOG.md` 的 Known defect）。
-报告是证据，把一次带着被拒证书的运行写成完整报告，就是拿不可靠的数字当结论。
-单个实例的证据仍然可以拿（`--mip` 会逐条打印节点数、校验计数、目标值与独立复核结果），
-但它写在 CHANGELOG / roadmap 里，而不是伪装成一份全清单报告。
+**`mip-report.md` 是这条命令生成的**：`noswot` 的三个被拒证书在 M5 第三轮全部定论为内核缺陷
+（对偶解在病态基上丢精度、方向求解没有自检、非负性自检的尺度与校验器不一致，见 `CHANGELOG.md`），
+32 个实例不再有被拒证书。报告是证据，脚本仍然按纪律拒绝写报告 —— 只要内核退出码非零、条目数不符、
+出现被拒证书、或解没通过独立复核，就不写。
 
 `report-solve.ps1` 用 **native release** 目标运行内核：同一实例在默认 wasm 目标上要慢约 6 倍
 （实测 `mod010`：wasm 119.6s / native debug 203.6s / native release 18.8s），

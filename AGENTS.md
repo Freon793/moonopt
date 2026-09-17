@@ -38,7 +38,14 @@ You can browse and install extra skills here:
     fallback, a pivot stability check that rebuilds stale factors before pivoting,
     one recovery attempt with Bland's rule after a numerical failure, a row ceiling
     and a fill budget that refuse a problem worth refusing, and a residual
-    self-check before it will report `Optimal`. Pricing is Dantzig plus a **measured
+    self-check before it will report `Optimal`. The self-checks are measured against
+    the *same* scale the independent checker uses — a triangle solve leaves a small
+    residual, not a small error, so the dual solution is refined on its residual
+    (`Bᵀy = c_B`), the pivot direction is checked against `A·d = aⱼ` every iteration
+    (a stale inverse used to pivot a basic value 20 out of feasibility and then call
+    the node unbounded), the unboundedness verdict has to carry a point that passes
+    the row residual, and non-negativity is judged per variable rather than against
+    the largest entry of the solution. Pricing is Dantzig plus a **measured
     gain** rule (`gain_candidates`): the reduced cost is an improvement rate, so the
     column that enters is chosen by the gain `|r| · step` measured for a bounded
     candidate set (Dantzig's pick, a pool of recently good columns, a rotating window

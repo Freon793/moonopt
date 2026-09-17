@@ -510,3 +510,28 @@ test "the ratio test never returns a negative step" {
 ///|
 /// A step is a distance travelled in the direction the entering column moves, so the
 /// ratio test may never return a negative one.
+
+///|
+/// The non-negativity self-check has to read a value against its *own* size, because
+/// that is what the variable's bound means and that is how `verify` reads it.
+///
+/// It used to read it against the largest entry anywhere in the solution, and that is a
+/// different statement: a basic value of `-7.7e-7` next to an entry of `1e5` measured
+/// `7.7e-12` here and passed the kernel's own gate, while the independent checker —
+/// which divides each violation by `1 + |xⱼ|` — measured `7.7e-7` and refused the point.
+/// A branch and bound node of `noswot` reached exactly that pair of numbers, and the run
+/// had reported the node as solved.
+test "non-negativity is measured per variable, not against the solution" {
+  let worst = max_negativity([1.0e5, 0.0, -7.7e-7])
+  let expected = 7.7e-7 / (1.0 + 7.7e-7)
+  assert_true(@core.approx_eq(worst, expected, rel=1.0e-12, abs=1.0e-15))
+  // A giant entry elsewhere does not license a violation of a variable's own bound.
+  let small = max_negativity([1.0e5, -1.0e-6])
+  assert_true(
+    @core.approx_eq(small, 1.0e-6 / (1.0 + 1.0e-6), rel=1.0e-12, abs=1.0e-15),
+  )
+  assert_true(small > 1.0e-7)
+  // Round-off next to a variable of size one is still round-off.
+  assert_true(max_negativity([1.0, -1.0e-12]) < 1.0e-7)
+  assert_eq(max_negativity([1.0, 2.0, 0.0]), 0.0)
+}

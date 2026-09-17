@@ -113,6 +113,11 @@ priv struct State {
   /// allocate, and the duals and the tableau direction are computed on every
   /// iteration.
   duals_buffer : Array[Double]
+  /// Residual of the dual system, used by the refinement in `duals`.
+  dual_error_buffer : Array[Double]
+  /// Signed deviation and row scale of the direction check, one entry per row.
+  direction_error_buffer : Array[Double]
+  direction_scale_buffer : Array[Double]
   direction_buffer : Array[Double]
   basic_cost_buffer : Array[Double]
   /// Scratch for the triangular solves. The solvers permute the vector they are
@@ -200,6 +205,9 @@ fn State::new(problem : KernelProblem, options : SimplexOptions) -> State {
     factorized: false,
     etas: [],
     duals_buffer: Array::make(m, 0.0),
+    dual_error_buffer: Array::make(m, 0.0),
+    direction_error_buffer: Array::make(m, 0.0),
+    direction_scale_buffer: Array::make(m, 0.0),
     direction_buffer: Array::make(m, 0.0),
     basic_cost_buffer: Array::make(m, 0.0),
     solve_scratch: Array::make(m, 0.0),
@@ -331,6 +339,19 @@ fn State::kernel_objective(self : State) -> Double {
 /// (each costs the nonzeros of its update), and the base transpose is applied
 /// through the rows of the base inverse, so only the nonzeros of the running
 /// vector cost a pass over `m`.
+///
+/// The triangular solves leave a small *residual* rather than a small *error*, and
+/// those are not the same statement: on an ill-conditioned basis the two differ by
+/// the condition number. A branch and bound node of `noswot` reached a basis where
+/// the computed multipliers missed `Bᵀy = c_B` by `3.7e-7`, five orders of magnitude
+/// above the round-off every other node there showed — and since the true multiplier
+/// was zero, the computed one came out negative, which is not a multiplier at all:
+/// the certificate's sign condition failed and `verify` refused an optimum that was
+/// real. Everything this kernel decides from a dual — the reduced costs, the pricing,
+/// whether a column can still improve the objective — was decided from that vector,
+/// so the fix belongs here and not at the certificate boundary: one step of iterative
+/// refinement on the residual (see `refine_duals`) took that node's residual from
+/// `3.7e-7` to `4e-13`.
 fn State::duals(self : State) -> Array[Double] {
   let y = self.duals_buffer
   for k = 0; k < self.m; k = k + 1 {
@@ -346,12 +367,117 @@ fn State::duals(self : State) -> Array[Double] {
     Some(lu) => lu.solve_transpose_into(y, self.basic_cost_buffer)
     None => ()
   }
+  self.refine_duals(y)
   y
 }
 
 ///|
-/// Reduced cost of a column: `cⱼ − y·Aⱼ`, walking only that column's nonzeros.
+/// One step of iterative refinement on `Bᵀy = c_B`, in place.
 ///
+/// The residual `r = c_B − Bᵀy` is measured on the basis the run is standing on —
+/// `m` columns walked once, which is what the columns cost, not what the factors do —
+/// and the same product-form solve that produced `y` is applied to `r` instead of to
+/// `c_B`: `Δ = (Bᵀ)⁻¹r`, `y ← y + Δ`. The solve is the same one, so the step costs one
+/// more triangular pass, and it converges because the factors are a backward-stable
+/// approximation of the basis: an error of order `ε·κ` becomes one of order `(ε·κ)²`.
+///
+/// It is applied unconditionally rather than behind a threshold: an unconditional
+/// step is a guarantee about every dual the kernel reports, and a threshold would be
+/// one more number to justify — the measurement that would set it is the residual this
+/// refinement removes anyway.
+fn State::refine_duals(self : State, y : Array[Double]) -> Unit {
+  let error = self.dual_error_buffer
+  let pointers = self.problem.matrix.col_pointers()
+  let rows = self.problem.matrix.row_indices()
+  let values = self.problem.matrix.values_view()
+  for r = 0; r < self.m; r = r + 1 {
+    let column = self.basis[r]
+    let mut acc = 0.0
+    let mut k = pointers[column]
+    let end = pointers[column + 1]
+    while k < end {
+      acc = acc + y[rows[k]] * values[k]
+      k = k + 1
+    }
+    error[r] = self.cost[column] - acc
+  }
+  let mut e = self.etas.length() - 1
+  while e >= 0 {
+    self.etas[e].apply_transpose(error)
+    e = e - 1
+  }
+  match self.lu {
+    Some(lu) => lu.solve_transpose_into(error, self.solve_scratch)
+    None => ()
+  }
+  for k = 0; k < self.m; k = k + 1 {
+    y[k] = y[k] + error[k]
+  }
+}
+
+///|
+/// Scaled residual of the direction solve: how far `d = B⁻¹aⱼ` is from satisfying the
+/// basis equation `A·d = aⱼ`, one pass over the basis columns.
+///
+/// An exact inverse makes this zero, so whatever is left is the error of the computed
+/// direction, judged row by row against the numbers it came from —
+/// `|aᵢⱼ − (Ad)ᵢ| / (1 + |aᵢⱼ| + Σₖ |Aᵢₖdₖ|)`, the convention the feasibility residual
+/// uses. A direction that misses its own column means the factors have stopped
+/// describing the basis, and every decision taken from it is then unfounded: on a
+/// branch and bound node of `noswot` one such direction was off by `20` against column
+/// entries of `20`, so the pivot moved a basic value `20` away from feasibility, and
+/// the run went on to report that node's bounded relaxation as unbounded. The existing
+/// pivot-stability check reads the size of the pivot element, which is a proxy for this
+/// question; this is the question.
+fn State::direction_residual(
+  self : State,
+  column : Int,
+  d : Array[Double],
+) -> Double {
+  let error = self.direction_error_buffer
+  let scale = self.direction_scale_buffer
+  for i = 0; i < self.m; i = i + 1 {
+    error[i] = 0.0
+    scale[i] = 1.0
+  }
+  let pointers = self.problem.matrix.col_pointers()
+  let rows = self.problem.matrix.row_indices()
+  let values = self.problem.matrix.values_view()
+  let mut k = pointers[column]
+  let end = pointers[column + 1]
+  while k < end {
+    let row = rows[k]
+    error[row] = error[row] + values[k]
+    scale[row] = scale[row] + @core.fabs(values[k])
+    k = k + 1
+  }
+  for j = 0; j < self.m; j = j + 1 {
+    let weight = d[j]
+    if weight != 0.0 {
+      let basic = self.basis[j]
+      let mut p = pointers[basic]
+      let column_end = pointers[basic + 1]
+      while p < column_end {
+        let row = rows[p]
+        let term = weight * values[p]
+        error[row] = error[row] - term
+        scale[row] = scale[row] + @core.fabs(term)
+        p = p + 1
+      }
+    }
+  }
+  let mut worst = 0.0
+  for i = 0; i < self.m; i = i + 1 {
+    let scaled = @core.fabs(error[i]) / scale[i]
+    if scaled > worst {
+      worst = scaled
+    }
+  }
+  worst
+}
+
+///|
+/// Reduced cost of a column: `cⱼ − y·Aⱼ`, walking only that column's nonzeros.
 /// The accumulation is a plain sum rather than a compensated one: a column of an
 /// LP holds a handful of entries, and paying for an accumulator object per column
 /// would cost more than it saves. The compensated path is used where it matters,
@@ -727,6 +853,12 @@ fn State::choose_leaving_row(
   // overshoot of the band is multiplied by the pivot element, so with ratios and
   // rows in the 1e5 range a relative allowance of 1e-9 still moved a basic value
   // by tens on MIPLIB's noswot.
+  //
+  // The allowance is read off the value the step *produces*, not off the value it
+  // started from. Judging a basic value that lands near zero against the size it
+  // used to have is how a `-7.7e-7` gets past a tolerance of `1e-7`: the variable
+  // ends next to its bound, where the only number that means anything is its own,
+  // and that is the number both the clamping below and `verify` read it against.
   if strict_row < 0 {
     return (-1, 0.0)
   }
@@ -737,7 +869,7 @@ fn State::choose_leaving_row(
   for i = 0; i < self.m; i = i + 1 {
     if i != leave {
       let candidate = self.xb[i] - chosen * sigma * d[i]
-      if candidate < -feasibility * (1.0 + @core.fabs(self.xb[i])) {
+      if candidate < -feasibility * (1.0 + @core.fabs(candidate)) {
         return (strict_row, self.row_step(strict_row, sigma * d[strict_row]))
       }
       let cap = upper[self.basis[i]]
@@ -1112,7 +1244,22 @@ fn State::iterate(self : State) -> Int {
       entering = self.choose_by_gain(duals, entering)
       self.enter_sigma = if self.at_upper[entering] { -1.0 } else { 1.0 }
     }
-    let d = self.direction(entering)
+    let mut d = self.direction(entering)
+    // The direction has to satisfy the basis equation `A·d = aⱼ`. When it does not, the
+    // factors no longer describe the basis, and both the ratio test and the pivot read
+    // their numbers off that direction — so the run rebuilds them and asks again. A
+    // direction that is still off afterwards is not something to pivot on: the run
+    // stops as a numerical failure, which the caller answers with a recovery attempt
+    // from a different pivot rule rather than with a step nothing supports.
+    if self.direction_residual(entering, d) > self.options.feasibility_tolerance {
+      if self.refactorize() {
+        d = self.direction(entering)
+      }
+      if self.direction_residual(entering, d) >
+        self.options.feasibility_tolerance {
+        return 3
+      }
+    }
     let limit = self.ratio_test(entering, d)
     if limit.unbounded {
       // The direction buffer still holds `B⁻¹aⱼ` and nothing else runs before the
@@ -1404,6 +1551,35 @@ fn solve_once(
   state.stalled = 0
   let code = state.iterate()
   if code == 1 {
+    // An unboundedness proof is a feasible point *plus* a direction that leaves it
+    // improving forever, and the run is standing on the feasible point when the ratio
+    // test finds nothing that limits the step. That "standing on" is an assumption
+    // about the state, so it is measured rather than assumed: a state that drifted is
+    // exactly the state whose ratio test finds no limit, and reporting it as unbounded
+    // is a wrong answer with a confident status — the one outcome this project exists
+    // to prevent. Two branch and bound nodes of `noswot` reached this verdict while
+    // violating a row by its whole scale, and the independent checker refused them.
+    let unbounded_values = state.values()
+    let (unbounded_residual, _) = max_scaled_residual(
+      problem,
+      unbounded_values,
+      false,
+      problem.rhs,
+    )
+    if unbounded_residual > options.feasibility_tolerance {
+      return {
+        status: NumericalFailure,
+        values: [],
+        objective: 0.0,
+        iterations: state.iterations,
+        duals: [],
+        ray: [],
+        basis: None,
+        message: "no limiting row was found, but the point the run is standing on is not feasible (scaled row residual " +
+        unbounded_residual.to_string() +
+        "), so the unboundedness verdict is not supported",
+      }
+    }
     return {
       status: Unbounded,
       // An unboundedness proof is a feasible point *plus* a direction that leaves it
@@ -1609,19 +1785,26 @@ fn max_scaled_residual(
 }
 
 ///|
-/// Worst violation of the non-negativity requirement, scaled by the magnitude of
-/// the solution so a `-1e-12` next to values of size 1e6 counts as rounded off.
+/// Worst violation of the non-negativity requirement, judged the way the independent
+/// checker judges it: `−xⱼ / (1 + |xⱼ|)`, per variable.
+///
+/// The scale used to be the largest value anywhere in the solution, and that is not
+/// the same statement: a basic value of `-7.7e-7` next to an entry of `1e5` measured
+/// `7.7e-12` here and passed, while `verify` — which reads each variable against its
+/// own size, because that is what a variable's bound means — measured `7.7e-7` and
+/// refused the point. A self-check that is looser than the check it stands in for is
+/// not a self-check: the kernel reported a branch and bound node of `noswot` as solved
+/// while its point sat `7.7e-7` below a lower bound of zero.
 fn max_negativity(values : Array[Double]) -> Double {
   let mut worst = 0.0
-  let mut scale = 1.0
   for j = 0; j < values.length(); j = j + 1 {
-    let magnitude = @core.fabs(values[j])
-    if magnitude > scale {
-      scale = magnitude
+    if values[j] >= 0.0 {
+      continue
     }
-    if values[j] < 0.0 && -values[j] > worst {
-      worst = -values[j]
+    let scaled = -values[j] / (1.0 + @core.fabs(values[j]))
+    if scaled > worst {
+      worst = scaled
     }
   }
-  worst / scale
+  worst
 }
