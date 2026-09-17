@@ -1506,6 +1506,29 @@ fn solve_once(
     // The caller's model is still measured against the unperturbed right hand side: a point
     // only gets reported as an answer if it survives that (`finish_optimal`), so relaxing
     // the question here cannot turn into a relaxed answer there.
+    // The verdict is drawn from a state whose basic values satisfy the basis equation, so
+    // that a residual here is a statement about the model rather than about the arithmetic.
+    //
+    // The product-form updates let the basic values drift away from `B x_B = b`, and a drifted
+    // value looks exactly like a row that cannot be satisfied — which is what a *feasible*
+    // node of `misc07` measured: `scaled 1.45e-6` against a `1e-6` margin, an artificial sum of
+    // `1.2e-8` and basic artificials of `5.5e-9`, while an outside solver finds that node's
+    // optimum at 1677. Refactorizing recomputes the basic values from the right hand side the
+    // run solved, which is the same repair, for the same reason, that the optimality
+    // self-check makes before it believes a residual; here it is what keeps a measurement of
+    // the arithmetic from being read as a proof that no point satisfies the rows.
+    if !state.refactorize() {
+      return {
+        status: NumericalFailure,
+        values: [],
+        objective: 0.0,
+        iterations: state.iterations,
+        duals: [],
+        ray: [],
+        basis: None,
+        message: "the basis could not be refactored before the phase one verdict, so the feasibility measurement would be about the arithmetic rather than the model",
+      }
+    }
     let phase1_values = state.values()
     let (phase1_scaled, _) = max_scaled_residual(
       problem,
