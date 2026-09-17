@@ -20,8 +20,12 @@ You can browse and install extra skills here:
     `SolveStatus`, `Solution`, `SolveOptions`. Keep it thin: orchestration only.
     Presolve is on by default here, so this is also the layer that reconstructs the
     solution into the original variables and **verifies** it against the original
-    model before reporting `Optimal`; integer models skip the reduction so the
-    kernel's refusal stays independent of what a reduction happened to fix.
+    model before reporting `Optimal`; integer models skip the reduction (the answer
+    must not depend on what a reduction happened to fix) and go to `mip` instead of the
+    kernel, because a relaxation is not an answer to an integer model. Their statuses map
+    onto `Optimal` / `Infeasible` / `NodeLimit` (a budget that ran out, with the incumbent
+    and the open bound); an unbounded relaxation, a refused certificate and an invalid
+    model all stay `NotSolved`, since none of them proves anything.
   - `core/`: numeric and sparse infrastructure (tolerances, compensated
     summation, CSC sparse matrix). Must not depend on other packages here.
   - `model/`: variables, linear expressions, constraints, objective, validation.

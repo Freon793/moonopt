@@ -23,10 +23,24 @@ fn report(
   println("== " + title)
   println("status     : " + status_name(sol.status))
   println("iterations : " + sol.iterations.to_string())
-  if sol.status == @moonopt.SolveStatus::Optimal {
-    println("objective  : " + sol.objective.to_string())
-    for i = 0; i < names.length() && i < sol.values.length(); i = i + 1 {
-      println("  " + names[i] + " = " + sol.values[i].to_string())
+  // The three numbers below mean something whenever there is an answer or a bound to
+  // report: for a linear solve the objective is its own bound and the gap is zero, for a
+  // branch and bound run on a budget they are what says how much is still open.
+  if sol.status == @moonopt.SolveStatus::Optimal ||
+    sol.status == @moonopt.SolveStatus::NodeLimit {
+    println("nodes      : " + sol.nodes.to_string())
+    println("bound      : " + sol.bound.to_string())
+    println("gap        : " + sol.gap.to_string())
+    // `objective` means something only alongside a point: a budget that ran out before the
+    // search stood on one reports zero there, and printing that zero as an objective is
+    // how a failed run comes to look like an answer.
+    if sol.values.length() > 0 {
+      println("objective  : " + sol.objective.to_string())
+      for i = 0; i < names.length() && i < sol.values.length(); i = i + 1 {
+        println("  " + names[i] + " = " + sol.values[i].to_string())
+      }
+    } else {
+      println("objective  : (no integer point yet)")
     }
   } else {
     println("message    : " + sol.message)
@@ -41,6 +55,7 @@ fn status_name(status : @moonopt.SolveStatus) -> String {
     @moonopt.SolveStatus::Optimal => "Optimal"
     @moonopt.SolveStatus::Infeasible => "Infeasible"
     @moonopt.SolveStatus::Unbounded => "Unbounded"
+    @moonopt.SolveStatus::NodeLimit => "NodeLimit"
     @moonopt.SolveStatus::NotSolved => "NotSolved"
   }
 }
@@ -109,12 +124,38 @@ fn transportation() -> Unit {
 }
 
 ///|
-/// Demo 3: a model outside the current kernel's class, reported honestly.
-fn unsupported_model() -> Unit {
+/// Demo 3: an integer model, answered by the branch and bound.
+///
+/// `max 5x + 4y` with `6x + 4y <= 13` over whole `x, y` in `[0, 2]`: the relaxation fills
+/// `y` to 2 and gives `x` what is left — 12.1667 — while the whole answer is 10 at
+/// `(2, 0)`. The point of the demo is that the number printed is the second one, and that
+/// nothing had to be said about relaxations to get it.
+fn integer_plan() -> Unit {
   let m = @model.Model::new(@model.Sense::Maximize)
-  let x = m.add_var("x", ub=1.0, is_int=true)
-  m.set_objective([(x, 1.0)])
-  report("integer model (not supported yet)", ["x"], @moonopt.solve(m))
+  let x = m.add_var("x", ub=2.0, is_int=true)
+  let y = m.add_var("y", ub=2.0, is_int=true)
+  m.set_objective([(x, 5.0), (y, 4.0)])
+  m.add_constraint([(x, 6.0), (y, 4.0)], @model.Rel::LessEqual, 13.0)
+  report("integer plan", ["x", "y"], @moonopt.solve(m))
+}
+
+///|
+/// Demo 4: the same model on a node budget too small to finish.
+///
+/// The run says `NodeLimit` and hands back the two numbers that decide what to do next:
+/// the best objective still reachable among the nodes left open, and how far the point it
+/// has (if any) is from it. What it does not do is call the point an answer.
+fn integer_plan_on_a_budget() -> Unit {
+  let m = @model.Model::new(@model.Sense::Maximize)
+  let x = m.add_var("x", ub=2.0, is_int=true)
+  let y = m.add_var("y", ub=2.0, is_int=true)
+  m.set_objective([(x, 5.0), (y, 4.0)])
+  m.add_constraint([(x, 6.0), (y, 4.0)], @model.Rel::LessEqual, 13.0)
+  report(
+    "integer plan on a one-relaxation budget",
+    ["x", "y"],
+    @moonopt.solve_with(m, @moonopt.SolveOptions::with_max_nodes(1)),
+  )
 }
 
 ///|
@@ -124,5 +165,6 @@ fn main {
   println("")
   production_plan()
   transportation()
-  unsupported_model()
+  integer_plan()
+  integer_plan_on_a_budget()
 }

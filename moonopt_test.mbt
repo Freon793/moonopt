@@ -97,12 +97,104 @@ test "free variables are supported by the kernel" {
 }
 
 ///|
-test "integer variables are rejected until the MIP stage lands" {
+/// `max 5x + 4y  s.t.  6x + 4y <= 13`, `x, y` integers in `[0, 2]`.
+///
+/// The relaxation fills `y` to its bound of 2 and gives `x` what is left — `(5/6, 2)` for
+/// 12.1667 — while the integer optimum is 10 at `(2, 0)`. That gap is what makes this a
+/// model where the answer has to come from the branch and bound rather than from the
+/// relaxation: a relaxation reported as an answer would say 12.1667 and be wrong.
+fn integer_mip() -> @model.Model {
   let m = @model.Model::new(@model.Sense::Maximize)
-  let x = m.add_var("x", ub=1.0, is_int=true)
-  m.set_objective([(x, 1.0)])
+  let x = m.add_var("x", ub=2.0, is_int=true)
+  let y = m.add_var("y", ub=2.0, is_int=true)
+  m.set_objective([(x, 5.0), (y, 4.0)])
+  m.add_constraint([(x, 6.0), (y, 4.0)], @model.Rel::LessEqual, 13.0)
+  m
+}
+
+///|
+/// `max x + y  s.t.  x + y <= 1`, both continuous: the LP the two fields are pinned on.
+fn continuous_lp() -> @model.Model {
+  let m = @model.Model::new(@model.Sense::Maximize)
+  let x = m.add_var("x", ub=1.0)
+  let y = m.add_var("y", ub=1.0)
+  m.set_objective([(x, 1.0), (y, 1.0)])
+  m.add_constraint([(x, 1.0), (y, 1.0)], @model.Rel::LessEqual, 1.0)
+  m
+}
+
+///|
+/// A model with integer variables is answered by the branch and bound, not by its
+/// relaxation: the relaxation's optimum here is 73/6 and the answer is 10.
+test "an integer model is solved to the integer optimum, not to its relaxation" {
+  let sol = @moonopt.solve(integer_mip())
+  assert_eq(sol.status, @moonopt.SolveStatus::Optimal)
+  assert_true(@core.approx_eq(sol.objective, 10.0, rel=1.0e-9, abs=1.0e-9))
+  assert_eq(sol.values.length(), 2)
+  // The point is whole, which is the one thing a relaxation answer would not be.
+  assert_true(@core.approx_eq(sol.values[0], 2.0, rel=1.0e-9, abs=1.0e-9))
+  assert_true(@core.approx_eq(sol.values[1], 0.0, rel=1.0e-9, abs=1.0e-9))
+  // Nothing is left open, and the two fields say so.
+  assert_true(@core.approx_eq(sol.bound, 10.0, rel=1.0e-9, abs=1.0e-9))
+  assert_true(@core.approx_eq(sol.gap, 0.0, rel=0.0, abs=1.0e-12))
+  assert_true(sol.nodes > 0)
+  // A linear solve is its own bound, so the same two fields mean the same thing there.
+  let linear = @moonopt.solve(continuous_lp())
+  assert_eq(linear.status, @moonopt.SolveStatus::Optimal)
+  assert_true(
+    @core.approx_eq(linear.bound, linear.objective, rel=1.0e-12, abs=0.0),
+  )
+  assert_true(@core.approx_eq(linear.gap, 0.0, rel=0.0, abs=1.0e-12))
+  assert_eq(linear.nodes, 0)
+}
+
+///|
+/// A node budget is a budget, not an answer: the run stops as `NodeLimit` with whatever
+/// integer point it has (here none, at one relaxation) and the bound still open.
+test "a node budget is reported as a budget rather than as an optimality claim" {
+  let sol = @moonopt.solve_with(
+    integer_mip(),
+    @moonopt.SolveOptions::with_max_nodes(1),
+  )
+  assert_eq(sol.status, @moonopt.SolveStatus::NodeLimit)
+  assert_eq(sol.values.length(), 0)
+  assert_true(@core.approx_eq(sol.bound, 73.0 / 6.0, rel=1.0e-9, abs=1.0e-9))
+  assert_true(sol.gap > 1.0e299)
+  assert_true(sol.message.length() > 0)
+  assert_eq(sol.nodes, 1)
+}
+
+///|
+/// A model whose relaxation is feasible and whose integer points are not: the tree
+/// exhausts itself, so `Infeasible` is a proof here in a way it never is for a single
+/// relaxation.
+test "an integer model with no integer point is proved infeasible" {
+  let m = @model.Model::new(@model.Sense::Minimize)
+  let x = m.add_var("x", ub=4.0, is_int=true)
+  let y = m.add_var("y", ub=4.0, is_int=true)
+  m.set_objective([(x, 1.0), (y, 1.0)])
+  m.add_constraint([(x, 2.0), (y, 2.0)], @model.Rel::Equal, 1.0)
+  let sol = @moonopt.solve(m)
+  assert_eq(sol.status, @moonopt.SolveStatus::Infeasible)
+  assert_eq(sol.values.length(), 0)
+  assert_true(sol.nodes > 0)
+}
+
+///|
+/// An unbounded *relaxation* is not an unbounded model. The improving ray of the
+/// relaxation carries no integrality of its own, so this comes back as `NotSolved` with
+/// the search's own words — never as `Unbounded`, which would be a claim about a model
+/// nothing has proven anything about.
+test "an unbounded relaxation is not reported as an unbounded integer model" {
+  let m = @model.Model::new(@model.Sense::Maximize)
+  let x = m.add_var("x", is_int=true)
+  let y = m.add_var("y")
+  m.set_objective([(x, 1.0), (y, 1.0)])
+  m.add_constraint([(x, 1.0), (y, -1.0)], @model.Rel::LessEqual, 3.0)
   let sol = @moonopt.solve(m)
   assert_eq(sol.status, @moonopt.SolveStatus::NotSolved)
+  assert_eq(sol.values.length(), 0)
+  assert_true(sol.message.length() > 0)
 }
 
 ///|
@@ -123,7 +215,11 @@ test "iteration limit is surfaced instead of being ignored" {
   // Presolve is on by default and would settle this model by itself (the row is a
   // bound, and the variable then appears in no row), which is a different thing
   // from what this test is about: the kernel's own iteration limit.
-  let sol = @moonopt.solve_with(m, { max_iterations: 0, presolve: false, })
+  let sol = @moonopt.solve_with(m, {
+    max_iterations: 0,
+    presolve: false,
+    max_nodes: 20000,
+  })
   assert_eq(sol.status, @moonopt.SolveStatus::NotSolved)
   assert_true(sol.message.length() > 0)
 }
@@ -176,6 +272,7 @@ test "the presolved path and the kernel-only path agree" {
   let kernel_only = @moonopt.solve_with(direct, {
     max_iterations: 10000,
     presolve: false,
+    max_nodes: 20000,
   })
   assert_eq(kernel_only.status, @moonopt.SolveStatus::Optimal)
   assert_true(

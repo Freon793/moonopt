@@ -46,6 +46,7 @@ fn status_text(status : @moonopt.SolveStatus) -> String {
     @moonopt.SolveStatus::Optimal => "optimal"
     @moonopt.SolveStatus::Infeasible => "infeasible"
     @moonopt.SolveStatus::Unbounded => "unbounded"
+    @moonopt.SolveStatus::NodeLimit => "stopped at the node budget"
     @moonopt.SolveStatus::NotSolved => "not solved"
   }
 }

@@ -19,20 +19,26 @@ pub struct Solution {
   values : Array[Double]
   objective : Double
   iterations : Int
+  nodes : Int
+  bound : Double
+  gap : Double
   message : String
 } derive(@debug.Debug)
 
 pub(all) struct SolveOptions {
   max_iterations : Int
   presolve : Bool
+  max_nodes : Int
 } derive(@debug.Debug)
 pub fn SolveOptions::default() -> Self
 pub fn SolveOptions::new(Int) -> Self
+pub fn SolveOptions::with_max_nodes(Int) -> Self
 
 pub(all) enum SolveStatus {
   Optimal
   Infeasible
   Unbounded
+  NodeLimit
   NotSolved
 } derive(Eq, @debug.Debug)
 

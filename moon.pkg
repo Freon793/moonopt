@@ -1,5 +1,6 @@
 import {
   "Freon793/moonopt/core",
+  "Freon793/moonopt/mip",
   "Freon793/moonopt/model",
   "Freon793/moonopt/presolve",
   "Freon793/moonopt/simplex",
