@@ -175,6 +175,32 @@ fn round_of(value : Double) -> Double {
 }
 
 ///|
+/// How many integer variables are further from a whole number than `tolerance`.
+///
+/// This is the size of the dive that starts here: fixing one fractional variable per
+/// step, and at most two steps per variable because a side that comes back infeasible is
+/// undone and the other side tried. It is what lets a launch be *started* only when the
+/// walk it implies fits the step budget, so a dive is never cut off in the middle — it
+/// either lands on a whole point or runs out of sides, and both of those are answers the
+/// caller can act on.
+fn fractional_count(
+  model : @model.Model,
+  values : Array[Double],
+  tolerance : Double,
+) -> Int {
+  let mut count = 0
+  for j = 0; j < model.num_vars() && j < values.length(); j = j + 1 {
+    if !model.get_var(j).is_int {
+      continue
+    }
+    if @core.fabs(values[j] - round_of(values[j])) > tolerance {
+      count = count + 1
+    }
+  }
+  count
+}
+
+///|
 /// The integer variable furthest from a whole number, or `-1` when the point is integral.
 fn most_fractional(
   model : @model.Model,
@@ -230,6 +256,127 @@ fn node_refusal(
   } else {
     verdict.reason
   }
+}
+
+///|
+/// What one launch of the primal heuristic came back with: the whole point it reached
+/// (`values`, empty when it reached none) and its objective, plus how many relaxations
+/// the launch solved and how many of them the verifier accepted.
+priv struct Dive {
+  values : Array[Double]
+  objective : Double
+  relaxations : Int
+  verified : Int
+  /// The verifier's account of the first refused certificate, when one was refused.
+  refusal : String
+}
+
+///|
+/// The primal heuristic: walk a node's relaxation down to a whole point.
+///
+/// Best-bound branching is a search for a *bound*, and it can spend an entire budget
+/// without ever standing on an integer point — thirteen of the fourteen instances the
+/// first branch and bound report stopped at the node budget on had no incumbent at all,
+/// which is exactly the state in which a bound prunes nothing. This is the cheapest thing
+/// that produces one: take the integer variable furthest from a whole number, follow the
+/// nearer of its two whole sides, and re-solve; the point the walk lands on is feasible
+/// because every step is a relaxation of a *restricted* model, and whole because that is
+/// where the walk stops.
+///
+/// Neither side is guaranteed to work, so a side that comes back infeasible is undone and
+/// the other one is tried at the same depth. A dive is not a proof of anything and is not
+/// treated as one: it only ever *offers* an incumbent, and the search keeps its own
+/// branching exactly as it was.
+///
+/// Every step is a relaxation of a model this package built, so every step is verified
+/// like a node's relaxation is — a certificate the verifier refuses stops the run rather
+/// than being quietly dropped, because a dive is not a reason to trust the kernel more
+/// than the tree is.
+fn dive_for_incumbent(
+  problem : @model.Model,
+  options : MipOptions,
+  start : NodeSolution,
+  basis : @simplex.SimplexBasis?,
+  budget : Int,
+) -> Dive {
+  let model = problem.clone()
+  let mut values = start.values
+  let mut objective = start.objective
+  let mut dive_basis = basis
+  let mut relaxations = 0
+  let mut verified = 0
+  while true {
+    // Whole already is the state the walk is looking for, and it is checked before the
+    // budget is: a walk that spends its last step landing on a whole point has found one,
+    // and reading the budget first would throw that away.
+    let fractional = most_fractional(model, values, options.tolerance)
+    if fractional < 0 {
+      return { values, objective, relaxations, verified, refusal: "", }
+    }
+    if relaxations >= budget {
+      return { values: [], objective: 0.0, relaxations, verified, refusal: "", }
+    }
+    let variable = model.get_var(fractional)
+    let value = values[fractional]
+    let down = floor_of(value)
+    let up = ceil_of(value)
+    let down_bound = if down < variable.lb { variable.lb } else { down }
+    let up_bound = if up > variable.ub { variable.ub } else { up }
+    // The nearer side first: it is the smaller step away from the point the relaxation
+    // chose, so it is the side that costs the least objective.
+    let prefer_down = value - down <= up - value
+    let mut landed = false
+    let mut side = 0
+    while side < 2 && !landed && relaxations < budget {
+      let go_down = if side == 0 { prefer_down } else { !prefer_down }
+      side = side + 1
+      let lb = if go_down { variable.lb } else { up_bound }
+      let ub = if go_down { down_bound } else { variable.ub }
+      // A side only counts when it actually excludes the value the relaxation chose.
+      // `x ≤ floor(v)` where the floor is already the variable's own bound would confine
+      // nothing, and re-solving would hand back the same fractional point for ever.
+      let moves = if go_down {
+        ub < value - options.tolerance
+      } else {
+        lb > value + options.tolerance
+      }
+      if !moves {
+        continue
+      }
+      model.set_var_bounds(fractional, lb, ub)
+      let (solution, step_basis) = match options.node_solver {
+        Some(injected) => (injected(model), None)
+        None => kernel_node(model, options, dive_basis)
+      }
+      relaxations = relaxations + 1
+      if options.verify_nodes && solution.status != NodeStatus::Unfinished {
+        let refusal = node_refusal(model, solution, options.tolerance)
+        if refusal != "" {
+          return { values: [], objective: 0.0, relaxations, verified, refusal, }
+        }
+        verified = verified + 1
+      }
+      if solution.status == NodeStatus::Optimal {
+        values = solution.values
+        objective = solution.objective
+        dive_basis = step_basis
+        landed = true
+      } else {
+        // The side is empty or the step did not finish: put the bounds back and let the
+        // other side have its turn.
+        model.set_var_bounds(fractional, variable.lb, variable.ub)
+      }
+    }
+    if !landed {
+      // Neither side of this variable leads anywhere, so this dive has no whole point to
+      // offer. The tree still has both sides queued and will do better with them than a
+      // walk that has already given up.
+      return { values: [], objective: 0.0, relaxations, verified, refusal: "", }
+    }
+  }
+  // Every way out of the loop above returns; this is here because the loop is an
+  // expression and the checker wants one.
+  { values: [], objective: 0.0, relaxations, verified, refusal: "", }
 }
 
 ///|
@@ -325,6 +472,7 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
   let mut solved = 0
   let mut verified = 0
   let mut unfinished_nodes = 0
+  let mut dives_launched = 0
   while !queue.is_empty() {
     if solved >= options.max_nodes {
       return limit_result(
@@ -407,6 +555,82 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
             has_incumbent = true
           }
         } else {
+          // Before branching, give the primal heuristic a chance to produce an incumbent:
+          // a bound with nothing to compare against prunes nothing, and best-bound search
+          // can spend a whole budget without ever standing on a whole point. It only runs
+          // while there is no incumbent, because that is the state it exists to fix.
+          //
+          // Three conditions keep it from being a way of not searching, and each of them is
+          // a measurement rather than a tuning constant:
+          //
+          // - `depth >= fractional` — the walk has to decide every integer the node has not
+          //   decided yet, so it is only worth starting where the search has already
+          //   decided at least as many. Launched at a shallow node it spends its whole step
+          //   budget discovering what the tree was about to discover anyway: on `noswot` the
+          //   launch that lands happens at depth 29 with 15 integers left, while the same
+          //   rule at depth 0 or 1 (markshare1, pk1, flugpl, blend2, gt2, markshare2) ran
+          //   out of steps every time;
+          // - `2·fractional <= dive_steps` — at most two relaxations per undecided integer,
+          //   because a side that comes back infeasible is undone and the other side tried;
+          // - `dive_attempts` launches in total, since the budget the walk spends is the
+          //   budget the tree does not get.
+          if options.dive_steps > 0 &&
+            dives_launched < options.dive_attempts &&
+            !has_incumbent {
+            let fractional = fractional_count(
+              problem,
+              solution.values,
+              options.tolerance,
+            )
+            let needed = 2 * fractional
+            let remaining = options.max_nodes - solved
+            let budget = if remaining < needed { remaining } else { needed }
+            if needed > 0 &&
+              needed <= options.dive_steps &&
+              budget > 0 &&
+              node.depth >= fractional {
+              dives_launched = dives_launched + 1
+              let dive = dive_for_incumbent(
+                problem, options, solution, node_basis, budget,
+              )
+              // The dive's relaxations are the run's relaxations: they are solved with the
+              // same solver and checked by the same verifier, so they count in both totals
+              // and the node budget bounds them.
+              solved = solved + dive.relaxations
+              verified = verified + dive.verified
+              if dive.refusal != "" {
+                return {
+                  status: MipStatus::Unverified,
+                  values: [],
+                  objective: 0.0,
+                  bound: node.bound,
+                  gap: 0.0,
+                  nodes: solved,
+                  verified,
+                  message: "a certificate was refused while the primal heuristic walked node " +
+                  index.to_string() +
+                  " down to a whole point: " +
+                  dive.refusal,
+                }
+              }
+              if dive.values.length() > 0 &&
+                (
+                  !has_incumbent ||
+                  sign * dive.objective <
+                  sign * incumbent_objective - options.tolerance
+                ) {
+                incumbent = dive.values
+                incumbent_objective = dive.objective
+                has_incumbent = true
+              }
+              if solved >= options.max_nodes {
+                return limit_result(
+                  nodes, queue, incumbent, incumbent_objective, has_incumbent, solved,
+                  verified, sign, options,
+                )
+              }
+            }
+          }
           let value = solution.values[fractional]
           let variable = problem.get_var(fractional)
           let down = floor_of(value)
@@ -519,11 +743,11 @@ fn limit_result(
     },
     nodes: solved,
     verified,
-    message: "node limit of " +
+    message: "relaxation budget of " +
     options.max_nodes.to_string() +
     " reached with " +
     queue.heap.length().to_string() +
-    " node(s) still open" +
+    " tree node(s) still open" +
     (if has_incumbent { "" } else { "; no integer point found yet" }),
   }
 }

@@ -4,7 +4,7 @@
 /// The kernel solves the LP relaxation of a model; this package turns that into an
 /// answer for a model with integer variables. The shape is the classical one: relax,
 /// branch on a fractional variable, prune by bound, keep the best integral point found.
-/// Three things are this package's own choices and worth stating up front.
+/// Four things are this package's own choices and worth stating up front.
 ///
 /// **Nothing is reported as an answer until it is proven.** A solve that stops at a
 /// limit reports that limit, with the incumbent it has and the bound still open — never
@@ -25,6 +25,17 @@
 /// lattice points. Proving a MIP unbounded needs an *integral* ray from an integral
 /// feasible point, which this round does not build, so the run says
 /// `UnboundedRelaxation` and leaves the question where it is.
+///
+/// **A bound is worth nothing without a point to compare it to.** Best-bound branching
+/// searches for a bound and can spend a whole budget without ever standing on an integer
+/// point, and in that state the bound prunes nothing: the first report over the public
+/// instances stopped at the node budget on fourteen of them and thirteen had no incumbent
+/// at all. So before a fractional relaxation is branched on, one more thing is tried on it
+/// — a walk down the nearer whole side of the most fractional variable, re-solving as it
+/// goes (`dive_for_incumbent`) — which costs a few of the same relaxations and turns an
+/// unknown gap into a number. It only ever *offers* an incumbent, it is bounded by
+/// `dive_steps` and `dive_attempts`, and its relaxations are verified like every other one,
+/// because being a heuristic is not a reason to trust the kernel more than the tree does.
 
 ///|
 /// How a branch and bound run ended.
@@ -120,6 +131,21 @@ pub(all) struct MipOptions {
   /// Verify every node's relaxation with `@verify` before branching on it. On by
   /// default; the tests turn it off to show it changes nothing but the count.
   verify_nodes : Bool
+  /// How many relaxations one launch of the primal heuristic may spend walking a node's
+  /// relaxation down to a whole point, or `0` to switch the heuristic off.
+  ///
+  /// The heuristic exists because best-bound branching without one spends a budget
+  /// without ever producing an incumbent, and an incumbent is what turns a bound into
+  /// pruning: of the fourteen instances the first report stopped at the node budget on,
+  /// thirteen had no integer point at all. It follows the nearer whole side of the most
+  /// fractional variable and re-solves, which is a solve per step, so the step count is
+  /// the knob that says how much that is worth.
+  dive_steps : Int
+  /// How many times the heuristic may be launched. A dive that ends infeasible or runs
+  /// out of steps found nothing, and another launch from a deeper node starts closer to a
+  /// whole point — but each launch costs up to `dive_steps` relaxations, so the number of
+  /// launches is bounded separately from their length.
+  dive_attempts : Int
   /// Replaces the default node solver. Only tests use it.
   node_solver : ((@model.Model) -> NodeSolution)?
 }
@@ -128,12 +154,18 @@ pub(all) struct MipOptions {
 /// Defaults: a node budget rather than a time budget (a clock is a caller's tool, and this
 /// package stays free of one), a relaxation cap in the kernel's usual range, and
 /// verification on.
+///
+/// The primal heuristic gets thirty relaxations per launch and two launches, so it can
+/// never be more than sixty of the node budget — the budget bounds the run, and a
+/// heuristic that ate it would be a way of not searching.
 pub fn MipOptions::default() -> MipOptions {
   {
     max_nodes: 20000,
     max_iterations: 20000,
     tolerance: 1.0e-7,
     verify_nodes: true,
+    dive_steps: 30,
+    dive_attempts: 2,
     node_solver: None,
   }
 }
@@ -147,6 +179,8 @@ pub fn MipOptions::with_max_nodes(max_nodes : Int) -> MipOptions {
     max_iterations: base.max_iterations,
     tolerance: base.tolerance,
     verify_nodes: base.verify_nodes,
+    dive_steps: base.dive_steps,
+    dive_attempts: base.dive_attempts,
     node_solver: base.node_solver,
   }
 }
@@ -160,6 +194,23 @@ pub fn MipOptions::without_verification(self : MipOptions) -> MipOptions {
     max_iterations: self.max_iterations,
     tolerance: self.tolerance,
     verify_nodes: false,
+    dive_steps: self.dive_steps,
+    dive_attempts: self.dive_attempts,
+    node_solver: self.node_solver,
+  }
+}
+
+///|
+/// The same options with the primal heuristic switched off, so a test can show what the
+/// incumbent it finds is worth.
+pub fn MipOptions::without_primal_dive(self : MipOptions) -> MipOptions {
+  {
+    max_nodes: self.max_nodes,
+    max_iterations: self.max_iterations,
+    tolerance: self.tolerance,
+    verify_nodes: self.verify_nodes,
+    dive_steps: 0,
+    dive_attempts: 0,
     node_solver: self.node_solver,
   }
 }
@@ -176,6 +227,8 @@ pub fn MipOptions::with_node_solver(
     max_iterations: self.max_iterations,
     tolerance: self.tolerance,
     verify_nodes: self.verify_nodes,
+    dive_steps: self.dive_steps,
+    dive_attempts: self.dive_attempts,
     node_solver: Some(solver),
   }
 }

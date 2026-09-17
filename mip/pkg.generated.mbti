@@ -17,11 +17,14 @@ pub(all) struct MipOptions {
   max_iterations : Int
   tolerance : Double
   verify_nodes : Bool
+  dive_steps : Int
+  dive_attempts : Int
   node_solver : ((@model.Model) -> NodeSolution)?
 }
 pub fn MipOptions::default() -> Self
 pub fn MipOptions::with_max_nodes(Int) -> Self
 pub fn MipOptions::with_node_solver(Self, (@model.Model) -> NodeSolution) -> Self
+pub fn MipOptions::without_primal_dive(Self) -> Self
 pub fn MipOptions::without_verification(Self) -> Self
 
 pub struct MipResult {

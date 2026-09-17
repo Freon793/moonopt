@@ -27,6 +27,24 @@ test "rounding goes to the whole number on the correct side" {
 }
 
 ///|
+/// The size of the dive a launch would start, which is what decides whether the primal
+/// heuristic runs at all: the walk fixes one fractional integer per step and may spend two
+/// steps on a variable whose first side comes back infeasible.
+test "the dive size counts fractional integers and only those" {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  model.add_var("a", lb=0.0, ub=10.0, is_int=true) |> ignore
+  // `b` is continuous and very fractional; it is not a step the walk would take.
+  model.add_var("b", lb=0.0, ub=10.0, is_int=false) |> ignore
+  model.add_var("c", lb=0.0, ub=10.0, is_int=true) |> ignore
+  model.add_var("d", lb=0.0, ub=10.0, is_int=true) |> ignore
+  assert_eq(fractional_count(model, [0.2, 4.5, 3.7, 2.0], 1.0e-7), 2)
+  assert_eq(fractional_count(model, [1.0, 4.5, 2.0, 3.0], 1.0e-7), 0)
+  // A value inside the tolerance of a whole number is a whole number, here too.
+  assert_eq(fractional_count(model, [1.0 + 1.0e-9, 0.0, 2.0, 3.0], 1.0e-7), 0)
+  assert_eq(fractional_count(model, [1.5, 0.0, 2.5, 3.5], 1.0e-7), 3)
+}
+
+///|
 test "the branching variable is the integer one furthest from a whole number" {
   let model = @model.Model::new(@model.Sense::Minimize)
   model.add_var("a", lb=0.0, ub=10.0, is_int=true) |> ignore

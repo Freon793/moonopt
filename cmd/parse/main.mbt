@@ -637,6 +637,10 @@ fn mip_report(model : @model.Model, flags : SolveFlags) -> Bool {
       "       mip=presolve-skipped(an integer model goes to the kernel as it is)",
     )
   }
+  // Built from the library's own defaults so the CLI cannot drift from them: a CLI that
+  // spelled its own tolerances and heuristic budgets would be a second set of defaults to
+  // keep in step.
+  let base = @mip.MipOptions::default()
   let options : @mip.MipOptions = {
     max_nodes: if flags.max_nodes > 0 {
       flags.max_nodes
@@ -648,9 +652,11 @@ fn mip_report(model : @model.Model, flags : SolveFlags) -> Bool {
     } else {
       20000
     },
-    tolerance: 1.0e-7,
-    verify_nodes: true,
-    node_solver: None,
+    tolerance: base.tolerance,
+    verify_nodes: base.verify_nodes,
+    dive_steps: base.dive_steps,
+    dive_attempts: base.dive_attempts,
+    node_solver: base.node_solver,
   }
   let result = @mip.solve_mip(model, options)
   let mut line = "       mip=" +

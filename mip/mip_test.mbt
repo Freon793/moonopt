@@ -258,6 +258,66 @@ fn never_finishes(_problem : @model.Model) -> NodeSolution {
 }
 
 ///|
+/// `max x + y  s.t.  x + y <= 3.3`, `x, y` integers in `[0, 4]`.
+///
+/// The relaxation's best value is 3.3 along the whole edge `x + y = 3.3`, and the best
+/// integer point is 3, one step inside it. That is what makes this the model the primal
+/// heuristic is worth measuring on: the walk that fixes the fractional variable reaches
+/// `(3, 0)` or `(0, 3)` in a single relaxation, while the tree's first two children are
+/// still not whole. (The relaxation's value is deliberately not a half: at `3.5` the two
+/// sides of the fractional variable are equally near and the walk would pick by round-off.)
+fn one_fractional_step_mip() -> @model.Model {
+  let model = @model.Model::new(@model.Sense::Maximize)
+  let x = model.add_var("x", lb=0.0, ub=4.0, is_int=true)
+  let y = model.add_var("y", lb=0.0, ub=4.0, is_int=true)
+  model.set_objective([(x, 1.0), (y, 1.0)])
+  model.add_constraint([(x, 1.0), (y, 1.0)], @model.Rel::LessEqual, 3.3)
+  model
+}
+
+///|
+/// The primal heuristic is what turns a bound into pruning: same model, same budget, and
+/// the only difference is whether the walk down to a whole point is allowed.
+test "the primal heuristic finds an incumbent the tree has not reached yet" {
+  let model = one_fractional_step_mip()
+  // Three relaxations: the root, then the walk's step. Without the walk the same three
+  // relaxations are the root and two children, neither of which is whole.
+  let without = solve_mip(
+    model,
+    MipOptions::with_max_nodes(3).without_primal_dive(),
+  )
+  assert_eq(without.status, MipStatus::NodeLimit)
+  assert_eq(without.values.length(), 0)
+  assert_eq(without.verified, without.nodes)
+  let dived = solve_mip(model, MipOptions::with_max_nodes(3))
+  assert_eq(dived.status, MipStatus::NodeLimit)
+  // The point it found is a real answer to the model, checked without the search's own
+  // routines: it satisfies the rows, sits on whole numbers and its objective is its own.
+  assert_answer_at_point(model, dived, 1.0e-6)
+  assert_true(@core.approx_eq(dived.objective, 3.0, rel=1.0e-9, abs=1.0e-9))
+  // The bound is still the relaxation's, so the run still has something to prove — and
+  // the gap between the two is now a number the caller can act on instead of `1e300`.
+  assert_true(@core.approx_eq(dived.bound, 3.3, rel=1.0e-9, abs=1.0e-9))
+  assert_true(@core.approx_eq(dived.gap, 0.3, rel=1.0e-9, abs=1.0e-9))
+  // The walk's relaxations are relaxations: solved, counted and verified like any other.
+  assert_eq(dived.verified, dived.nodes)
+  assert_true(dived.nodes > 1)
+}
+
+///|
+/// The heuristic offers an incumbent; it never claims optimality. With a budget too small
+/// to finish, the run still ends at the limit rather than at an answer.
+test "the primal heuristic does not turn a limit into an answer" {
+  let model = one_fractional_step_mip()
+  let result = solve_mip(model, MipOptions::with_max_nodes(2))
+  assert_eq(result.status, MipStatus::NodeLimit)
+  assert_true(result.message.length() > 0)
+  if result.values.length() > 0 {
+    assert_answer_at_point(model, result, 1.0e-6)
+  }
+}
+
+///|
 /// The relaxation is fractional, so the answer only appears after branching.
 test "branching finds the integer optimum of a fractional relaxation" {
   let model = two_variable_mip()
