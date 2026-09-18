@@ -24,7 +24,7 @@ MIPLIB 2017 —— 它提供同样性质的工业实例，但以纯 MPS（gzip �
 | `fetch-instances.ps1` | 下载实例到 `bench/data/instances/`，生成 `manifest.txt`（相对路径，可移植） |
 | `report-parse.ps1` | 通过 `moon run cmd/parse -- --manifest ...` 解析全部实例，生成 `parse-report.md` |
 | `report-solve.ps1` | 加 `--solve --relax --max-rows N` 求解，生成 `solve-report.md` |
-| `report-mip.ps1` | 加 `--mip --max-nodes N` 做分支定界，生成 `mip-report.md` |
+| `report-mip.ps1` | 加 `--mip --max-nodes N` 做分支定界，生成 `mip-report.md`（可换 `-Manifest` / `-Output` / `-CutRounds`：小规模满预算那一份就是这么生成的） |
 | `check-relaxation-bounds.ps1` | 把求解报告里的目标值与 MIPLIB 官方最优值表对拍 |
 | `check-mip-objectives.ps1` | 把分支定界报告里每个 `optimal` 与官方最优值**取等**对拍，并断言 `verified == nodes` |
 
@@ -35,7 +35,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Rela
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-relaxation-bounds.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -MaxRows 300 -MaxNodes 300 -MaxIterations 5000
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-mip-objectives.ps1
+# 小规模实例的满预算口径（完成标准"M5 ①：小规模实例求到公开已知最优值"的证据）
+powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -Manifest bench/data/instances/small.txt -MaxRows 300 -MaxNodes 20000 -MaxIterations 20000 -Output bench/mip-report-small.md
+powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-mip-objectives.ps1 -Report bench/mip-report-small.md
 ```
+
+**`check-mip-objectives.ps1` 按表头列名读报告，不按列位置。** 它此前是按位置取 "nodes / verified" 的：
+报告插入 `cuts` 列之后，它把 `verified` 读成 `nodes`、把 `cuts` 读成 `verified`，对一个 33/33 全部过校验的
+最优运行报 `UNVERIFIED` 并非零退出 —— 读数的人坏了，而报告里的数字一个都没变。加列就要重新走一遍这条命令。
 
 **`mip-report.md` 是这条命令生成的**：`noswot` 的三个被拒证书在 M5 第三轮全部定论为内核缺陷
 （对偶解在病态基上丢精度、方向求解没有自检、非负性自检的尺度与校验器不一致，见 `CHANGELOG.md`），
@@ -98,6 +105,16 @@ native 目标在这里直接以访问冲突（`0xC0000005`）退出并造成整�
 
 - `parse-report.md`：解析报告。含工具链版本与产生它的提交哈希，因此每个数字都可追溯到具体代码；
   记录每个实例的规模、整数列数与校验结论，失败的实例逐条给出原因与位置。
+- `mip-report.md`：分支定界报告（行数上限 300、节点预算 300）。清单里 32 个实例，逐实例给状态、
+  目标值、仍在开的界、`nodes` / `verified` / `cuts` 与点复核结论；脚本在退出码非零、条目数不符、
+  出现被拒证书或点没通过复核时**拒绝写报告**。
+- `mip-report-small.md`：**小规模实例的满预算口径**（清单 `bench/data/instances/small.txt`、行数上限 300、
+  节点预算 20000、迭代上限 20000、开根割）。它是完成标准"M5 ①：小规模实例求到公开已知最优值"的证据：
+  9 个实例里 **4 个证到公开已知最优值**（`khb05250` 305 节点 / `p0201` 586 / `22433` 33 / `flugpl` 13806），
+  `check-mip-objectives.ps1 -Report bench/mip-report-small.md` 对 4 项**取等**通过。
+  清单文件本身也是证据：它把每个实例**实测的每节点成本**与排除理由写在里面（`rout` 391 ms/节点、
+  `misc07` 1000 节点超过 8 分钟 → 20000 节点的臂跑不起），并把 `blend2` 记为 **BLOCKED**
+  （深预算运行被一条证书拒签挡住，见 `CHANGELOG.md`）而不是把它移出清单。
 - `solve-report.md`：求解报告。记录模式（是否 LP 松弛）、行数上限、工具链版本与提交哈希，
   逐实例给出状态、目标值与枢轴迭代数；非最优结果逐条如实列出，包含内核自检测得的残差与负值。
   当前这份由 `-Relax -MaxRows 1000 -MaxIterations 1200 -Presolve` 生成，用时 113 秒：

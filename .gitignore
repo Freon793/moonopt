@@ -6,4 +6,10 @@ target
 .moonagent/
 
 # Third party benchmark data is downloaded, never committed (see bench/README.md).
-bench/data/
+# The hand-written instance *lists* are not data: a report cannot be reproduced without the
+# list it was generated from, so `small.txt` is tracked. Git cannot re-include a file whose
+# parent directory is excluded, hence the rule is stated one level at a time.
+bench/data/*
+!bench/data/instances/
+bench/data/instances/*
+!bench/data/instances/small.txt

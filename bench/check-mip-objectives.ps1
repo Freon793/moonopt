@@ -56,12 +56,46 @@ $checked = 0
 $violations = 0
 $unknown = 0
 $unverified = 0
-foreach ($line in [IO.File]::ReadAllLines($Report)) {
-  if ($line -notmatch '^\|\s*([A-Za-z0-9_.-]+)\s*\|.*\|\s*optimal\s*\|\s*(\S+)\s*\|.*\|\s*(\d+)\s*\|\s*(\d+)\s*\|') { continue }
-  $name = $Matches[1]
-  $objective = [double]$Matches[2]
-  $nodes = [int]$Matches[3]
-  $verified = [int]$Matches[4]
+
+# The columns are read by name, from the table's own header. Reading them by position is
+# how this script came to compare a `cuts` count against a `verified` count: the `cuts`
+# column was inserted between them and every position after it moved, so the check reported
+# "UNVERIFIED 22433: 33 nodes, 20 verified" for a run whose 33 relaxations were all
+# verified. A checker that reads the report by position is a checker that has to be edited
+# whenever the report grows a column, and the failure mode of forgetting is a false alarm.
+$lines = [IO.File]::ReadAllLines($Report)
+$header = $null
+foreach ($line in $lines) {
+  if ($line -match '^\|\s*instance\s*\|') {
+    $header = @(($line.Trim().Trim('|') -split '\|') | ForEach-Object { $_.Trim() })
+    break
+  }
+}
+if ($null -eq $header) {
+  Write-Error "no instance table found in $Report"
+  exit 2
+}
+$column = @{}
+for ($k = 0; $k -lt $header.Count; $k++) {
+  $column[$header[$k]] = $k
+}
+foreach ($needed in @('instance', 'result', 'objective', 'nodes', 'verified')) {
+  if (-not $column.ContainsKey($needed)) {
+    Write-Error ("the report table has no '{0}' column; columns are: {1}" -f $needed, ($header -join ', '))
+    exit 2
+  }
+}
+
+foreach ($line in $lines) {
+  if ($line -notmatch '^\|') { continue }
+  $cells = @(($line.Trim().Trim('|') -split '\|') | ForEach-Object { $_.Trim() })
+  if ($cells.Count -ne $header.Count) { continue }
+  if ($cells[$column['result']] -ne 'optimal') { continue }
+  $name = $cells[$column['instance']]
+  if (-not ($cells[$column['objective']] -as [double])) { continue }
+  $objective = [double]$cells[$column['objective']]
+  $nodes = [int]$cells[$column['nodes']]
+  $verified = [int]$cells[$column['verified']]
   if ($verified -ne $nodes) {
     $unverified++
     Write-Host ("UNVERIFIED {0}: {1} nodes, {2} verified" -f $name, $nodes, $verified)

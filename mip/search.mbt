@@ -230,6 +230,13 @@ fn most_fractional(
 /// itself. Nothing here shares state with the solver: `@verify` reads the model and these
 /// arrays.
 ///
+/// Before the certificate is offered, the multipliers a tight row makes free are repaired
+/// (`repaired_duals`): a degenerate optimum's dual is not unique, and a simplex can land on a
+/// point in that face a few parts in `1e7` outside the sign convention, which the checker
+/// refuses while its own duality gap comes out at `1e-13`. The repair decides nothing — the
+/// checker still judges the repaired certificate, and would refuse it if the clamp had moved
+/// the bound.
+///
 /// A relaxation that reached no verdict is not a claim to check — the caller counts it
 /// as an open node instead of stopping the run — so it comes back as no refusal here.
 fn node_refusal(
@@ -243,12 +250,13 @@ fn node_refusal(
     NodeStatus::Unbounded => @verify.Claim::Unbounded
     NodeStatus::Unfinished => return ""
   }
+  let repaired = repaired_duals(model, solution, tolerance)
   let certificate : @verify.Certificate = {
     claim,
-    values: solution.values,
-    duals: solution.duals,
-    ray: solution.ray,
-    objective: solution.objective,
+    values: repaired.values,
+    duals: repaired.duals,
+    ray: repaired.ray,
+    objective: repaired.objective,
   }
   let verdict = @verify.verify(model, certificate, tolerance~)
   if verdict.accepted {
