@@ -22,6 +22,8 @@ pub fn solve_standard_with(Int, Array[Double], Array[(Array[Double], @model.Rel,
 
 pub fn solve_standard_with_basis(Int, Array[Double], Array[(Array[Double], @model.Rel, Double)], SimplexOptions, SimplexBasis) -> SimplexResult
 
+pub fn tableau_rows(@model.Model, SimplexOptions, SimplexBasis) -> Result[Array[TableauRow], String]
+
 // Errors
 
 // Types and methods
@@ -41,6 +43,7 @@ pub struct KernelProblem {
   initial_basis : Array[Int]
   row_source : Array[Int]
   row_dual_factor : Array[Double]
+  row_sign : Array[Double]
 } derive(@debug.Debug)
 pub fn KernelProblem::from_model(@model.Model) -> Result[Self, String]
 pub fn KernelProblem::from_standard(Int, Array[Double], Array[(Array[Double], @model.Rel, Double)]) -> Self
@@ -96,6 +99,12 @@ pub(all) enum SimplexStatus {
   NumericalFailure
   TooLarge
 } derive(Eq, @debug.Debug)
+
+pub(all) struct TableauRow {
+  basic : Int
+  value : Double
+  multipliers : Array[Double]
+} derive(@debug.Debug)
 
 // Type aliases
 

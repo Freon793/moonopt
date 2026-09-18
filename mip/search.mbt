@@ -448,6 +448,7 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
       gap: 0.0,
       nodes: 0,
       verified: 0,
+      cuts: 0,
       message: "model is not well formed: " + issues[0],
     }
   }
@@ -473,11 +474,16 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
   let mut verified = 0
   let mut unfinished_nodes = 0
   let mut dives_launched = 0
+  // The model the tree is built on: the caller's model plus the cuts the root earned.
+  // Every node below the root is rebuilt from this one, so a cut added here is inherited
+  // by the whole tree — which is exactly why it has to be checked before it lands.
+  let mut root_model = model.clone()
+  let mut cuts_added = 0
   while !queue.is_empty() {
     if solved >= options.max_nodes {
       return limit_result(
         nodes, queue, incumbent, incumbent_objective, has_incumbent, solved, verified,
-        sign, options,
+        cuts_added, sign, options,
       )
     }
     let index = queue.pop()
@@ -488,12 +494,14 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
       sign * node.bound >= sign * incumbent_objective - options.tolerance {
       continue
     }
-    let problem = node_model(model, nodes, index)
-    let (solution, node_basis) = match options.node_solver {
+    let mut problem = node_model(root_model, nodes, index)
+    let (started, started_basis) = match options.node_solver {
       // A node solver supplied from outside carries no basis, so its children restart.
       Some(injected) => (injected(problem), None)
       None => kernel_node(problem, options, node.basis)
     }
+    let mut solution = started
+    let mut node_basis = started_basis
     solved = solved + 1
     // A relaxation that reached no verdict has no claim to check: it is counted open
     // below instead, so a run whose budget cut a relaxation short ends at a limit
@@ -509,6 +517,7 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
           gap: 0.0,
           nodes: solved,
           verified,
+          cuts: cuts_added,
           message: "a relaxation's certificate was refused at node " +
           index.to_string() +
           " (depth " +
@@ -518,6 +527,138 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
         }
       }
       verified = verified + 1
+    }
+    // Root cuts. The relaxation at the root decides every node below it, so one round of
+    // tightening there is worth more than tightening any other node, and cutting only at
+    // the root is what keeps the tree's "a node is its parent plus one bound" shape and
+    // the warm starts between nodes intact. A cut is added only after
+    // `@verify.verify_cut` has re-derived it from the witness the tableau gave; a
+    // disagreement stops the run, because a cut nothing downstream can check is the one
+    // way this search could return a wrong answer without anyone noticing.
+    //
+    // A round is kept only if it pays: the cuts go into a copy of the root, the copy is
+    // re-solved, and unless that relaxation comes back optimal *and* better than the one
+    // the cuts were taken from, the whole round is thrown away and the tree is built on the
+    // model as it was. That is not a detail. Adding rows to a degenerate relaxation can cost
+    // more pivots than it saves — on `noswot` a round of twenty cuts left the root's
+    // re-solve unfinished, which under the plain version of this code ended the run at the
+    // limit after three relaxations with no bound at all, a strictly worse answer than
+    // never having asked. A discarded round still spent its relaxations, so they are
+    // counted and verified like any other; what is not kept is the model change.
+    if options.cut_rounds > 0 &&
+      index == 0 &&
+      solution.status == NodeStatus::Optimal {
+      let mut round = 0
+      let mut keep_going = true
+      while keep_going && round < options.cut_rounds {
+        round = round + 1
+        match node_basis {
+          // No basis means no tableau to round from: a test's injected node solver, or a
+          // relaxation that reached no verdict. Nothing to do, nothing to refuse.
+          None => keep_going = false
+          Some(basis) => {
+            let cuts = match cut_round(problem, solution, basis, options) {
+              Err(reason) =>
+                return {
+                  status: MipStatus::Unverified,
+                  values: [],
+                  objective: 0.0,
+                  bound: node.bound,
+                  gap: 0.0,
+                  nodes: solved,
+                  verified,
+                  cuts: cuts_added,
+                  message: reason,
+                }
+              Ok(cuts) => cuts
+            }
+            if cuts.length() == 0 {
+              keep_going = false
+            } else {
+              let candidate = root_model.clone()
+              for cut in cuts {
+                candidate.add_named_constraint(
+                  cut.terms,
+                  cut.rel,
+                  cut.rhs,
+                  "cut",
+                )
+              }
+              // The added rows changed the shape of the problem, so the basis the
+              // relaxation ended on no longer describes it: this re-solve is cold on
+              // purpose, and it is counted and verified like every other relaxation.
+              let tightened_problem = node_model(candidate, nodes, index)
+              let (tightened, tightened_basis) = kernel_node(
+                tightened_problem,
+                options,
+                None,
+              )
+              solved = solved + 1
+              let mut refused = ""
+              if options.verify_nodes &&
+                tightened.status != NodeStatus::Unfinished {
+                refused = node_refusal(
+                  tightened_problem,
+                  tightened,
+                  options.tolerance,
+                )
+                if refused == "" {
+                  verified = verified + 1
+                }
+              }
+              if refused != "" {
+                return {
+                  status: MipStatus::Unverified,
+                  values: [],
+                  objective: 0.0,
+                  bound: node.bound,
+                  gap: 0.0,
+                  nodes: solved,
+                  verified,
+                  cuts: cuts_added,
+                  message: "the relaxation of the cut root was refused: " +
+                  refused,
+                }
+              }
+              // Whether the round is kept. Adding valid cuts can only shrink the feasible
+              // region of a relaxation, so a relaxed optimum that *moved the wrong way* is
+              // arithmetic rather than information, and a re-solve that reached no verdict
+              // says nothing at all: both are thrown away rather than believed. Within
+              // that, a round is kept even when the root's own optimum did not move,
+              // because the cut that is slack at one optimum can still cut a deeper
+              // node's — on `pk1` a round that left the root's objective where it was
+              // took the incumbent from 45 to 36 further down the tree.
+              let resolved = tightened.status == NodeStatus::Optimal
+              let not_worse = sign * tightened.objective >=
+                sign * solution.objective -
+                options.tolerance * (1.0 + @core.fabs(solution.objective))
+              let paid = resolved && not_worse
+              if paid {
+                root_model = candidate
+                problem = tightened_problem
+                solution = tightened
+                node_basis = tightened_basis
+                cuts_added = cuts_added + cuts.length()
+              } else {
+                keep_going = false
+              }
+              if solved >= options.max_nodes {
+                return limit_result(
+                  nodes, queue, incumbent, incumbent_objective, has_incumbent, solved,
+                  verified, cuts_added, sign, options,
+                )
+              }
+              // Either the tightened relaxation is whole (the round has done its job and
+              // the branch below picks the incumbent up) or it is not worth another
+              // round of the same rows.
+              if !paid ||
+                most_fractional(problem, solution.values, options.tolerance) < 0 {
+                keep_going = false
+              }
+            }
+          }
+        }
+      }
     }
     match solution.status {
       NodeStatus::Infeasible => ()
@@ -534,6 +675,7 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
           },
           nodes: solved,
           verified,
+          cuts: cuts_added,
           message: "a relaxation is unbounded, which does not prove the integer problem is",
         }
       NodeStatus::Unfinished =>
@@ -620,6 +762,7 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
                   gap: 0.0,
                   nodes: solved,
                   verified,
+                  cuts: cuts_added,
                   message: "a certificate was refused while the primal heuristic walked node " +
                   index.to_string() +
                   " down to a whole point: " +
@@ -639,7 +782,7 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
               if solved >= options.max_nodes {
                 return limit_result(
                   nodes, queue, incumbent, incumbent_objective, has_incumbent, solved,
-                  verified, sign, options,
+                  verified, cuts_added, sign, options,
                 )
               }
             }
@@ -699,6 +842,7 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
       },
       nodes: solved,
       verified,
+      cuts: cuts_added,
       message: unfinished_nodes.to_string() +
       " node relaxation(s) did not finish, so the tree is not exhausted",
     }
@@ -712,6 +856,7 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
       gap: 0.0,
       nodes: solved,
       verified,
+      cuts: cuts_added,
       message: "every node was pruned without an integer point, so none exists",
     }
   }
@@ -723,6 +868,7 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
     gap: 0.0,
     nodes: solved,
     verified,
+    cuts: cuts_added,
     message: "",
   }
 }
@@ -738,6 +884,7 @@ fn limit_result(
   has_incumbent : Bool,
   solved : Int,
   verified : Int,
+  cuts_added : Int,
   sign : Double,
   options : MipOptions,
 ) -> MipResult {
@@ -756,6 +903,7 @@ fn limit_result(
     },
     nodes: solved,
     verified,
+    cuts: cuts_added,
     message: "relaxation budget of " +
     options.max_nodes.to_string() +
     " reached with " +

@@ -115,24 +115,31 @@ pub(all) struct SolveOptions {
   /// heuristic spends. Reaching it ends the run as `NodeLimit` with the incumbent and the
   /// bound still open. Ignored by a linear solve, which spends `max_iterations` instead.
   max_nodes : Int
+  /// Rounds of cuts the root relaxation may be tightened with before the tree is built, or
+  /// `0` to search the model as written. Each round re-solves the root, and every cut that
+  /// lands has been re-derived and checked by the independent verifier first — an
+  /// unchecked cut would remove integer points from every node below it without anything
+  /// downstream noticing. Ignored by a linear solve, which has nothing to round.
+  cut_rounds : Int
 } derive(Debug)
 
 ///|
-/// Default solve options: a generous iteration budget and node budget, presolve on.
+/// Default solve options: a generous iteration budget and node budget, presolve on, cuts
+/// on.
 pub fn SolveOptions::default() -> SolveOptions {
-  { max_iterations: 10000, presolve: true, max_nodes: 20000, }
+  { max_iterations: 10000, presolve: true, max_nodes: 20000, cut_rounds: 2, }
 }
 
 ///|
 /// Solve options with an explicit iteration cap, keeping presolve on.
 pub fn SolveOptions::new(max_iterations : Int) -> SolveOptions {
-  { max_iterations, presolve: true, max_nodes: 20000, }
+  { max_iterations, presolve: true, max_nodes: 20000, cut_rounds: 2, }
 }
 
 ///|
 /// Solve options with an explicit node budget, for a model with integer variables.
 pub fn SolveOptions::with_max_nodes(max_nodes : Int) -> SolveOptions {
-  { max_iterations: 10000, presolve: true, max_nodes, }
+  { max_iterations: 10000, presolve: true, max_nodes, cut_rounds: 2, }
 }
 
 ///|
@@ -363,7 +370,9 @@ pub fn solve_with(model : @model.Model, options : SolveOptions) -> Solution {
       verify_nodes: base.verify_nodes,
       dive_steps: base.dive_steps,
       dive_attempts: base.dive_attempts,
+      cut_rounds: options.cut_rounds,
       node_solver: base.node_solver,
+      cut_hook: base.cut_hook,
     }
     return from_mip(@mip.solve_mip(model, mip_options))
   }

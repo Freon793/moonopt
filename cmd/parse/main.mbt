@@ -41,7 +41,9 @@ fn print_usage() -> Unit {
   println("usage: moon run cmd/parse -- <file> [<file> ...]")
   println("       moon run cmd/parse -- --manifest <list-file>")
   println("       moon run cmd/parse -- <file> --verify")
-  println("       moon run cmd/parse -- <file> --mip [--max-nodes <n>]")
+  println(
+    "       moon run cmd/parse -- <file> --mip [--max-nodes <n>] [--cut-rounds <n>]",
+  )
   println(
     "       moon run cmd/parse -- <file> --certificate <certificate.json>",
   )
@@ -162,6 +164,9 @@ pub(all) struct SolveFlags {
   mip : Bool
   /// Node budget for a branch and bound run; zero means the library default.
   max_nodes : Int
+  /// Rounds of cuts at the root of a branch and bound run; negative means the library
+  /// default, zero means search the model as written.
+  cut_rounds : Int
 }
 
 ///|
@@ -656,7 +661,13 @@ fn mip_report(model : @model.Model, flags : SolveFlags) -> Bool {
     verify_nodes: base.verify_nodes,
     dive_steps: base.dive_steps,
     dive_attempts: base.dive_attempts,
+    cut_rounds: if flags.cut_rounds >= 0 {
+      flags.cut_rounds
+    } else {
+      base.cut_rounds
+    },
     node_solver: base.node_solver,
+    cut_hook: base.cut_hook,
   }
   let result = @mip.solve_mip(model, options)
   let mut line = "       mip=" +
@@ -664,7 +675,9 @@ fn mip_report(model : @model.Model, flags : SolveFlags) -> Bool {
     " nodes=" +
     result.nodes.to_string() +
     " verified=" +
-    result.verified.to_string()
+    result.verified.to_string() +
+    " cuts=" +
+    result.cuts.to_string()
   if result.values.length() > 0 {
     line = line + " obj=" + result.objective.to_string()
   }
@@ -869,6 +882,7 @@ fn main {
   let mut reoptimize_enabled = false
   let mut mip_enabled = false
   let mut max_nodes = 0
+  let mut cut_rounds = -1
   let mut certificate_path = ""
   let mut index = 1
   while index < args.length() {
@@ -900,6 +914,16 @@ fn main {
       if index + 1 < args.length() {
         match @format.parse_index(args[index + 1]) {
           Some(value) => max_nodes = value
+          None => ()
+        }
+        index = index + 2
+        continue
+      }
+    }
+    if argument == "--cut-rounds" {
+      if index + 1 < args.length() {
+        match @format.parse_index(args[index + 1]) {
+          Some(value) => cut_rounds = value
           None => ()
         }
         index = index + 2
@@ -1001,6 +1025,7 @@ fn main {
     reoptimize: reoptimize_enabled,
     mip: mip_enabled,
     max_nodes,
+    cut_rounds,
   }
   for path in files {
     if !inspect(path, flags) {

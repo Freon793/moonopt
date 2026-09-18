@@ -7,7 +7,11 @@ import {
 }
 
 // Values
+pub fn derive_cut(@model.Model, CutCertificate, tolerance? : Double) -> Result[CutRow, String]
+
 pub fn verify(@model.Model, Certificate, tolerance? : Double) -> Verdict
+
+pub fn verify_cut(@model.Model, CutRow, CutCertificate, tolerance? : Double) -> CutVerdict
 
 // Errors
 
@@ -35,6 +39,27 @@ pub(all) enum Claim {
   Infeasible
   Unbounded
 } derive(Eq, @debug.Debug)
+
+pub(all) struct CutCertificate {
+  basic : Int
+  multipliers : Array[Double]
+  rhs : Double
+  from_lower : Array[Bool]
+} derive(@debug.Debug)
+
+pub(all) struct CutRow {
+  terms : Array[(Int, Double)]
+  rel : @model.Rel
+  rhs : Double
+} derive(@debug.Debug)
+
+pub(all) struct CutVerdict {
+  accepted : Bool
+  checks : Array[Check]
+  reason : String
+  derived : CutRow?
+} derive(@debug.Debug)
+pub fn CutVerdict::to_text(Self) -> String
 
 pub(all) struct Verdict {
   accepted : Bool

@@ -17,6 +17,7 @@ pub(all) struct SolveFlags {
   reoptimize : Bool
   mip : Bool
   max_nodes : Int
+  cut_rounds : Int
 }
 
 // Type aliases

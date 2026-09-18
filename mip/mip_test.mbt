@@ -281,15 +281,17 @@ fn one_fractional_step_mip() -> @model.Model {
 test "the primal heuristic finds an incumbent the tree has not reached yet" {
   let model = one_fractional_step_mip()
   // Three relaxations: the root, then the walk's step. Without the walk the same three
-  // relaxations are the root and two children, neither of which is whole.
+  // relaxations are the root and two children, neither of which is whole. Cuts are
+  // switched off because this test is about the walk: with the root's row rounded away,
+  // the same three-relaxation budget proves optimality instead of running out.
   let without = solve_mip(
     model,
-    MipOptions::with_max_nodes(3).without_primal_dive(),
+    MipOptions::with_max_nodes(3).without_primal_dive().without_cuts(),
   )
   assert_eq(without.status, MipStatus::NodeLimit)
   assert_eq(without.values.length(), 0)
   assert_eq(without.verified, without.nodes)
-  let dived = solve_mip(model, MipOptions::with_max_nodes(3))
+  let dived = solve_mip(model, MipOptions::with_max_nodes(3).without_cuts())
   assert_eq(dived.status, MipStatus::NodeLimit)
   // The point it found is a real answer to the model, checked without the search's own
   // routines: it satisfies the rows, sits on whole numbers and its objective is its own.
@@ -359,7 +361,9 @@ test "an unbounded relaxation is not reported as an unbounded model" {
 /// objective is the bound, and nothing is the incumbent yet.
 test "a node budget stops the run without claiming optimality" {
   let model = two_variable_mip()
-  let result = solve_mip(model, MipOptions::with_max_nodes(1))
+  // Cuts off: this is a test about what a budget of one relaxation leaves behind, and a
+  // round of cuts at the root would spend a second relaxation to tighten it.
+  let result = solve_mip(model, MipOptions::with_max_nodes(1).without_cuts())
   assert_eq(result.status, MipStatus::NodeLimit)
   assert_eq(result.nodes, 1)
   assert_eq(result.values.length(), 0)

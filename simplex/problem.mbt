@@ -72,6 +72,17 @@ pub struct KernelProblem {
   /// caused it, is the only place it can be got right; a reader of a certificate
   /// should not have to redo it.
   row_dual_factor : Array[Double]
+  /// `+1` when the kernel row is the model row, `-1` when it is the model row negated
+  /// because its right hand side was negative.
+  ///
+  /// Not the same number as `row_dual_factor`, which also folds in the relation's own
+  /// sign (a slack column moves a dual one way, a surplus the other). That factor is
+  /// the right one for the *dual* of a row, because a dual is stated against the row's
+  /// oriented form. A row multiplier used as a coefficient *of the model row* — which
+  /// is what a cut's witness is, `Σ yᵢ·(row i) = row` — needs this one instead, and
+  /// reading the factor above for it would put a sign error into every cut taken from a
+  /// `≤` row.
+  row_sign : Array[Double]
 } derive(Debug)
 
 ///|
@@ -359,6 +370,7 @@ fn assemble(
   let rhs : Array[Double] = []
   let rows : Array[Array[(Int, Double)]] = []
   let dual_factors : Array[Double] = []
+  let signs : Array[Double] = []
   for i = 0; i < m; i = i + 1 {
     let rel = row_rels[i]
     let value = row_rhs[i]
@@ -372,6 +384,7 @@ fn assemble(
       rows.push(negated)
       rhs.push(-value)
       dual_factors.push(dual_factor(row_sources[i], rel, -1.0))
+      signs.push(-1.0)
       rels.push(
         match rel {
           @model.Rel::LessEqual => @model.Rel::GreaterEqual
@@ -383,6 +396,7 @@ fn assemble(
       rows.push(row_entries[i])
       rhs.push(value)
       dual_factors.push(dual_factor(row_sources[i], rel, 1.0))
+      signs.push(1.0)
       rels.push(rel)
     }
   }
@@ -470,6 +484,7 @@ fn assemble(
     initial_basis: initial_basis_column,
     row_source: row_sources,
     row_dual_factor: dual_factors,
+    row_sign: signs,
   }
 }
 

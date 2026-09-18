@@ -85,6 +85,11 @@ pub struct MipResult {
   /// did reach a verdict went through the verifier. The tests assert the equality — it is
   /// the evidence for "every re-solve is checked".
   verified : Int
+  /// Cuts added to the model the tree is built on. Every one of them was checked by
+  /// `@verify.verify_cut` against the model it was added to before it was added, because
+  /// an invalid cut removes integer points from every node below it and nothing
+  /// downstream would notice — see `verify/cuts.mbt`.
+  cuts : Int
   /// The verifier's account of the first refusal, when the run ended `Unverified`; the
   /// reason a run ended otherwise (an invalid model, a limit, an unbounded relaxation).
   message : String
@@ -155,8 +160,26 @@ pub(all) struct MipOptions {
   /// whole point — but each launch costs up to `dive_steps` relaxations, so the number of
   /// launches is bounded separately from their length.
   dive_attempts : Int
+  /// How many rounds of cuts the root relaxation may be tightened with, or `0` to switch
+  /// cut generation off.
+  ///
+  /// Cuts exist to push the *bound* down, which is the one lever the other two rounds of
+  /// this milestone left in place: the primal heuristic was measured to the end of its
+  /// step budget, and the pseudo-cost round showed that a signal about the bound cannot
+  /// be spent on finding integer points. A cut is the only change that makes the
+  /// relaxation itself stronger.
+  ///
+  /// Every cut is generated from a row of the root tableau, re-derived by
+  /// `@verify.verify_cut` and refused if the checker disagrees — a refused cut stops the
+  /// run as `Unverified` exactly like a refused node certificate, because the alternative
+  /// is to keep searching a model that is no longer the caller's.
+  cut_rounds : Int
   /// Replaces the default node solver. Only tests use it.
   node_solver : ((@model.Model) -> NodeSolution)?
+  /// Rewrites each generated cut just before it is verified. Only tests use it, and the
+  /// test it exists for is the one that matters: hand the search a deliberately wrong cut
+  /// and show that it is refused — and so never reaches the model the tree is built on.
+  cut_hook : ((@verify.CutRow) -> @verify.CutRow)?
 }
 
 ///|
@@ -175,7 +198,9 @@ pub fn MipOptions::default() -> MipOptions {
     verify_nodes: true,
     dive_steps: 60,
     dive_attempts: 2,
+    cut_rounds: 2,
     node_solver: None,
+    cut_hook: None,
   }
 }
 
@@ -190,7 +215,47 @@ pub fn MipOptions::with_max_nodes(max_nodes : Int) -> MipOptions {
     verify_nodes: base.verify_nodes,
     dive_steps: base.dive_steps,
     dive_attempts: base.dive_attempts,
+    cut_rounds: base.cut_rounds,
     node_solver: base.node_solver,
+    cut_hook: base.cut_hook,
+  }
+}
+
+///|
+/// The same options with cut generation switched off, for the measurement that says what
+/// the cuts are worth.
+pub fn MipOptions::without_cuts(self : MipOptions) -> MipOptions {
+  {
+    max_nodes: self.max_nodes,
+    max_iterations: self.max_iterations,
+    tolerance: self.tolerance,
+    verify_nodes: self.verify_nodes,
+    dive_steps: self.dive_steps,
+    dive_attempts: self.dive_attempts,
+    cut_rounds: 0,
+    node_solver: self.node_solver,
+    cut_hook: self.cut_hook,
+  }
+}
+
+///|
+/// The same options with a hook that rewrites each cut before it is verified. Only tests
+/// use it: handing the search a wrong cut is how "an invalid cut cannot reach the model"
+/// is shown rather than asserted.
+pub fn MipOptions::with_cut_hook(
+  self : MipOptions,
+  hook : (@verify.CutRow) -> @verify.CutRow,
+) -> MipOptions {
+  {
+    max_nodes: self.max_nodes,
+    max_iterations: self.max_iterations,
+    tolerance: self.tolerance,
+    verify_nodes: self.verify_nodes,
+    dive_steps: self.dive_steps,
+    dive_attempts: self.dive_attempts,
+    cut_rounds: self.cut_rounds,
+    node_solver: self.node_solver,
+    cut_hook: Some(hook),
   }
 }
 
@@ -205,7 +270,9 @@ pub fn MipOptions::without_verification(self : MipOptions) -> MipOptions {
     verify_nodes: false,
     dive_steps: self.dive_steps,
     dive_attempts: self.dive_attempts,
+    cut_rounds: self.cut_rounds,
     node_solver: self.node_solver,
+    cut_hook: self.cut_hook,
   }
 }
 
@@ -220,7 +287,9 @@ pub fn MipOptions::without_primal_dive(self : MipOptions) -> MipOptions {
     verify_nodes: self.verify_nodes,
     dive_steps: 0,
     dive_attempts: 0,
+    cut_rounds: self.cut_rounds,
     node_solver: self.node_solver,
+    cut_hook: self.cut_hook,
   }
 }
 
@@ -238,6 +307,8 @@ pub fn MipOptions::with_node_solver(
     verify_nodes: self.verify_nodes,
     dive_steps: self.dive_steps,
     dive_attempts: self.dive_attempts,
+    cut_rounds: self.cut_rounds,
     node_solver: Some(solver),
+    cut_hook: self.cut_hook,
   }
 }

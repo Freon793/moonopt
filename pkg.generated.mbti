@@ -29,6 +29,7 @@ pub(all) struct SolveOptions {
   max_iterations : Int
   presolve : Bool
   max_nodes : Int
+  cut_rounds : Int
 } derive(@debug.Debug)
 pub fn SolveOptions::default() -> Self
 pub fn SolveOptions::new(Int) -> Self

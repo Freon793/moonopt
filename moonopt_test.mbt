@@ -152,10 +152,14 @@ test "an integer model is solved to the integer optimum, not to its relaxation" 
 /// A node budget is a budget, not an answer: the run stops as `NodeLimit` with whatever
 /// integer point it has (here none, at one relaxation) and the bound still open.
 test "a node budget is reported as a budget rather than as an optimality claim" {
-  let sol = @moonopt.solve_with(
-    integer_mip(),
-    @moonopt.SolveOptions::with_max_nodes(1),
-  )
+  // Cuts off: this is about what one relaxation's budget leaves behind, and a round of
+  // cuts at the root would spend a second relaxation to tighten the same node.
+  let sol = @moonopt.solve_with(integer_mip(), {
+    max_iterations: 10000,
+    presolve: true,
+    max_nodes: 1,
+    cut_rounds: 0,
+  })
   assert_eq(sol.status, @moonopt.SolveStatus::NodeLimit)
   assert_eq(sol.values.length(), 0)
   assert_true(@core.approx_eq(sol.bound, 73.0 / 6.0, rel=1.0e-9, abs=1.0e-9))
@@ -219,6 +223,7 @@ test "iteration limit is surfaced instead of being ignored" {
     max_iterations: 0,
     presolve: false,
     max_nodes: 20000,
+    cut_rounds: 2,
   })
   assert_eq(sol.status, @moonopt.SolveStatus::NotSolved)
   assert_true(sol.message.length() > 0)
@@ -273,6 +278,7 @@ test "the presolved path and the kernel-only path agree" {
     max_iterations: 10000,
     presolve: false,
     max_nodes: 20000,
+    cut_rounds: 2,
   })
   assert_eq(kernel_only.status, @moonopt.SolveStatus::Optimal)
   assert_true(
