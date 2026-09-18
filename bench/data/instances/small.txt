@@ -21,9 +21,13 @@
 # Excluded, and why:
 #   blend2     353 vars  274 rows   7.2 ms/node  -> BLOCKED, not merely expensive: at this
 #       budget its run is stopped by a certificate the verifier refuses, first on the dual
-#       signs (node 11158, 1.1e-7 against 1e-7, repaired in this round) and then on column
-#       complementarity (node 30782, 2.96e-6). The defect is recorded in CHANGELOG.md; the
-#       instance is in the main manifest and reported as a node limit in bench/mip-report.md.
+#       signs. Measured again in M5 round 12, with the repair tried second (it is tried only
+#       for a refusal): without cuts the run stops at node 30782 (depth 60), where the run's
+#       own certificate fails on `dual signs 1.68e-7` and the repaired one fails on
+#       `complementarity (columns) 2.96e-6` - clamping that multiplier makes the violation
+#       larger, so the dual itself is what needs fixing (see CHANGELOG.md, docs/roadmap.md).
+#       With cuts it stops at node 6075 (depth 33) on `dual signs 1.50e-6`. The instance is
+#       in the main manifest and reported as a node limit in bench/mip-report.md.
 #   dcmulti    548 vars  290 rows  87 ms/node  -> a 20 000-node arm is 29 minutes
 #   rout       556 vars  291 rows 391 ms/node  -> a 20 000-node arm is 2.2 hours
 #   misc07     260 vars  212 rows over 8 minutes for 1 000 nodes -> over 2.5 hours

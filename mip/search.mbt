@@ -224,18 +224,43 @@ fn most_fractional(
 }
 
 ///|
+/// `true` when the repair left the multipliers exactly as they were.
+///
+/// Written out rather than compared with `==`: what is being asked is whether the repair
+/// changed the certificate, and that is a question about the numbers, not about which array
+/// is which.
+fn unchanged(before : Array[Double], after : Array[Double]) -> Bool {
+  if before.length() != after.length() {
+    return false
+  }
+  for i = 0; i < before.length(); i = i + 1 {
+    if before[i] != after[i] {
+      return false
+    }
+  }
+  true
+}
+
+///|
 /// The certificate check of one node, or the verifier's account of why it refused.
 ///
 /// The claim follows the relaxation's status, and the numbers come from the relaxation
 /// itself. Nothing here shares state with the solver: `@verify` reads the model and these
 /// arrays.
 ///
-/// Before the certificate is offered, the multipliers a tight row makes free are repaired
-/// (`repaired_duals`): a degenerate optimum's dual is not unique, and a simplex can land on a
-/// point in that face a few parts in `1e7` outside the sign convention, which the checker
-/// refuses while its own duality gap comes out at `1e-13`. The repair decides nothing — the
-/// checker still judges the repaired certificate, and would refuse it if the clamp had moved
-/// the bound.
+/// The run's own certificate is offered **first**, and the repair (`repaired_duals`) is only
+/// tried when the checker refuses that: a degenerate optimum's dual is not unique, and a
+/// simplex can land on a point in that face a few parts in `1e7` outside the sign
+/// convention, which the checker refuses while its own duality gap comes out at `1e-13`.
+/// Repairing unconditionally got the order wrong and paid for it — the clamp's own size is
+/// `violation · cost_scale / row_sign_scale`, so on a model whose objective is large it can
+/// remove a multiplier of real size and turn a certificate the checker would have accepted
+/// into one it refuses on a *different* check (complementarity, on `blend2` node 30782:
+/// `2.96e-6`). Repair the refusals, not the acceptances.
+///
+/// Either way the checker judges what it is given, and if both attempts are refused the run
+/// stops with the refusal of the run's own certificate, because that is the one the solver
+/// actually produced.
 ///
 /// A relaxation that reached no verdict is not a claim to check — the caller counts it
 /// as an open node instead of stopping the run — so it comes back as no refusal here.
@@ -250,19 +275,36 @@ fn node_refusal(
     NodeStatus::Unbounded => @verify.Claim::Unbounded
     NodeStatus::Unfinished => return ""
   }
+  let offered : @verify.Certificate = {
+    claim,
+    values: solution.values,
+    duals: solution.duals,
+    ray: solution.ray,
+    objective: solution.objective,
+  }
+  let verdict = @verify.verify(model, offered, tolerance~)
+  if verdict.accepted {
+    return ""
+  }
   let repaired = repaired_duals(model, solution, tolerance)
-  let certificate : @verify.Certificate = {
+  if unchanged(solution.duals, repaired.duals) {
+    return verdict.reason
+  }
+  let cleaned : @verify.Certificate = {
     claim,
     values: repaired.values,
     duals: repaired.duals,
     ray: repaired.ray,
     objective: repaired.objective,
   }
-  let verdict = @verify.verify(model, certificate, tolerance~)
-  if verdict.accepted {
+  let retried = @verify.verify(model, cleaned, tolerance~)
+  if retried.accepted {
     ""
   } else {
-    verdict.reason
+    // Both are named. A refusal is a diagnosis, and the next person to look at it should not
+    // have to reproduce the run to find out that the repair was tried and also refused — or
+    // on what.
+    verdict.reason + " (the repaired certificate: " + retried.reason + ")"
   }
 }
 
