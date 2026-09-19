@@ -535,3 +535,164 @@ test "non-negativity is measured per variable, not against the solution" {
   assert_true(max_negativity([1.0, -1.0e-12]) < 1.0e-7)
   assert_eq(max_negativity([1.0, 2.0, 0.0]), 0.0)
 }
+
+///|
+/// The dual sign self-check is the checker's own expression, and the two have to reach
+/// the same verdict on the same multipliers.
+///
+/// A multiplier is judged by the effect a wrong sign can have — `|y| · max|aᵢⱼ|` against
+/// the largest objective coefficient — and not by its own size. The model below separates
+/// the two: the offending multiplier is `5e-8`, which is round-off by itself, against a row
+/// of coefficients in the hundreds whose prices are of order one, which makes it a
+/// violation three hundred million times the tolerance. Every number here is exact by
+/// construction, so the assertion is on the formula rather than on a range.
+test "the dual sign self-check measures what the checker measures" {
+  // min 4x  s.t.  300x ≥ 6,  x ≥ 0  ->  0.08 at x = 0.02, with the dual 4/300.
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let x = model.add_var("x", lb=0.0)
+  model.set_objective([(x, 4.0)])
+  model.add_constraint([(x, 300.0)], @model.Rel::GreaterEqual, 6.0)
+  let problem = match KernelProblem::from_model(model) {
+    Ok(value) => value
+    Err(reason) => fail("kernel refused the model: " + reason)
+  }
+  let state = State::new(problem, SimplexOptions::default())
+  let tolerance = 1.0e-7
+  // The convention wants `y ≥ 0` on a `≥` row; this one goes the other way.
+  let (worst, row) = state.max_dual_sign_violation([-5.0e-8])
+  assert_eq(row, 0)
+  let expected = 5.0e-8 * 300.0 / 4.0
+  assert_true(@core.approx_eq(worst, expected, rel=1.0e-12, abs=1.0e-18))
+  // The multiplier's own size is *not* the measurement.
+  assert_true(5.0e-8 < tolerance)
+  assert_true(worst > tolerance)
+  // And the independent checker, given the same multipliers and a point that satisfies
+  // everything else, refuses for the same reason and at the same scale.
+  let refused = @verify.verify(model, {
+    claim: @verify.Claim::Optimal,
+    values: [0.02],
+    duals: [-5.0e-8],
+    ray: [],
+    objective: 0.08,
+  })
+  assert_false(refused.accepted)
+  assert_true(refused.reason.contains("dual signs"))
+  // The honest multiplier of the same row is accepted by both, and the measurement answers
+  // "no row" without looking at the matrix at all — which is the state every ordinary solve
+  // is in, so it is what this check costs there.
+  let honest_duals = [4.0 / 300.0]
+  let (honest_worst, honest_row) = state.max_dual_sign_violation(honest_duals)
+  assert_eq(honest_worst, 0.0)
+  assert_eq(honest_row, -1)
+  let accepted = @verify.verify(model, {
+    claim: @verify.Claim::Optimal,
+    values: [0.02],
+    duals: honest_duals,
+    ray: [],
+    objective: 0.08,
+  })
+  assert_true(accepted.accepted)
+  // An equality row's multiplier is free, so the self-check has to skip it — a kernel
+  // that measured it would refuse certificates the checker accepts.
+  let equality = @model.Model::new(@model.Sense::Minimize)
+  let u = equality.add_var("u", lb=0.0)
+  equality.set_objective([(u, 4.0)])
+  equality.add_constraint([(u, 300.0)], @model.Rel::Equal, 6.0)
+  let equality_problem = match KernelProblem::from_model(equality) {
+    Ok(value) => value
+    Err(reason) => fail("kernel refused the model: " + reason)
+  }
+  let equality_state = State::new(equality_problem, SimplexOptions::default())
+  let (equality_worst, equality_row) = equality_state.max_dual_sign_violation([
+    -5.0e-8,
+  ])
+  assert_eq(equality_worst, 0.0)
+  assert_eq(equality_row, -1)
+  // The same pair of operations on the other scale: a model whose prices are `4e9` makes
+  // the same multiplier round-off, and the checker's sign check passes it there — which is
+  // the whole reason the scale is the objective's size and not the row's.
+  let dear = @model.Model::new(@model.Sense::Minimize)
+  let v = dear.add_var("v", lb=0.0)
+  dear.set_objective([(v, 4.0e9)])
+  dear.add_constraint([(v, 300.0)], @model.Rel::GreaterEqual, 6.0)
+  let dear_problem = match KernelProblem::from_model(dear) {
+    Ok(value) => value
+    Err(reason) => fail("kernel refused the model: " + reason)
+  }
+  let dear_state = State::new(dear_problem, SimplexOptions::default())
+  let dear_worst = dear_state.max_dual_sign_violation([-5.0e-8]).0
+  assert_true(
+    @core.approx_eq(
+      dear_worst,
+      5.0e-8 * 300.0 / 4.0e9,
+      rel=1.0e-12,
+      abs=1.0e-20,
+    ),
+  )
+  assert_true(dear_worst <= tolerance)
+  let dear_verdict = @verify.verify(dear, {
+    claim: @verify.Claim::Optimal,
+    values: [0.02],
+    duals: [-5.0e-8],
+    ray: [],
+    objective: 0.0,
+  })
+  assert_false(dear_verdict.reason.contains("dual signs"))
+}
+
+///|
+/// The invariant the self-check exists for: a run that reports `Optimal` has multipliers its
+/// own gate accepts, so nothing the kernel emits can be refused by the checker on the sign
+/// axis.
+///
+/// The measurement and the emitted vector are the same array, and this is what keeps them
+/// from drifting apart — a run that recomputed its multipliers for the result after
+/// measuring an earlier vector would pass its own check and fail the caller's.
+test "an optimal run emits the multipliers it measured" {
+  let models : Array[@model.Model] = []
+  let degenerate = @model.Model::new(@model.Sense::Minimize)
+  let a = degenerate.add_var("a", lb=0.0)
+  let b = degenerate.add_var("b", lb=0.0)
+  degenerate.set_objective([(a, 1.0), (b, 1.0)])
+  degenerate.add_constraint([(a, 1.0), (b, 1.0)], @model.Rel::GreaterEqual, 1.0)
+  degenerate.add_constraint([(a, 1.0), (b, 1.0)], @model.Rel::LessEqual, 9.0)
+  models.push(degenerate)
+  let maximisation = @model.Model::new(@model.Sense::Maximize)
+  let c = maximisation.add_var("c", lb=0.0, ub=4.0)
+  let d = maximisation.add_var("d", lb=0.0, ub=4.0)
+  maximisation.set_objective([(c, 1.0), (d, 2.0)])
+  maximisation.add_constraint([(c, 1.0), (d, 1.0)], @model.Rel::Equal, 5.0)
+  models.push(maximisation)
+  let shifted = @model.Model::new(@model.Sense::Minimize)
+  let e = shifted.add_var("e", lb=2.0, ub=5.0)
+  shifted.set_objective([(e, -3.0)])
+  shifted.add_constraint([(e, -1.0)], @model.Rel::LessEqual, -2.0)
+  shifted.add_constraint([(e, 1.0)], @model.Rel::GreaterEqual, 1.0)
+  models.push(shifted)
+  let mut optimal = 0
+  for model in models {
+    let result = match solve_model_with(model, SimplexOptions::default()) {
+      Ok(value) => value
+      Err(reason) => fail("kernel refused the model: " + reason)
+    }
+    if result.status != Optimal {
+      continue
+    }
+    optimal = optimal + 1
+    let problem = match KernelProblem::from_model(model) {
+      Ok(value) => value
+      Err(reason) => fail("kernel refused the model: " + reason)
+    }
+    let state = State::new(problem, SimplexOptions::default())
+    let (worst, row) = state.max_dual_sign_violation(result.duals)
+    if worst > 1.0e-7 {
+      fail(
+        "an optimal run emitted multipliers its own gate refuses: " +
+        worst.to_string() +
+        " on model row " +
+        row.to_string(),
+      )
+    }
+  }
+  assert_true(optimal > 0)
+}

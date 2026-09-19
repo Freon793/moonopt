@@ -44,6 +44,7 @@ pub struct KernelProblem {
   row_source : Array[Int]
   row_dual_factor : Array[Double]
   row_sign : Array[Double]
+  row_relation : Array[@model.Rel]
 } derive(@debug.Debug)
 pub fn KernelProblem::from_model(@model.Model) -> Result[Self, String]
 pub fn KernelProblem::from_standard(Int, Array[Double], Array[(Array[Double], @model.Rel, Double)]) -> Self

@@ -83,6 +83,15 @@ pub struct KernelProblem {
   /// reading the factor above for it would put a sign error into every cut taken from a
   /// `≤` row.
   row_sign : Array[Double]
+  /// The **model** relation of each kernel row, before the sign normalisation above.
+  ///
+  /// A certificate's row multipliers carry a sign condition on a `≤` or `≥` row and none at
+  /// all on an equality, so a producer that measures its own multipliers against that
+  /// convention has to know which model rows are equalities. `row_dual_factor` cannot
+  /// answer it — its magnitude is one on every relation — and recovering the relation from
+  /// the slack column the assembly happened to add would be reading one field for another,
+  /// which is how a cut witness came to carry a sign error on every `≤` row.
+  row_relation : Array[@model.Rel]
 } derive(Debug)
 
 ///|
@@ -485,6 +494,7 @@ fn assemble(
     row_source: row_sources,
     row_dual_factor: dual_factors,
     row_sign: signs,
+    row_relation: row_rels,
   }
 }
 

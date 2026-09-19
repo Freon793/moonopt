@@ -1671,21 +1671,42 @@ fn State::finish_optimal(self : State) -> SimplexResult {
   let mut scaled_residual = measured.0
   let mut raw_residual = measured.1
   let mut negativity = max_negativity(kernel_values)
-  if scaled_residual > tolerance || negativity > tolerance {
+  // The other half of an optimality proof is the multipliers, and until now nothing
+  // measured the half of it that is not about the basis: the sign convention the
+  // certificate is *read* in. Reduced costs decide optimality without any sign
+  // convention at all, so the kernel could declare a basis optimal and hand out a
+  // multiplier vector the checker refuses for a sign — which is what stopped a branch
+  // and bound run of `blend2` at node 30782 and, with it, the whole search. Measuring
+  // it here rather than at the certificate boundary is the same argument that put the
+  // residual check here: a producer that has not checked what it is about to claim
+  // cannot tell a run that has nothing to say from one that has something wrong to say.
+  let mut duals = self.model_duals()
+  let mut signs = self.max_dual_sign_violation(duals)
+  let mut sign_violation = signs.0
+  if scaled_residual > tolerance ||
+    negativity > tolerance ||
+    sign_violation > tolerance {
     // The product-form updates are exact in exact arithmetic but accumulate
     // round-off; folding them into a fresh factorization often restores the last
     // digits. Only a violation that survives that is a numerical failure.
     if self.refactorize() {
       kernel_values = self.values()
-      let (retry_scaled, retry_raw) = max_scaled_residual(
+      let retried = max_scaled_residual(
         problem,
         kernel_values,
         false,
         problem.rhs,
       )
-      scaled_residual = retry_scaled
-      raw_residual = retry_raw
+      scaled_residual = retried.0
+      raw_residual = retried.1
       negativity = max_negativity(kernel_values)
+      // Refactorizing discards the accumulated updates, so the multipliers are
+      // recomputed from the fresh factors and re-measured: a sign violation that was
+      // drift in the basis inverse is exactly what this repairs, and one that is not
+      // has to survive the repair to be reported.
+      duals = self.model_duals()
+      signs = self.max_dual_sign_violation(duals)
+      sign_violation = signs.0
     }
   }
   if scaled_residual > tolerance || negativity > tolerance {
@@ -1706,6 +1727,30 @@ fn State::finish_optimal(self : State) -> SimplexResult {
       ")",
     }
   }
+  if sign_violation > tolerance {
+    // The point is feasible, the reduced costs certify the basis as optimal, and the
+    // multipliers still cannot be written down as the certificate they would have to
+    // be. Reporting `Optimal` here is what put a refused certificate in a caller's
+    // hands; `NumericalFailure` says what is true — this run has no proof to offer for
+    // this model — and the caller's budget and verification accounting treat it as a
+    // relaxation that reached no verdict.
+    return {
+      status: NumericalFailure,
+      values: [],
+      objective: 0.0,
+      iterations: self.iterations,
+      duals: [],
+      ray: [],
+      basis: None,
+      message: "the multipliers of the optimal basis violate the sign convention a certificate is read in (dual signs " +
+      sign_violation.to_string() +
+      " on model row " +
+      signs.1.to_string() +
+      " against a tolerance of " +
+      tolerance.to_string() +
+      ", so the optimality proof cannot be written down)",
+    }
+  }
   let acc = @core.CompensatedSum::new()
   acc.add(problem.objective_constant)
   for j = 0; j < problem.ncols; j = j + 1 {
@@ -1719,7 +1764,7 @@ fn State::finish_optimal(self : State) -> SimplexResult {
     // The duals of the final basis are the other half of an optimality proof. They
     // are read after Phase II, so they belong to the costs the run actually
     // minimised.
-    duals: self.model_duals(),
+    duals,
     ray: [],
     // The optimal basis, so a later run over the same columns can reoptimize from it
     // instead of rebuilding Phase I.

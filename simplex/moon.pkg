@@ -7,3 +7,7 @@ import {
   "Freon793/moonopt/oracle",
   "Freon793/moonopt/verify",
 } for "test"
+
+import {
+  "Freon793/moonopt/verify",
+} for "wbtest"
