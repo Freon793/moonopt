@@ -220,6 +220,19 @@ fn cut_round(
   }
   // Strongest first, and at most `cut_round_cap` of them: a cut that barely moves the
   // point costs the same re-solve as one that moves it a long way.
+  //
+  // Measured in round 16, and it changes what this loop means in practice: every candidate
+  // of a round has the *same* strength here. A rounding cut is violated by exactly one unit
+  // of its own scale at the point it was derived from — the variables the rounding counts
+  // are all sitting at the bounds their shifts were written from there — so `markshare1`'s
+  // root produced six candidates measuring `1` (the largest of them `1.0000000000000018`),
+  // and with the strict comparison below the loop keeps whichever came first in row order.
+  // Ranking the candidates by efficacy (`violation²/‖a‖²`) instead was implemented and
+  // measured: it took `gt2`'s bound up by 4.3% at the same budget and cost `p0201` a proof
+  // it had within a 1000-node budget (586 nodes before, 1325 after), so it was reverted.
+  // What the selection needs is a *measurement* of each candidate's own effect — a re-solve
+  // per candidate, bounded by this cap — rather than another geometric proxy; the numbers
+  // are in `CHANGELOG.md` (M5 round 16) and the plan in `docs/roadmap.md`.
   let selected : Array[@verify.CutRow] = []
   while selected.length() < cut_round_cap && selected.length() < cuts.length() {
     let mut best = -1
