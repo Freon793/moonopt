@@ -609,6 +609,21 @@ presolve 的其余归约、DeVex 定价）与两条遗留（`fast0507` 类实例
 - README 的每条承诺都有可复核证据；
 - 发布版本通过 `moon check --deny-warn` / `moon test --deny-warn` 与全部目标平台测试。
 
+**进度与轮次（A→B→C→D）**
+
+- **A 轮（已落地）：`bench/report.md` + `bench/report.ps1`**。它把"报告可由脚本一键复现"变成机制，
+  而不只是把命令抄进 README：索引四份报告的范围与关键数字（**从各自 Summary 表读出**，不是抄的）、
+  生成时的提交、一键复现命令，并对每份报告做**陈旧性判决**（读报告自己记的提交，把该报告依赖的源路径
+  在 `那个提交..HEAD` 之间差分，有改动标 `STALE` 并列出文件；保守方向：改注释也算改）。
+  实测本轮四份全标 `STALE`（`parse-report.md`/`solve-report.md` 落后十几轮、`mip-report.md` 落在一轮割改动前、
+  `mip-report-small.md` 只差第十六轮那条注释——该报告数字已复核逐位一致）。
+  脚本在"报告缺失（exit 2）/ git 无法回答（exit 4）/ 数字读不出（exit 3）"时拒绝写且不落盘，前两条已实测。
+- **B 轮（下一步）**：CLI 子命令 `solve` / `verify` / `fmt` / `bench` + 统一 JSON 输出。
+- **C 轮**：API/算法文档（`docs/`）+ README 承诺↔证据逐条对照表。
+- **D 轮**：发布 mooncakes.io（版本与元数据、承诺面终审、三目标 check/test 全绿）。
+  另：`bench/solve-report.md`（`315107f`）与 `bench/parse-report.md`（`b338547`）已被 `report.md` 标为陈旧，
+  重跑它们是 D 轮前必须结清的一笔账。
+
 ---
 
 ## 明确不做（非目标）
