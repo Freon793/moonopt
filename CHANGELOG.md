@@ -5,6 +5,62 @@
 
 ## [Unreleased]
 
+### Changed — M6 第四轮（发布准备）：四份基准报告在当前代码上重跑，并查出"报告条目数与数据清单不符"的根因
+
+上一轮的 `bench/report.md` 把四份报告全标成 `STALE`（其中 `parse-report.md` 落后十几轮、
+`solve-report.md` 停在 `315107f`）。这一轮把它们**在当前代码上重跑**，并把重跑时暴露出来的问题查到底。
+按用户要求，本轮**不发布**。
+
+**重跑（提交 `4891704` 的树，命令就是 `bench/report.md` 里写的那几条）**：
+
+| 报告 | 新口径 | 与旧报告的差异 |
+| --- | --- | --- |
+| `parse-report.md` | **32 attempted / 32 parsed / 0 failed** | 旧报告写 `33 attempted / 33 parsed`，且总计多 521 个变量 |
+| `solve-report.md` | **18 最优 / 11 跳过上限 / 0 规模拒绝 / 3 迭代上限 / 21 个过化简 / 18 重建解过三项检查 / 0 次 Bland 恢复 / 6974 枢轴** | 旧报告写 20 最优 / 21 重建 / 1 个迭代上限 |
+| `mip-report.md` | 32 实例 / 300 节点：**1 最优 / 14 节点预算 / 17 跳过 / 0 其他 / 3932 个松弛过校验 / 256 条割 / 9 个点复核** | 旧报告停在 `3ee797a`；重跑后**逐项相同**（第 11~15 轮改的是"证书被拒/写不出"那两条路径，在这条 300 节点口径上一次都没触发） |
+| `mip-report-small.md` | 10 实例 / 20000 节点：**4 最优 / 6 节点预算 / 134601 个松弛过校验 / 176 条割 / 9 个点复核** | 旧报告停在 `4a4e002`；重跑后**逐项相同** |
+
+重跑之后 `bench/report.ps1` 的陈旧性判决变成 **4 份报告、0 份 `STALE`**（此前是 4/4），
+即仓库里每一份报告都被当前代码支撑；两份对拍脚本同时通过
+（`check-relaxation-bounds.ps1` 18 项 0 违反、`check-mip-objectives.ps1` 主报告 1 项取等与小报告 4 项取等、
+两者 `unverified nodes 0`）。
+
+`check-relaxation-bounds.ps1` 对新求解报告 **checked 18 / violations 0**（18 项松弛值全部 ≤ 官方最优值）。
+
+**查出的根因（"33 vs 32"不是玄学）**：`bench/fetch-instances.ps1` 的实例清单里 `"danoint"` **被列了两次**
+（第 20 行与第 28 行），而 manifest 是**逐条**从 `$downloaded` 写出来的 —— 清单里的重复于是变成 manifest 里的
+重复行，**每一份读 manifest 的报告都把那个实例处理两遍、把它对总计的贡献翻倍**。
+算术能指名道姓：旧报告总变量 `173934`、新报告 `173413`，差 **521**，而 `danoint` 正好是 **521** 个变量
+（约束 44480 vs 43816、非零 1651814 vs 1648581 同样对上）。修法两处：删掉清单里重复的那一条，
+并在遍历前**去重**（`$Instances | Select-Object -Unique`），注释里写明"清单里的重复会变成 manifest 里的重复行"。
+**这条缺陷影响的是全部四份报告的条目数与总量**，只是解析报告的数字最显眼。
+
+**一处必须写下来的口径变化**：求解报告的 20 → 18 不是数据变了，是**同一个 1200 枢轴上限买到的进度变少了** ——
+第三轮的方向自检、第九轮的 Phase I 每次求解一次重建因子、第十五轮的对偶侧自检都在这个上限里计费
+（第三轮实测 LP 全清单总枢轴 **+27%**）。README 里那两个从旧报告抄来的数字（"20 个 LP 松弛求到最优"、
+"20 项交叉校验"）已改成报告上的 18，并把 3 个迭代上限**点名**（`danoint` 内核目标值 22.473、
+`mod010` 5544.519、`fast0507` 人工和 99.231）。
+另外 README 的"33 成功"改成"32 成功"，与重跑后的证据一致。
+
+**元数据终审（发布前必须过的那一关，逐条对证据）**：
+
+- `license = "Apache-2.0"` ←→ 仓库根有 `LICENSE`（11358 字节）✓；
+- `readme` / `repository` / `name` / `version` 与仓库、README 一致 ✓；
+- **依赖边界**（README 声明的"库包不依赖任何第三方包，只有 `cmd/parse` 用 `moonbitlang/x`"）逐包核对：
+  `core` 无依赖、`model` 只依赖 `core`、`verify` 只依赖 `core`/`model`/`moonbitlang/core/string`、
+  根包只依赖仓内包，只有 `cmd/parse` 引入 `moonbitlang/x` 的 `fs`/`sys`；
+  `simplex` 对 `oracle`/`verify` 的依赖带 `for "test"` / `for "wbtest"` 条件（**不是**发布依赖）✓；
+- **CI 承诺** 与 `.github/workflows/check.yml` 逐条对上：`moon check --deny-warn`、
+  `moon fmt` + `git diff --exit-code`、`moon info` + `git diff --exit-code`、`moon test --deny-warn`，
+  另有 wasm-gc / js 的矩阵任务 ✓；
+- `description` 的四项能力（MPS/LP 互操作、带 presolve 与对偶热启动的稀疏修正单纯形、整数模型的分支定界、
+  可独立校验的三类证书）**每一项都有实现与证据**——这条曾经是明确的"承诺 vs 证据"违例
+  （2026-09-16 记下的三项尚不存在的能力），现在已随实现补齐，属**已结清**。
+
+**发布本身按用户要求推迟**；顺带测到一个事实：`moon publish --dry-run` 在本机**无法在未登录时校验元数据**
+（`failed to open credentials file: C:\Users\Freon\.moon\credentials.json, please login first`），
+所以发布那一步必须先 `moon login`；本轮**没有上传任何东西**。
+
 ### Added — M6 第三轮（C）：公开 API 契约与算法说明两份文档 + README 的"承诺 ↔ 证据"对照表
 
 M6 的交付物里有"API 文档、算法说明"这一条，完成标准里有"README 的每条承诺都有可复核证据"这一条。

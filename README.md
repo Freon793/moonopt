@@ -22,11 +22,11 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 > 内核规模与填充预算门禁、presolve/postsolve 与公开契约的默认化简路径均已完成；
 > 对偶单纯形与 DeVex 定价待完成）：
 > 可构建、可测试、CI 全绿，并已在 **MIPLIB 2017 的 32 个真实实例**上跑通解析报告
-> （33 成功 / 0 失败，见 [`bench/parse-report.md`](bench/parse-report.md)）与求解报告
-> （**20 个 LP 松弛求到最优、11 个超规模跳过、规模拒绝归零、0 个数值失败**；
-> 基准口径**开启 presolve**，行数上限 1000、迭代上限 1200 —— 报告里另有 1 个 `iteration-limit`
-> 是 `fast0507`，它在 507 条约束下需要上万次枢轴；
-> 20 个重建解全部在原模型上通过行、界与目标值三项检查，20 项松弛值经 MIPLIB 官方最优值表
+> （32 成功 / 0 失败，见 [`bench/parse-report.md`](bench/parse-report.md)）与求解报告
+> （**18 个 LP 松弛求到最优、11 个超规模跳过、规模拒绝归零、0 个数值失败、3 个迭代上限**；
+> 基准口径**开启 presolve**，行数上限 1000、迭代上限 1200 —— 另外 3 个是
+> `danoint` / `mod010` / `fast0507`，在这个枢轴上限下解不完；
+> 18 个重建解全部在原模型上通过行、界与目标值三项检查，18 项松弛值经 MIPLIB 官方最优值表
 > 交叉校验、**0 违反**，见 [`bench/solve-report.md`](bench/solve-report.md)）。
 > 尚未发布到 mooncakes.io。
 > 分支定界的第一份报告已经写出（[`bench/mip-report.md`](bench/mip-report.md)：32 个实例
@@ -223,7 +223,7 @@ Phase II 仍是最大的一道墙 —— 而它的成因在**定价**：Dantzig 
 | 承诺 | 证据 | 限度 / 备注 |
 | --- | --- | --- |
 | 能读真实模型文件（MPS / LP） | `bench/parse-report.md`：manifest 全部实例 `parsed`、`failed 0`；重跑 `bench/report-parse.ps1` | MPS 的 `SC`/`SI`、完整 `SOS`/`MARKER` 不支持（解析器会明确报错） |
-| 能求解真实规模 LP（presolve + 稀疏 LU + 增益定价） | `bench/solve-report.md`（最优/跳过/规模拒绝/数值失败各项计数）；`bench/README.md` 记录的单实例量级（`30n20b8` 化简后 11591 行 16 秒最优、`danoint` 3716 枢轴） | 该报告当前被 `bench/report.md` 标为 `STALE`，重跑后才是当前代码的证据 |
+| 能求解真实规模 LP（presolve + 稀疏 LU + 增益定价） | `bench/solve-report.md`（最优/跳过/规模拒绝/数值失败各项计数）；`bench/README.md` 记录的单实例量级（`30n20b8` 化简后 11591 行 16 秒最优、`danoint` 3716 枢轴） | 报告已在当前代码上重跑（`bench/report.md` 标 `current`）：32 实例中 **18 个求到最优、11 个超行数上限被跳过、3 个到 1200 枢轴上限**；`danoint` 那一行的 3716 枢轴来自 `bench/README.md` 记录的另一次口径，不是这份报告 |
 | **每个松弛都经过独立校验器** | `bench/mip-report.md` 与 `bench/mip-report-small.md` 的 `verified` 列；`mip/mip_test.mbt` 断言 `verified == nodes` | `verified < nodes` 的差额是"到达不了结论的松弛"（迭代上限或写不出符号约定的证书），按开着的活计 |
 | 小规模整数实例证到**公开已知最优值** | `bench/mip-report-small.md`（4/10）+ `bench/check-mip-objectives.ps1` 对 4 项**取等**通过 | 另外 6 个到节点预算（含 `markshare1`/`markshare2`/`pk1` 界贴下界） |
 | 证书可被第三方独立复核（含 JSON） | `verify/verify_test.mbt`（含"故意做坏的解必须被拒"）；`cmd/parse -- verify <file> --certificate <json>` | 证书只对**内核收到的模型**成立，所以校验路径不化简 |

@@ -638,9 +638,19 @@ presolve 的其余归约、DeVex 定价）与两条遗留（`fast0507` 类实例
   （标准形变换表、枢轴数随行数走、增益定价、自检清单与各自量过的事故、加行热启动、presolve、割的有效性检验、
   分支定界、证书与 Farkas 的限度、数值策略）。README 新增 15 行**承诺↔证据**表，并在同一行写出限度
   （报告陈旧状态、6 个到预算的实例、Farkas 未验证、尚未发布），同时修正三处过期表述。
-- **D 轮（下一步）**：发布 mooncakes.io（版本与元数据、承诺面终审、三目标 check/test 全绿）。
-  另：`bench/solve-report.md`（`315107f`）与 `bench/parse-report.md`（`b338547`）已被 `report.md` 标为陈旧，
-  重跑它们是 D 轮前必须结清的一笔账。
+- **D 轮（已落地：发布准备；**发布本身按用户要求推迟**）**：把四份基准报告在提交 `4891704` 的树上重跑
+  （`parse-report.md` 32/32、`solve-report.md` 18 最优/11 跳过/0 规模拒绝/3 迭代上限、`mip-report.md`
+  1 最优/14 节点预算/17 跳过/3932 过校验/256 割/9 点、`mip-report-small.md` 见报告），
+  `bench/report.md` 的陈旧性判决随之归零；两份对拍脚本各自通过（松弛界 18 项 0 违反、MIP 最优值取等）。
+  **重跑暴露出的根因**：`fetch-instances.ps1` 的实例清单里 `danoint` 被列了两次，而 manifest 逐条写出 ⇒
+  重复行的实例被每份报告处理两遍、总计翻倍（旧 173934 vs 新 173413 个变量，差 521 = danoint 的变量数）；
+  已删重复并加去重。**口径变化如实记录**：求解报告 20 → 18 最优是同一 1200 枢轴上限"买到的进度变少"
+  （第三/九/十五轮的自检都在这个上限里计费），README 的两个数字已改成报告上的值并点名 3 个迭代上限。
+  **元数据终审**：`LICENSE` 与 `license` 字段对上、`readme`/`repository`/`name`/`version` 一致、
+  依赖边界逐包核对（只有 `cmd/parse` 引 `moonbitlang/x`；`simplex` 对 `oracle`/`verify` 的依赖带 test 条件）、
+  CI 承诺与 `check.yml` 逐条对上、`description` 的四项能力都有实现与证据
+  （2026-09-16 记下的"承诺 vs 证据"违例**已结清**）。发布前的最后一步是 `moon login` + `moon publish`：
+  `moon publish --dry-run` 在本机未登录时无法校验元数据（实测报 `please login first`），本轮未上传任何东西。
 
 ---
 

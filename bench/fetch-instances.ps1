@@ -25,7 +25,7 @@ param(
     "p0548", "p2756", "pk1", "pp08a", "pp08aCUTS", "qiu", "rgn", "rout",
     "set1ch", "stein27", "stein45", "vpm1", "vpm2", "22433", "30n20b8",
     "50v-10", "aflow40b", "2club200v15p5scn", "bc1", "bienst1", "bienst2",
-    "blp-ar98", "core2536-691", "dano3_3", "danoint", "fast0507"
+    "blp-ar98", "core2536-691", "dano3_3", "fast0507"
   ),
   [string]$Source = "https://miplib.zib.de/WebData/instances/",
   [string]$Target = (Join-Path $PSScriptRoot "data/instances")
@@ -49,7 +49,14 @@ function Expand-Gzip([string]$archive, [string]$destination) {
 
 $downloaded = @()
 $missing = @()
-foreach ($name in $Instances) {
+# Deduplicated on purpose: the manifest is written from `$downloaded`, one line per entry of
+# this list, so a name listed twice becomes a line twice - and every report that reads the
+# manifest then processes that instance twice, doubling its contribution to the totals. That
+# is not hypothetical: `danoint` was listed twice, and the parse report of the time read
+# `instances attempted 33` with totals 521 variables above the 32-instance ones, 521 being
+# exactly that instance's variable count. The list is deduplicated here so a typo cannot
+# reach a report again.
+foreach ($name in ($Instances | Select-Object -Unique)) {
   $destination = Join-Path $Target $name
   if (Test-Path $destination) {
     Write-Host "cached  $name"
