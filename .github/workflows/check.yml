@@ -25,8 +25,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The toolchain is pinned, not `latest`, and that is a deliberate change of policy.
+      # `latest` meant a compiler release could turn every job here red without a line of
+      # this repository changing - which is exactly what happened on 2026-09-20, when the
+      # day's release started reporting E0079 (`implicit_impl_as_method`) and the CI went
+      # from green to five red jobs (see CHANGELOG.md for the diagnosis chain). It also
+      # keeps CI on the toolchain the benchmark reports record for themselves, since a
+      # report is only evidence if the thing that produced it is the thing CI tests.
+      # Bumping this version is its own round: it is a request from the compiler, and the
+      # answer to it (new warnings to fix, code to migrate) is that round's work.
       - name: install
         uses: moonbit-community/setup-moonbit@04293a8a813bfd4b6c2fce22701b52ae1050d100
+        with:
+          version: "0.1.20260904"
 
       - name: moon version
         run: moon version --all
@@ -34,13 +45,13 @@ jobs:
       - name: moon update
         run: moon update
 
-      # The toolchain this job installs is `latest`, so a compiler release can change
-      # the verdict of every job here without a line of this repository changing. When
-      # that happens the failing step has to say what it saw: a job log is only readable
-      # with credentials, while a workflow command lands in the run's annotations, which
-      # anyone can read through the API. So the failing step re-emits its diagnostics as
-      # annotations (toolchain version plus the warning/error lines) and still exits
-      # non-zero, which keeps the verdict exactly as strict as it was.
+      # The failing step has to say what it saw: a job log is only readable with
+      # credentials, while a workflow command lands in the run's annotations, which anyone
+      # can read through the page. `--deny-warn` stops the build at the first package that
+      # has a warning, so the strict output is one package's worth of them; the same check
+      # *without* `--deny-warn` compiles everything (a warning does not stop a build) and
+      # prints the whole list, which is what answering a compiler release needs. Both are
+      # emitted, and the step still exits non-zero, so the verdict stays as strict as it was.
       - name: moon check
         shell: bash
         run: |
@@ -50,9 +61,14 @@ jobs:
           code=$?
           echo "$output"
           if [ $code -ne 0 ]; then
-            echo "::error title=moon version::$(printf '%s' "$version" | sed -e 's/%/%25/g' -e 's/\r//g')"
-            printf '%s\n' "$output" | grep -n -i -E 'warning|error|[0-9]{4}' | head -n 20 | sed -e 's/%/%25/g' -e 's/\r//g' | while IFS= read -r line; do
-              echo "::error title=moon check::${line}"
+            escape() { sed -e 's/%/%25/g' -e 's/\r//g'; }
+            echo "::error title=moon version::$(printf '%s' "$version" | escape)"
+            printf '%s\n' "$output" | grep -n -i -E 'warning|error|[0-9]{4}' | head -n 20 | escape | while IFS= read -r line; do
+              echo "::error title=moon check (strict)::${line}"
+            done
+            full=$(moon check 2>&1)
+            printf '%s\n' "$full" | grep -i -E 'warning|error|implicit|unqualified|deprecated' | sed -e 's/^[[:space:]]*//' -e 's/%/%25/g' | sort -u | head -n 60 | while IFS= read -r line; do
+              echo "::error title=moon check (all warnings)::${line}"
             done
             echo "::error title=moon check exit::moon check --deny-warn exited ${code}"
           fi
@@ -124,6 +140,8 @@ jobs:
 
       - name: install
         uses: moonbit-community/setup-moonbit@04293a8a813bfd4b6c2fce22701b52ae1050d100
+        with:
+          version: "0.1.20260904"
 
       - name: moon update
         run: moon update
@@ -136,9 +154,14 @@ jobs:
           code=$?
           echo "$output"
           if [ $code -ne 0 ]; then
-            echo "::error title=toolchain::$(moon version --all 2>&1 | tr '\n' ' ' | sed -e 's/%/%25/g' -e 's/\r//g')"
-            printf '%s\n' "$output" | grep -n -i -E 'warning|error|failed|[0-9]{4}' | head -n 20 | sed -e 's/%/%25/g' -e 's/\r//g' | while IFS= read -r line; do
-              echo "::error title=moon test (${{ matrix.target }})::${line}"
+            escape() { sed -e 's/%/%25/g' -e 's/\r//g'; }
+            echo "::error title=toolchain::$(moon version --all 2>&1 | tr '\n' ' ' | escape)"
+            printf '%s\n' "$output" | grep -n -i -E 'warning|error|failed|[0-9]{4}' | head -n 20 | escape | while IFS= read -r line; do
+              echo "::error title=moon test (${{ matrix.target }}) (strict)::${line}"
+            done
+            full=$(moon test --target ${{ matrix.target }} 2>&1)
+            printf '%s\n' "$full" | grep -i -E 'warning|error|implicit|unqualified|deprecated' | sed -e 's/^[[:space:]]*//' -e 's/%/%25/g' | sort -u | head -n 60 | while IFS= read -r line; do
+              echo "::error title=moon test (${{ matrix.target }}) (all warnings)::${line}"
             done
             echo "::error title=moon test exit::moon test --target ${{ matrix.target }} --deny-warn exited ${code}"
           fi
