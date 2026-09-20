@@ -630,8 +630,15 @@ presolve 的其余归约、DeVex 定价）与两条遗留（`fast0507` 类实例
   `objective=1167185.7255927906` 与文本路径逐位一致、`solve --mip --json` 的 `bound=1171718.464052804`
   与文本一致、`--presolve` 镜像 `rows_after_presolve=16`，每份都用 `ConvertFrom-Json` 验过合法性；
   修掉一个实测缺陷（JSON 路径经过会打印的读文件助手 → 文档不可解析，改用静默读）。新增 8 条 CLI 白盒测试。
-- **C 轮（下一步）**：API/算法文档（`docs/`）+ README 承诺↔证据逐条对照表。
-- **D 轮**：发布 mooncakes.io（版本与元数据、承诺面终审、三目标 check/test 全绿）。
+- **C 轮（已落地）：公开 API 契约与算法说明 + README 的"承诺 ↔ 证据"对照表**。
+  `docs/api.md` 逐包写清承诺与状态口径（顶层 MIP 取舍、`Err` 与 `SimplexStatus` 的分工、
+  `NumericalFailure` 意味着"有答案但证据不成立时选择不报"、热启动"只是提速"、`presolve` 的还原必须被独立复核、
+  `verify` 的乘子约定与"不依赖 simplex"、`mip` 的九条规则表、CLI 退出码口径），每条都指到证据
+  （测试文件 / 报告的哪一列 / 一条命令）；`docs/algorithms.md` 写实现里真正在跑的是什么，每段以一条可复核数字结尾
+  （标准形变换表、枢轴数随行数走、增益定价、自检清单与各自量过的事故、加行热启动、presolve、割的有效性检验、
+  分支定界、证书与 Farkas 的限度、数值策略）。README 新增 15 行**承诺↔证据**表，并在同一行写出限度
+  （报告陈旧状态、6 个到预算的实例、Farkas 未验证、尚未发布），同时修正三处过期表述。
+- **D 轮（下一步）**：发布 mooncakes.io（版本与元数据、承诺面终审、三目标 check/test 全绿）。
   另：`bench/solve-report.md`（`315107f`）与 `bench/parse-report.md`（`b338547`）已被 `report.md` 标为陈旧，
   重跑它们是 D 轮前必须结清的一笔账。
 

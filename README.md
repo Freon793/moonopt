@@ -214,6 +214,30 @@ Phase II 仍是最大的一道墙 —— 而它的成因在**定价**：Dantzig 
 在分支定界里，被这条自检拦下的松弛按**无结论**计（不计入 `verified`），所以搜索继续往下走，
 而不是因为一份注定被拒的证书停在半路 —— `blend2` 的深节点拒签就是这样消失的。
 
+## 承诺 ↔ 证据
+
+本项目的规矩是"README 的每条承诺都要有可复核证据"（M6 完成标准之一）。下表把上面那些可检验的说法逐条
+指到证据上——报告里的具体列、一条能重跑的命令，或一个测试文件。**没有证据的说法不写进来**；
+有限度的地方在最后一列写清楚限度本身。
+
+| 承诺 | 证据 | 限度 / 备注 |
+| --- | --- | --- |
+| 能读真实模型文件（MPS / LP） | `bench/parse-report.md`：manifest 全部实例 `parsed`、`failed 0`；重跑 `bench/report-parse.ps1` | MPS 的 `SC`/`SI`、完整 `SOS`/`MARKER` 不支持（解析器会明确报错） |
+| 能求解真实规模 LP（presolve + 稀疏 LU + 增益定价） | `bench/solve-report.md`（最优/跳过/规模拒绝/数值失败各项计数）；`bench/README.md` 记录的单实例量级（`30n20b8` 化简后 11591 行 16 秒最优、`danoint` 3716 枢轴） | 该报告当前被 `bench/report.md` 标为 `STALE`，重跑后才是当前代码的证据 |
+| **每个松弛都经过独立校验器** | `bench/mip-report.md` 与 `bench/mip-report-small.md` 的 `verified` 列；`mip/mip_test.mbt` 断言 `verified == nodes` | `verified < nodes` 的差额是"到达不了结论的松弛"（迭代上限或写不出符号约定的证书），按开着的活计 |
+| 小规模整数实例证到**公开已知最优值** | `bench/mip-report-small.md`（4/10）+ `bench/check-mip-objectives.ps1` 对 4 项**取等**通过 | 另外 6 个到节点预算（含 `markshare1`/`markshare2`/`pk1` 界贴下界） |
+| 证书可被第三方独立复核（含 JSON） | `verify/verify_test.mbt`（含"故意做坏的解必须被拒"）；`cmd/parse -- verify <file> --certificate <json>` | 证书只对**内核收到的模型**成立，所以校验路径不化简 |
+| 每条割都能被独立**再推导** | `verify/cuts_test.mbt`（穷举小模型所有整数点、确认无效割确实砍掉一个可行整点）；`mip/cuts_test.mbt`（做坏的割被拒且运行停 `Unverified`） | 割族目前只有单行舍入；选择规则经五轮实测后确认"没有一种赢过行序取满上限" |
+| 公开入口的取舍口径（`NodeLimit` / `NotSolved`） | `docs/api.md` 的契约表；`moonopt_test.mbt` | 整数模型**不做化简**（答案不取决于化简碰巧定住了什么） |
+| 不可行 / 无界 / 预算到顶各有明确状态 | `mip/mip_test.mbt`（松弛无界报 `UnboundedRelaxation`、非法模型报 `Invalid`） | 整数无界性证明（整数射线）未做 |
+| 规模门禁：行数上限与填充预算 | `bench/README.md` 的两张表；`simplex` 的 `TooLarge`/`max_factor_entries` | 行数上限是粗闸门，真正的界是枢轴数与每次枢轴增益 |
+| CLI 文本输出稳定（`bench/` 脚本解析它） | `bench/report.md` 的一键复现命令；本轮改动后实测同一调用逐位不变 | `--json` 是同一批运行的另一份渲染，不替代文本 |
+| 报告是证据：脚本拒绝写不可靠报告 | 四个脚本各自的拒绝条件（退出码非零 / 条目数不符 / 出现被拒证书 / 点未通过复核），`bench/README.md` 逐条写出 | 拒绝即非零退出且**不落盘** |
+| 报告是否仍被当前代码支持，有机械化判定 | `bench/report.md` 的 `generated at` 与 `code behind it` 两列（`STALE (N changed since)`） | 判据保守：改注释也算改 |
+| 依赖边界（可被审阅的架构事实） | `verify/moon.pkg` 不 import `simplex`；库包不引 `moonbitlang/x`（只有 `cmd/parse` 引） | 这是"校验器与求解器不共享状态"的可检查形式 |
+| 三目标全绿 | `moon test --deny-warn`、`--target wasm-gc`、`--target js`（当前 172 个测试） | 发布前必须重跑（M6 完成标准之一） |
+| 尚未发布 | `moon.mod` 的 `version = "0.1.0"`；本 README 的"尚未发布到 mooncakes.io" | 发布是 M6 的最后一轮（D） |
+
 ## 为什么需要它
 
 MoonBit 生态已经有一批排产、排班、路由、装箱、约束模型库，但它们几乎全部是启发式或专用实现：
@@ -340,15 +364,17 @@ core/             数值与稀疏基础设施（容差比较、补偿求和、CS
 model/            模型层（变量、线性表达式、约束、目标、模型校验）
 format/           MPS 与 LP 格式读写、解析错误定位
 oracle/           参考实现：稠密两阶段单纯形（差分测试对照基准，非交付求解器）
-simplex/          稀疏修正单纯形内核（M3 进行中：对偶单纯形待补）
-presolve/         模型化简与解还原（M3；公开接口可单独使用）
-verify/           独立校验器：最优性、Farkas、无界射线 + 证书 JSON（M4，不依赖 simplex）
-mip/              分支定界与割平面（M5，受范围闸门约束）
+simplex/          稀疏修正单纯形内核（对偶单纯形热启动已落地）
+presolve/         模型化简与解还原（公开接口可单独使用）
+verify/           独立校验器：最优性、Farkas、无界射线 + 证书 JSON（不依赖 simplex）
+mip/              分支定界与割平面（每个松弛过 verify）
 cmd/main/         示例 CLI 与演示输出
-cmd/parse/        模型文件巡检 CLI（解析报告使用）
+cmd/parse/        模型巡检 / 求解 / 校验证书 / 格式化 / 批量基准 CLI（子命令 + `--json`）
 examples/         可运行示例
-bench/            数据政策、下载与报告脚本、报告
+bench/            数据政策、下载与报告脚本、报告（入口 `bench/report.md`）
 docs/             设计说明、技术路线图、生态现状调研
+docs/api.md       公开 API 契约（每个包承诺什么、什么情况下返回哪个状态）
+docs/algorithms.md 算法说明（实现里真正在跑的是什么，以及背后的实测数字）
 ```
 
 ## 依赖
