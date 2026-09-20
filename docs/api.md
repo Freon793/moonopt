@@ -28,6 +28,32 @@ pub(all) enum SolveStatus { Optimal, Infeasible, Unbounded, NodeLimit, NotSolved
 | `values` 非空时才有 `objective` | 预算到顶且没找到整数点时 `objective` 为 0，`message` 用文字说"还没有整数点" | `cmd/parse` 的 `"(no integer point yet)"`；`moonopt_test.mbt` |
 | `bound`/`gap` 在所有路径同义 | 线性求解下 `bound = objective`、`gap = 0`（线性解就是它自己的界）；`NodeLimit` 下是仍在开的界 | `moonopt_test.mbt` |
 
+### 状态体系与 MathOptInterface 的逐条对照（审计于 2026-09-20；**只记录，不改公开枚举**）
+
+外部标准参照是 MathOptInterface（JuMP 生态）的 `TerminationStatusCode`：它用十来年把"一个求解结果
+到底处于什么状态"分类清楚。本项目自创了三层：公开 `SolveStatus`（5）、内核 `SimplexStatus`（6）、
+`MipStatus`（6）。逐条对照的结果如下 —— **只有一条是实质缺口，其余是"刻意的合并"或"功能不存在"**：
+
+| MOI | 本项目 | 审计结论 |
+| --- | --- | --- |
+| `OPTIMAL` | `SolveStatus::Optimal`（只在证书被独立校验器接受时给出） | 同义；本项目的 `Optimal` 比 MOI 更难拿（要过校验器） |
+| `ALMOST_OPTIMAL` | 无 | **不是缺口**：本项目没有"解出来了但证不出来"的公开状态 —— 那种情况是 `NotSolved`（线性）或内核 `NumericalFailure`。MOI 需要它，是因为有些求解器无法证明最优 |
+| `INFEASIBLE` | `Infeasible`（带 Farkas 证书） | 同义 |
+| `INFEASIBLE_OR_UNBOUNDED` | 无 | **不是缺口**：两个结论各自带证书，能分开，不需要"分不清"的兜底 |
+| `DUAL_INFEASIBLE` | 无（对偶面不公开） | 刻意的：公开面只到 `Infeasible` |
+| `UNBOUNDED` | `Unbounded` + 校验器复核的射线 | 同义 |
+| `NODE_LIMIT` | `NodeLimit`（带当前整数点与仍在开的界） | 同义 |
+| `ITERATION_LIMIT` | **内核有（`SimplexStatus::IterationLimit`），公开面没有**，归入 `NotSolved` | **唯一实质条目：同样"预算用尽"，整数侧的节点预算有专门状态，线性侧的枢轴上限却与"数值失败/规模拒绝/非法模型"合并进 `NotSolved`** —— 调用方无法只凭状态区分"再给点预算就可能解完"与"这条路走不通" |
+| `SOLUTION_LIMIT` / `TIME_LIMIT` / `INTERRUPTED` | 无 | **功能不存在 ⇒ 状态不存在**（不做时间预算、不做并行、没有中断通道），已在 README 的非目标里写明 |
+| `NUMERICAL_ERROR` | 内核 `NumericalFailure` → 公开 `NotSolved` + 内核原话 | **刻意的合并**：`NotSolved` 的口径是"带内核自己的原话"，调用方读原话就知道是数值问题 |
+| `INVALID_MODEL` | `MipStatus::Invalid` → 公开 `NotSolved` + 原话 | 同上（模型非法不是一种求解结论） |
+| `OTHER_ERROR` | 无 | 同 `NUMERICAL_ERROR` 的合并 |
+
+**结论与倾向（本轮不改）**：唯一值得考虑的是给公开面加 `IterationLimit`（与 `NodeLimit` 对称）。
+但公开枚举是**契约**，改动会让 `.mbti` 变化、并要求先把"线性求解的枢轴预算用尽算不算一种结论"
+写清楚（本项目的口径是"只承认证明过的结论"，而"没解完"确实不是结论 —— 这与 MIP 侧给 `NodeLimit`
+的理由并不对称：那边给状态是因为**有 incumbent 与仍在开的界**两个可用数字，线性侧没有）。要动就先写口径。
+
 ## `model`：模型层
 
 `Model`（变量、约束、目标、sense）+ `Var`/`Constraint` 视图 + `validate`（返回人类可读的问题列表）。

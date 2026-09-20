@@ -1,3 +1,4 @@
 import {
   "Freon793/moonopt/core",
+  "moonbitlang/core/debug",
 }

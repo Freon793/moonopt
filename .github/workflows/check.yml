@@ -18,7 +18,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     continue-on-error: false
     steps:
+      # Full history on purpose: the last step asks git whether a report's own source
+      # paths changed between the commit it recorded and HEAD, and a shallow clone
+      # cannot answer that (the recorded commit is not there).
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: install
         uses: moonbit-community/setup-moonbit@04293a8a813bfd4b6c2fce22701b52ae1050d100
@@ -29,8 +34,29 @@ jobs:
       - name: moon update
         run: moon update
 
+      # The toolchain this job installs is `latest`, so a compiler release can change
+      # the verdict of every job here without a line of this repository changing. When
+      # that happens the failing step has to say what it saw: a job log is only readable
+      # with credentials, while a workflow command lands in the run's annotations, which
+      # anyone can read through the API. So the failing step re-emits its diagnostics as
+      # annotations (toolchain version plus the warning/error lines) and still exits
+      # non-zero, which keeps the verdict exactly as strict as it was.
       - name: moon check
-        run: moon check --deny-warn
+        shell: bash
+        run: |
+          set +e
+          version=$(moon version --all 2>&1 | tr '\n' ' ')
+          output=$(moon check --deny-warn 2>&1)
+          code=$?
+          echo "$output"
+          if [ $code -ne 0 ]; then
+            echo "::error title=moon version::$(printf '%s' "$version" | sed -e 's/%/%25/g' -e 's/\r//g')"
+            printf '%s\n' "$output" | grep -n -i -E 'warning|error|[0-9]{4}' | head -n 20 | sed -e 's/%/%25/g' -e 's/\r//g' | while IFS= read -r line; do
+              echo "::error title=moon check::${line}"
+            done
+            echo "::error title=moon check exit::moon check --deny-warn exited ${code}"
+          fi
+          exit $code
 
       - name: format diff
         run: |
@@ -43,7 +69,47 @@ jobs:
           git diff --exit-code
 
       - name: moon test
-        run: moon test --deny-warn
+        shell: bash
+        run: |
+          set +e
+          output=$(moon test --deny-warn 2>&1)
+          code=$?
+          echo "$output"
+          if [ $code -ne 0 ]; then
+            printf '%s\n' "$output" | grep -n -i -E 'warning|error|failed|[0-9]{4}' | head -n 20 | sed -e 's/%/%25/g' -e 's/\r//g' | while IFS= read -r line; do
+              echo "::error title=moon test::${line}"
+            done
+            echo "::error title=moon test exit::moon test --deny-warn exited ${code}"
+          fi
+          exit $code
+
+      # A report under bench/ is evidence, and evidence that describes older code is
+      # worse than none. bench/report.ps1 answers "is this report still current" from
+      # the commit each report recorded for itself; this step makes the answer visible
+      # where it can be acted on.
+      #
+      # It reads the index the script writes rather than its console output: the script
+      # prints its summary with Write-Host, which does not travel down the pipeline, so
+      # capturing it and matching the text there silently reads nothing. It matches the
+      # table cell `STALE (`, not the word STALE: the index explains what STALE means in
+      # prose, and a search for the bare word matches that explanation on a healthy tree.
+      # Both of those were found by running these exact steps locally before trusting them.
+      - name: benchmark reports are current
+        shell: pwsh
+        run: |
+          $index = Join-Path $env:RUNNER_TEMP "report-index.md"
+          & ./bench/report.ps1 -Output $index
+          if ($LASTEXITCODE -ne 0) {
+            throw "bench/report.ps1 exited $LASTEXITCODE, so the staleness question was not answered"
+          }
+          if (-not (Test-Path $index)) {
+            throw "bench/report.ps1 wrote no index, so this check has nothing to read"
+          }
+          $stale = @(Select-String -Path $index -Pattern 'STALE \(')
+          if ($stale.Count -ne 0) {
+            $stale | ForEach-Object { $_.Line }
+            throw "a report under bench/ no longer describes the code in the tree; regenerate it in the round that made it stale"
+          }
 
   targets:
     name: test target (${{ matrix.target }})
@@ -63,4 +129,17 @@ jobs:
         run: moon update
 
       - name: moon test (${{ matrix.target }})
-        run: moon test --target ${{ matrix.target }} --deny-warn
+        shell: bash
+        run: |
+          set +e
+          output=$(moon test --target ${{ matrix.target }} --deny-warn 2>&1)
+          code=$?
+          echo "$output"
+          if [ $code -ne 0 ]; then
+            echo "::error title=toolchain::$(moon version --all 2>&1 | tr '\n' ' ' | sed -e 's/%/%25/g' -e 's/\r//g')"
+            printf '%s\n' "$output" | grep -n -i -E 'warning|error|failed|[0-9]{4}' | head -n 20 | sed -e 's/%/%25/g' -e 's/\r//g' | while IFS= read -r line; do
+              echo "::error title=moon test (${{ matrix.target }})::${line}"
+            done
+            echo "::error title=moon test exit::moon test --target ${{ matrix.target }} --deny-warn exited ${code}"
+          fi
+          exit $code

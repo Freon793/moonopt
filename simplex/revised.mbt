@@ -1309,6 +1309,22 @@ fn State::iterate(self : State) -> Int {
       self.best_objective = objective
       self.saw_objective = true
       self.stalled = 0
+      // The stall is over, so the fallback goes with it. Bland's rule is what makes
+      // termination certain for a run whose objective has stopped responding to its
+      // pivots, and while it stays latched it costs whatever the problem's degeneracy
+      // costs: on `mod010` a latched run reaches the same optimum in 15 527 pivots
+      // where a released one needs 2 693, and on the other nineteen instances of the
+      // 1000-row manifest the two runs are pivot for pivot identical. Releasing does
+      // not drop the guarantee: a cycle makes no progress at all, so it re-arms the
+      // window within `stall_window` pivots and latches again from there.
+      //
+      // A run that *started* with Bland (`start_with_bland`, the recovery attempt
+      // after a numerically singular basis) keeps it latched: that run's whole purpose
+      // is a different path, and releasing it on the first improvement would hand it
+      // straight back to the rule whose path just failed.
+      if self.options.stall_window > 0 && !self.options.start_with_bland {
+        self.bland = false
+      }
     } else {
       self.stalled = self.stalled + 1
       // A fixed window, not `2m + 50`: what a stall means does not depend on how
