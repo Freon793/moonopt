@@ -282,6 +282,24 @@ moon run cmd/parse -- <file.mps>     # 读模型文件，打印规模统计与�
 moon run cmd/parse -- <file.mps> --presolve --relax --max-rows 300
 ```
 
+**子命令**（`parse` / `solve` / `verify` / `fmt` / `bench`）：第一个参数是这五个名字之一时按子命令解释，
+否则就是上面的旗标形式（两者都支持，旗标继续生效并特化动词）：
+
+```bash
+moon run cmd/parse -- solve <file.mps> --relax --presolve      # 求解（LP；--mip 走分支定界）
+moon run cmd/parse -- solve <file.mps> --mip --max-nodes 2000  # 分支定界，每个松弛过 verify
+moon run cmd/parse -- verify <file.mps> --relax                # 求解并用独立校验器复核证书
+moon run cmd/parse -- verify <file.mps> --certificate cert.json # 只校验证书，不解算
+moon run cmd/parse -- fmt <file.mps> --format lp -o out.lp     # 读→写（用库自己的 writer）
+moon run cmd/parse -- bench --manifest bench/data/instances/small.txt --mip --max-nodes 300
+moon run cmd/parse -- solve <file.mps> --relax --json          # 机器可读输出
+```
+
+`--json` 输出一份 `{"tool","command","files":[...],"summary":{...}}` 文档（每个文件一个对象；
+**没跑出来的字段不出现**，而不是填 0）。文本输出**保持原样**——`bench/` 的脚本与四份报告都依赖它。
+`fmt` 不给 `-o` 时只打印不落盘（不会就地改写）；`--json` 与 `--reoptimize` 的组合被**显式拒绝**并说明原因。
+数字一律是**最短往返表示、不取整**，下游拿到的副本与报告逐位一致。
+
 `--presolve` 先做模型化简（空行/列、冗余行、singleton 转界、隐式界收紧、固定变量消元），
 打印每实例的化简前后规模，然后求解**化简后**的模型并把解还原回原变量，
 最后打印还原解在**原模型**上的最大行/界违反（可行才标 `(feasible)`）。

@@ -5,6 +5,43 @@
 
 ## [Unreleased]
 
+### Added — M6 第二轮（B）：CLI 子命令 `parse` / `solve` / `verify` / `fmt` / `bench` + 统一 JSON 输出
+
+M6 的交付物第二条是"CLI 完整：`solve` / `verify` / `fmt` / `bench`，统一文本与 JSON 输出"。
+在此之前 CLI 只有一面旗标墙（`cmd/parse -- <file> --mip --max-nodes ...`），没有动词、没有机器可读输出。
+这一轮把两件事都补上，并且**动都没动老的文本输出**——`bench/` 里四个脚本解析的就是它、四份报告也是它生成的，
+改它等于作废证据。
+
+- **子命令**：`moon run cmd/parse -- <verb> [flags]`，动词表是 `parse` / `solve` / `verify` / `fmt` / `bench`；
+  第一个参数不是这五个名字时就是老的旗标形式，逐位不变（实测 `--mip --max-nodes 20` 的输出与改动前一致）。
+  旗标继续生效并**特化**动词：`solve --mip` 是分支定界，`solve --verify` 走证书校验，`bench --relax` 是逐实例松弛。
+- **`fmt` 动词**：读模型再写出来（`--format mps|lp`，缺省用读进来的那个格式；`-o <path>` 指定输出）。
+  写出去的是**库自己的 writer**（`@format.write_mps` / `write_lp`），不是为 CLI 另写一个格式化器。
+  默认**打印到 stdout 且不写任何文件**——裸 `fmt <file>` 就地改写是这条动词唯一可能弄丢工作的方式；
+  `-o` 只接受一个输入（一个输出路径装不下两个模型），非法用法退出 2。
+- **统一 JSON 输出**（`--json`）：一份文档 = `{"tool","command","files":[...],"summary":{...}}`，
+  每个文件一个对象，字段按运行产出（解析事实、`mode`、`status`、`objective`、`iterations`、
+  `nodes`/`verified`/`cuts`/`bound`/`gap`、`presolve_*`、`point{row_violation,bound_violation,integrality_violation}`、
+  `claim`/`accepted`/`reason`、`message`、`failed`）。**没跑出来的字段不出现**，而不是填 0 ——
+  一份说"没有状态"的文档不会被误读，一个 0 会被当成数字。
+- **语义与文本路径逐条对齐**：`refused`（模型不在内核受理范围内）**不算失败**、退出码仍为 0（与文本路径一致；
+  实测 `bench` 在整数模型上逐条 `solve=refused` 而 `failed 0`）；证书被拒、点没通过复核、解析失败、
+  证书读不出来才是失败。
+- **`--json` 显式拒绝它还没镜像的东西**：`--json --reoptimize` 退出 2 并说明原因（那个旗标存在的意义就是
+  打印一次测量，文档里少了它就是在回答另一个问题）。这条比"悄悄给一份缺字段的文档"重要。
+- **数字格式**：JSON 里的数字用**最短往返表示**（`Double::to_string`，与 `@format.format_number` 给模型文件的
+  是同一条政策），不做四舍五入 —— 取整会让下游拿到的报告数字与报告本身不符。这一条同时回答了 roadmap 里
+  "定点数值格式化"：CLI 的数字政策是**有文档的、可精确回读的**表示，而不是一个有损的有效位约定。
+- **实测**（native release）：`solve --relax --json` 给出 `objective=1167185.7255927906`（与文本路径的
+  `solve=optimal obj=1167185.7255927906` 逐位一致）；`solve --mip --json` 给出
+  `mode=mip status=node-limit nodes=20 bound=1171718.464052804`；`solve --presolve --json` 给出
+  `presolved=true verdict=reduced rows_after_presolve=16 point.row_violation=2.65e-13`；
+  `verify --json` 给出 `claim=optimal accepted=true`；每一份都用 `ConvertFrom-Json` 验证过是合法 JSON。
+  修掉一个实测缺陷：JSON 路径最初经过会打印的读文件助手，一行 `cannot read ...` 落在文档中间 → 文档不可解析
+  （`--json` 因此只用**静默读**）。
+- **测试**：新增 `cmd/parse/main_wbtest.mbt` 8 条（动词表、JSON 转义、解析事实来自模型、parse 文档**不带**
+  `status`/`objective`、solve 文档只报它真有的字段、不可读文件是失败文档、文档外壳与 summary、数字不取整）。
+
 ### Added — M6 第一轮（A）：`bench/report.md`，全部基准报告的入口 + "报告是否仍被当前代码支持"的机械化判定
 
 M6 的完成标准第一条是"报告可由脚本一键复现"，而在此之前仓库里没有任何地方能回答一个更基本的问题：

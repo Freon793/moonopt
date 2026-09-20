@@ -618,8 +618,19 @@ presolve 的其余归约、DeVex 定价）与两条遗留（`fast0507` 类实例
   实测本轮四份全标 `STALE`（`parse-report.md`/`solve-report.md` 落后十几轮、`mip-report.md` 落在一轮割改动前、
   `mip-report-small.md` 只差第十六轮那条注释——该报告数字已复核逐位一致）。
   脚本在"报告缺失（exit 2）/ git 无法回答（exit 4）/ 数字读不出（exit 3）"时拒绝写且不落盘，前两条已实测。
-- **B 轮（下一步）**：CLI 子命令 `solve` / `verify` / `fmt` / `bench` + 统一 JSON 输出。
-- **C 轮**：API/算法文档（`docs/`）+ README 承诺↔证据逐条对照表。
+- **B 轮（已落地）：CLI 子命令 + 统一 JSON 输出**。`parse` / `solve` / `verify` / `fmt` / `bench` 五个动词
+  （第一个参数不是动词时就是原来的旗标形式，**文本输出逐位未动**——`bench/` 的四个脚本解析它、四份报告由它生成）；
+  旗标继续生效并特化动词（`solve --mip`、`solve --verify`、`bench --relax`）。`fmt` 用库自己的 writer 读→写，
+  缺 `-o` 时只打印不落盘（裸 `fmt <file>` 不能就地改写），`-o` 只接受一个输入。
+  `--json` 输出一份文档 `{tool,command,files[],summary}`，字段按运行产出、**没跑出来的不出现**；
+  语义与文本路径逐条对齐（`refused` 不算失败、退出码 0；被拒证书/点未通过/解析失败才算）；
+  `--json --reoptimize` **显式拒绝**（那个旗标就是为了打印一次测量，文档里少了它就是另一个问题）。
+  数字用最短往返表示、不取整（下游的副本必须与报告一致）——**这就是"定点数值格式化"这条的答案：
+  政策有文档、可精确回读，而不是一个有损的有效位约定**。实测：`solve --relax --json` 的
+  `objective=1167185.7255927906` 与文本路径逐位一致、`solve --mip --json` 的 `bound=1171718.464052804`
+  与文本一致、`--presolve` 镜像 `rows_after_presolve=16`，每份都用 `ConvertFrom-Json` 验过合法性；
+  修掉一个实测缺陷（JSON 路径经过会打印的读文件助手 → 文档不可解析，改用静默读）。新增 8 条 CLI 白盒测试。
+- **C 轮（下一步）**：API/算法文档（`docs/`）+ README 承诺↔证据逐条对照表。
 - **D 轮**：发布 mooncakes.io（版本与元数据、承诺面终审、三目标 check/test 全绿）。
   另：`bench/solve-report.md`（`315107f`）与 `bench/parse-report.md`（`b338547`）已被 `report.md` 标为陈旧，
   重跑它们是 D 轮前必须结清的一笔账。

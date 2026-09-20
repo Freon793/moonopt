@@ -47,6 +47,29 @@ fn print_usage() -> Unit {
   println(
     "       moon run cmd/parse -- <file> --certificate <certificate.json>",
   )
+  println("")
+  println("subcommands (the flags above all still apply):")
+  println("       moon run cmd/parse -- parse <file> ...")
+  println(
+    "       moon run cmd/parse -- solve <file> [--presolve] [--mip] [--json]",
+  )
+  println(
+    "       moon run cmd/parse -- verify <file> [--certificate <path>] [--json]",
+  )
+  println(
+    "       moon run cmd/parse -- fmt <file> [--format mps|lp] [-o <out>]",
+  )
+  println("       moon run cmd/parse -- bench --manifest <list-file> [--json]")
+}
+
+///|
+/// The subcommands the CLI answers to, or `""` when the first argument is not one of them
+/// (which is how the flag-only form has always been spelled).
+fn command_of(argument : String) -> String {
+  match argument {
+    "parse" | "solve" | "verify" | "fmt" | "bench" => argument
+    _ => ""
+  }
 }
 
 ///|
@@ -884,9 +907,52 @@ fn main {
   let mut max_nodes = 0
   let mut cut_rounds = -1
   let mut certificate_path = ""
+  let mut json_mode = false
+  let mut output_path = ""
+  let mut output_format = ""
+  // The first argument is a subcommand when it names one; otherwise this is the flag-only
+  // form, which is what every script in `bench/` uses and which therefore keeps working
+  // unchanged.
+  let mut command = "parse"
   let mut index = 1
+  if args.length() > 1 {
+    let named = command_of(args[1])
+    if named != "" {
+      command = named
+      index = 2
+    }
+  }
+  if command == "solve" || command == "verify" || command == "bench" {
+    solve_enabled = true
+  }
+  if command == "verify" {
+    verify_enabled = true
+  }
   while index < args.length() {
     let argument = args[index]
+    if argument == "--json" {
+      json_mode = true
+      index = index + 1
+      continue
+    }
+    if argument == "--format" {
+      if index + 1 < args.length() {
+        output_format = args[index + 1]
+        index = index + 2
+        continue
+      }
+      print_usage()
+      @sys.exit(2)
+    }
+    if argument == "-o" || argument == "--output" {
+      if index + 1 < args.length() {
+        output_path = args[index + 1]
+        index = index + 2
+        continue
+      }
+      print_usage()
+      @sys.exit(2)
+    }
     if argument == "--solve" {
       solve_enabled = true
       index = index + 1
@@ -1013,7 +1079,6 @@ fn main {
     print_usage()
     @sys.exit(2)
   }
-  let mut failures = 0
   let flags : SolveFlags = {
     enabled: solve_enabled,
     relax,
@@ -1027,6 +1092,97 @@ fn main {
     max_nodes,
     cut_rounds,
   }
+  // `fmt` writes models, so it is the one verb that does not go through the inspection
+  // path.
+  if command == "fmt" {
+    let failures = run_fmt(files, output_format, output_path)
+    if failures > 0 {
+      @sys.exit(1)
+    }
+    return
+  }
+  // `--json` asks for the machine-readable document instead of the printed lines; `bench`
+  // asks for the per-file outcomes whether or not it wants them as JSON, because its
+  // summary is computed from them. The text path below is what the scripts in `bench/`
+  // parse, so it stays untouched.
+  if json_mode || command == "bench" {
+    if json_mode && flags.reoptimize {
+      println(
+        "--json does not mirror --reoptimize yet: that flag exists to print a measurement, and a document without it would answer a different question",
+      )
+      @sys.exit(2)
+    }
+    // What each file gets: the flags decide, which is how `solve --mip` means branch and
+    // bound and `bench --relax` means a relaxation per instance.
+    let mode = if flags.verify {
+      "verify"
+    } else if flags.mip {
+      "mip"
+    } else if flags.enabled {
+      "solve"
+    } else {
+      "parse"
+    }
+    let outcomes : Array[FileOutcome] = []
+    let mut failures = 0
+    for path in files {
+      let outcome = json_inspect(path, flags, mode)
+      if outcome.failed {
+        failures = failures + 1
+      }
+      outcomes.push(outcome)
+    }
+    if json_mode {
+      println(document_json(command, outcomes, failures))
+    } else {
+      // `bench` in text mode: the same facts as one line per file plus the summary the
+      // reports and the exit code are made of.
+      for outcome in outcomes {
+        let mut line = "OK   " +
+          outcome.path +
+          "  format=" +
+          outcome.format_name +
+          "  vars=" +
+          outcome.vars.to_string() +
+          "  cons=" +
+          outcome.cons.to_string() +
+          "  nnz=" +
+          outcome.nonzeros.to_string() +
+          "  int=" +
+          outcome.integers.to_string() +
+          "  sense=" +
+          outcome.sense
+        if outcome.status != "" {
+          line = line + "  " + outcome.mode + "=" + outcome.status
+        }
+        if outcome.has_objective {
+          line = line + "  obj=" + outcome.objective.to_string()
+        }
+        if outcome.has_bound {
+          line = line + "  bound=" + outcome.bound.to_string()
+        }
+        if outcome.nodes > 0 {
+          line = line + "  nodes=" + outcome.nodes.to_string()
+        }
+        if outcome.cuts > 0 {
+          line = line + "  cuts=" + outcome.cuts.to_string()
+        }
+        println(line)
+      }
+      println("")
+      println(
+        "checked " +
+        outcomes.length().to_string() +
+        " file(s), failed " +
+        failures.to_string(),
+      )
+    }
+    if failures > 0 {
+      @sys.exit(1)
+    }
+    return
+  }
+  let mut failures = 0
   for path in files {
     if !inspect(path, flags) {
       failures = failures + 1
