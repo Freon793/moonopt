@@ -5,6 +5,30 @@
 
 ## [Unreleased]
 
+（下一轮开发在此累积。）
+
+## [0.1.0] — 2026-09-21
+
+首发版本。它的内容就是下面这一整份日志：四份基准报告（解析 / 求解 / 分支定界两张口径）、
+稀疏修正单纯形内核（稀疏 LU 基分解、有界变量枢轴、对偶单纯形热启动、presolve/postsolve）、
+MPS 与 LP 读写、分支定界与根割、独立校验器（最优性 / Farkas / 无界射线 + 证书 JSON）、
+CLI（`solve` / `verify` / `fmt` / `bench`，文本与 JSON 两套渲染）。
+
+安装：
+
+```text
+moon add Freon793/moonopt
+```
+
+发布物本身被验过三件事（细节见 `docs/roadmap.md` 的 M6 E 轮）：`moon package` 的归档**自包含**
+（解出来后 `moon check --deny-warn` 干净、`moon test` 172/172 全绿）；归档**不含**任何第三方实例数据
+（121 个条目 / 421 KB，`bench/data/instances` 只保留本项目自己写的清单 `small.txt`，排除规则从
+"`.gitignore` 顺带生效"改成显式的 `.moonignore`）；一个**只使用公开面**的兄弟包能编译并通过四项契约检查
+（线性模型 21、整数模型 20、不可行模型、以及"预算 1 时必须报 `node-limit` 而不是假装最优"）。
+"字段可见性"这条也由该验收程序正面确认：包外可读 `Solution` 的 `objective` / `nodes` / `bound` / `message`。
+
+已知限度与逐条证据在 README 的"承诺 ↔ 证据"表里，不在这里重复。
+
 ### 实测后回退 — M5 第二十一轮：多行 MIR 聚合（`y_B + λ·y_k`）在行序对照下重测，四个"根界抬不动"的实例仍然抬不动
 
 **为什么要重测**：第十六轮量过这个割族，但当时它建立在**已被回退的 efficacy 排序之上**，所以那批数字回答的是
@@ -1785,11 +1809,3 @@ best-bound 纯分支定界先找界、不先找点，而**没有最优解可比�
 - 求解内核仍是 `oracle`（稠密参考实现）：非零变量下界与整数变量会返回 `NotSolved` + 原因。
 - 尚无 MPS/LP 文件输入（M2）、无稀疏修正单纯形（M3）、无证书校验（M4）、无整数分支（M5）。
 - CLI 尚未做定点数值格式化，示例直接打印 `Double` 的原始值。
-
-## [0.1.0] — 计划发布
-
-- M2–M6 完成后发布：MPS/LP 读写、稀疏修正单纯形与对偶单纯形、presolve/postsolve、
-  证书（最优性 / Farkas / 无界）与独立 `verify` 校验器、CLI、Netlib 对拍报告、
-  发布到 mooncakes.io。
-- 整数规划层（分支定界 + 割平面）是否纳入本版本，取决于 [`docs/roadmap.md`](docs/roadmap.md)
-  的范围闸门。

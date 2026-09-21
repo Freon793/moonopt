@@ -8,8 +8,8 @@
 presolve/postsolve、可复用的分支切割框架，以及**可被第三方独立校验**的最优性（对偶可行解）、
 不可行性（Farkas）与无界（射线）证书。纯 MoonBit 实现，无 FFI 依赖。
 
-> 状态：**v0.1.0-dev**，`M1`（基础层与模型层）、`M2`（标准模型输入）已落地，`M3` 进行中（完成标准已满足），`M4`（证书与独立校验器）已完成，
-> `M5`（整数规划）进行中：分支定界骨架 + **每个松弛都由独立校验器复核**。这条复核先后拦下六次被拒证书，
+> 状态：**v0.1.0**，已发布到 mooncakes.io（`moon add Freon793/moonopt`）。`M1`（基础层与模型层）、`M2`（标准模型输入）、`M4`（证书与独立校验器）已完成，
+> `M3`（稀疏求解内核）完成标准已满足，`M5`（整数规划）完成标准①②③全部满足：分支定界 + 根割 + **每个松弛都由独立校验器复核**。这条复核先后拦下六次被拒证书，
 > 基准报告的入口是 [`bench/report.md`](bench/report.md)（`bench/report.ps1` 生成）：四份报告的索引、
 > 一键复现命令，以及**每份报告是否仍被当前代码支持**（按报告自己记的提交与它依赖的源路径差分判定，
 > 有改动标 `STALE` 并列出文件）。
@@ -19,8 +19,8 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 > 不一致。三处都修完且 `noswot` 5000 节点 0 拒签，`noswot` 不再阻塞分支定界报告（见 CHANGELOG 与
 > `docs/roadmap.md`）
 > （稀疏修正单纯形、**稀疏 LU 基分解**、性能测量与优化、比值检验的可行性守卫、退化扰动、
-> 内核规模与填充预算门禁、presolve/postsolve 与公开契约的默认化简路径均已完成；
-> 对偶单纯形与 DeVex 定价待完成）：
+> 内核规模与填充预算门禁、presolve/postsolve、对偶单纯形热启动与公开契约的默认化简路径均已完成；
+> DeVex / steepest-edge 定价待完成）：
 > 可构建、可测试、CI 全绿，并已在 **MIPLIB 2017 的 32 个真实实例**上跑通解析报告
 > （32 成功 / 0 失败，见 [`bench/parse-report.md`](bench/parse-report.md)）与求解报告
 > （**18 个 LP 松弛求到最优、11 个超规模跳过、规模拒绝归零、0 个数值失败、3 个迭代上限**；
@@ -29,7 +29,7 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 > 同一份清单是 **20 个求到最优**，只有 `fast0507` 仍到上限 —— 两个上限下的计数是两场实验，不可互相比较；
 > 18 个重建解全部在原模型上通过行、界与目标值三项检查，18 项松弛值经 MIPLIB 官方最优值表
 > 交叉校验、**0 违反**，见 [`bench/solve-report.md`](bench/solve-report.md)）。
-> 尚未发布到 mooncakes.io。
+> 已发布到 mooncakes.io（首版 `0.1.0`）：`moon add Freon793/moonopt`。
 > 分支定界的第一份报告已经写出（[`bench/mip-report.md`](bench/mip-report.md)：32 个实例
 > **1 最优 / 14 节点预算 / 17 跳过 / 0 被拒证书**，`22433` 与官方最优值取等、0 违反）。
 > 报告指出的缺口是"到预算的实例没有整数点、界因此剪不掉东西"，第四轮据此加了**取整启发式（下潜）**：
@@ -227,8 +227,8 @@ Phase II 仍是最大的一道墙 —— 而它的成因在**定价**：Dantzig 
 | 能求解真实规模 LP（presolve + 稀疏 LU + 增益定价） | `bench/solve-report.md`（最优/跳过/规模拒绝/数值失败各项计数）；`bench/README.md` 记录的单实例量级（`30n20b8` 化简后 11591 行 16 秒最优、`danoint` 3716 枢轴） | 报告已在当前代码上重跑（`bench/report.md` 标 `current`）：32 实例中 **18 个求到最优、11 个超行数上限被跳过、3 个到 1200 枢轴上限**。**枢轴上限是基准口径的一部分、且已记录在报告头部**：同一条命令把上限放到默认的 20000，**同一份清单实测 20 个求到最优 / 11 跳过 / 1 到上限（`fast0507`），总枢轴 12 336、373 秒**（`danoint` 1907 枢轴、`mod010` 3455 枢轴）—— 1200 上限下的 18 与 20000 上限下的 20 是**两场实验**，不可互相比较；`danoint` 那一行的 3716 枢轴来自 `bench/README.md` 记录的另一次口径，不是这份报告 |
 | **每个松弛都经过独立校验器** | `bench/mip-report.md` 与 `bench/mip-report-small.md` 的 `verified` 列；`mip/mip_test.mbt` 断言 `verified == nodes` | `verified < nodes` 的差额是"到达不了结论的松弛"（迭代上限或写不出符号约定的证书），按开着的活计 |
 | 小规模整数实例证到**公开已知最优值** | `bench/mip-report-small.md`（4/10）+ `bench/check-mip-objectives.ps1` 对 4 项**取等**通过 | 另外 6 个到节点预算（含 `markshare1`/`markshare2`/`pk1` 界贴下界） |
-| 证书可被第三方独立复核（含 JSON） | `verify/verify_test.mbt`（含"故意做坏的解必须被拒"）；`cmd/parse -- verify <file> --certificate <json>` | 证书只对**内核收到的模型**成立，所以校验路径不化简 |
-| 每条割都能被独立**再推导** | `verify/cuts_test.mbt`（穷举小模型所有整数点、确认无效割确实砍掉一个可行整点）；`mip/cuts_test.mbt`（做坏的割被拒且运行停 `Unverified`） | 割族目前只有单行舍入；选择规则经五轮实测后确认"没有一种赢过行序取满上限" |
+| 证书可被第三方独立复核（含 JSON） | `verify/verify_test.mbt`（含"故意做坏的解必须被拒"）；`cmd/parse -- verify <file> --certificate <json>` | 证书只对**内核收到的模型**成立，所以校验路径不化简；**Farkas 射线的构造端**（"Phase I 的对偶解即射线"）仍无证据 —— 校验端每次独立复核（没有证据的射线不可能通过），但生产者不因此获得保证，见 `docs/roadmap.md` 的"已知缺陷" |
+| 每条割都能被独立**再推导** | `verify/cuts_test.mbt`（穷举小模型所有整数点、确认无效割确实砍掉一个可行整点）；`mip/cuts_test.mbt`（做坏的割被拒且运行停 `Unverified`） | 割族目前只有单行舍入；选择规则经五轮实测后确认"没有一种赢过行序取满上限"；**多行 MIR 聚合**在第二十一轮按**行序对照**重测，同样无净收益并回退（根界为 0 的四个实例即使只用聚合族、不截断上限仍是 0），数字见 `CHANGELOG.md` |
 | 公开入口的取舍口径（`NodeLimit` / `NotSolved`） | `docs/api.md` 的契约表；`moonopt_test.mbt` | 整数模型**不做化简**（答案不取决于化简碰巧定住了什么） |
 | 不可行 / 无界 / 预算到顶各有明确状态 | `mip/mip_test.mbt`（松弛无界报 `UnboundedRelaxation`、非法模型报 `Invalid`） | 整数无界性证明（整数射线）未做 |
 | 规模门禁：行数上限与填充预算 | `bench/README.md` 的两张表；`simplex` 的 `TooLarge`/`max_factor_entries` | 行数上限是粗闸门，真正的界是枢轴数与每次枢轴增益 |
@@ -237,7 +237,7 @@ Phase II 仍是最大的一道墙 —— 而它的成因在**定价**：Dantzig 
 | 报告是否仍被当前代码支持，有机械化判定 | `bench/report.md` 的 `generated at` 与 `code behind it` 两列（`STALE (N changed since)`） | 判据保守：改注释也算改 |
 | 依赖边界（可被审阅的架构事实） | `verify/moon.pkg` 不 import `simplex`；库包不引 `moonbitlang/x`（只有 `cmd/parse` 引） | 这是"校验器与求解器不共享状态"的可检查形式 |
 | 三目标全绿 | `moon test --deny-warn`、`--target wasm-gc`、`--target js`（当前 172 个测试） | 发布前必须重跑（M6 完成标准之一） |
-| 尚未发布 | `moon.mod` 的 `version = "0.1.0"`；本 README 的"尚未发布到 mooncakes.io" | 发布是 M6 的最后一轮（D） |
+| 已发布（mooncakes.io 的 `Freon793/moonopt` 0.1.0） | `moon.mod` 的 `version = "0.1.0"`；注册表页面；发布物的自包含与公开面四项契约的验收见 `docs/roadmap.md` 的 M6 E 轮 | 首版；语义版本号从 `0.1.0` 起，之后按 SemVer 递增 |
 
 ## 为什么需要它
 

@@ -1,0 +1,21 @@
+# What `moon package` / `moon publish` must leave out of the archive.
+#
+# The rule is the same one `.gitignore` states for the repository, written out here so
+# that it holds for the *published artefact* on its own terms rather than as a side effect
+# of how git is configured: the benchmark instances are third-party data, downloaded by
+# `bench/fetch-instances.ps1` and owned by MIPLIB 2017. Mooncakes is not the place to
+# redistribute them, and a 74 MB archive of them would not be a solver library. The kept
+# file is the hand-written *list* those instances are named in, which is this project's own
+# text and the thing a report cannot be reproduced without.
+bench/data/instances/*
+!bench/data/instances/small.txt
+bench/data/*.solu
+
+# Build outputs and local tool state. Neither belongs in an archive: `_build` is per-target
+# compiler output, and `.mooncakes`/`.moonagent` are local caches.
+_build/
+target/
+target
+.mooncakes/
+.moonagent/
+.DS_Store

@@ -12,7 +12,7 @@
 | M3 | 稀疏求解内核：修正单纯形 + 对偶单纯形 + presolve/postsolve | 完成标准已满足（增强项：DeVex 定价、presolve 其余归约、`fast0507` Phase II） |
 | M4 | 证书与独立校验器：最优性、Farkas、无界射线 | **已完成** |
 | M5 | 整数规划：分支定界 + 割平面（受范围闸门约束） | **完成标准①②③全部满足**；十九轮增强（骨架、两例假"不可行"、`noswot` 三例被拒证书、取整启发式、公开入口接线、下潜预算放大、可回溯下潜回退、伪成本分支回退、又一处假"不可行"、割平面、小规模覆盖面、深节点拒签诊断、收紧容差回退、对偶侧自检、割的选择规则（六条量完关闭）、自检开销：防停滞闩死解除、多行 MIR 聚合（行序对照实测后回退，割族这条杠杆量完）） |
-| M6 | 基准对拍、CLI 完善、文档与发布 | A~D 四轮已落地（四份报告 + 索引与陈旧性判决、CLI 子命令与 JSON、`docs/api.md` + `docs/algorithms.md` + README 承诺↔证据表、四份报告重跑与元数据终审）；**发布按用户要求推迟** |
+| M6 | 基准对拍、CLI 完善、文档与发布 | **已完成**：A~D 四轮（四份报告 + 索引与陈旧性判决、CLI 子命令与 JSON、`docs/api.md` + `docs/algorithms.md` + README 承诺↔证据表、四份报告重跑与元数据终审）+ **E 轮**（发布面从零建立：显式 `.moonignore`、发布物自包含与公开面契约的离线验收、`0.1.0` 发布到 mooncakes.io、tag `v0.1.0`） |
 
 ---
 
@@ -734,6 +734,31 @@ presolve 的其余归约、DeVex 定价）与两条遗留（`fast0507` 类实例
   CI 承诺与 `check.yml` 逐条对上、`description` 的四项能力都有实现与证据
   （2026-09-16 记下的"承诺 vs 证据"违例**已结清**）。发布前的最后一步是 `moon login` + `moon publish`：
   `moon publish --dry-run` 在本机未登录时无法校验元数据（实测报 `please login first`），本轮未上传任何东西。
+- **E 轮（已落地：发布 `0.1.0`）**：发布面在本轮之前是**零**（仓库没有任何 tag）。本轮把它拆成四件先测再做的事：
+  ① **发布物包含什么** —— 打包规则由 `.moonignore`（gitignore 风格，`moon package` 与 `moon publish` 共用）
+     与 `.gitignore` 共同决定，而本仓库原本**没有 `.moonignore`**：归档之所以没把 `bench/data` 下
+     **74 MB 的 MIPLIB 第三方实例**打进去，只是因为 `.gitignore` 恰好排除了它们 —— 发布件不该依赖这种巧合，
+     于是补上显式 `.moonignore` 并复核归档：`_build/publish/Freon793-moonopt-0.1.0.zip`，
+     **121 个条目 / 421 158 字节**，`bench/data` 只剩本项目自己写的清单 `small.txt`，
+     `_build`/`target`/`.mooncakes` 零条目，`moon.mod`/`LICENSE`/`README.md` 齐全。
+     关键的可操作性：`moon package` **不需要登录**（而且它自己会先跑一次 `moon check`），
+     所以这一步在拿到凭据之前就能做完。
+  ② **发布物自包含** —— 把归档解出来当模块根：`moon check --deny-warn` 退出 0、`moon test` **172/172**，
+     说明归档没漏文件、也不依赖仓库里未打包的内容。
+  ③ **公开面能被陌生人使用** —— 写一个只 import `Freon793/moonopt` 与 `Freon793/moonopt/model` 的**兄弟包**
+     （MoonBit 的 `pub` 边界是**包**，所以它看到的可见性与外部工程一致），对四项契约做检查：
+     线性模型最优 21、整数模型最优 20（2 节点、界 20）、矛盾行报 `infeasible`、
+     以及"预算 1 时必须报 `node-limit` 而不是假装最优"，实测 **`FAILURES: 0`**。
+     这一步同时正面回答了"`Solution` 的字段在包外读不读得到"：`.mbti` 里它是 `pub struct Solution`、
+     而 `SolveOptions` 是 `pub(all) struct`，写法不同 ⇒ 必须实测而不是推断，实测可读
+     `objective` / `nodes` / `bound` / `message`。
+  ④ **注册表消费要等注册表里真有它** —— 把副本放进 `.mooncakes/Freon793/moonopt/` 不解决问题，
+     `moon` 仍按注册表解析依赖（实测 `Failed to resolve registry dependency ... module was not found in the registry`），
+     所以 `moon add` 形式的验收只能在发布之后做 ⇒ 本轮顺序定为"先测打包与公开面 → 登录并发布 →
+     立刻用空白工程 `moon add` 验收"。
+  发布动作本身：`moon.mod` 的 `version = "0.1.0"` 不动（首版），`moon login` + `moon publish`；
+  随后建 tag `v0.1.0` 与 GitHub Release，并把 README 两处"尚未发布"改成注册表事实、
+  `CHANGELOG.md` 把 `[Unreleased]` 收敛为 `## [0.1.0] — 2026-09-21` 并删掉底部那份"计划发布"。
 
 ---
 
