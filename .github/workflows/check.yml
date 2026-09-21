@@ -25,22 +25,40 @@ jobs:
         with:
           fetch-depth: 0
 
-      # The toolchain is pinned, not `latest`, and that is a deliberate change of policy.
-      # `latest` meant a compiler release could turn every job here red without a line of
-      # this repository changing - which is exactly what happened on 2026-09-20, when the
-      # day's release started reporting E0079 (`implicit_impl_as_method`) and the CI went
-      # from green to five red jobs (see CHANGELOG.md for the diagnosis chain). It also
-      # keeps CI on the toolchain the benchmark reports record for themselves, since a
-      # report is only evidence if the thing that produced it is the thing CI tests.
-      # Bumping this version is its own round: it is a request from the compiler, and the
-      # answer to it (new warnings to fix, code to migrate) is that round's work.
+      # The toolchain is NOT pinned, and that is a measured fact rather than a preference.
+      #
+      # `moonbit-community/setup-moonbit` accepts only the keywords latest, nightly,
+      # pre-release, stable and bleeding in its `version` input; `normalizeVersion` throws
+      # `unsupported version: <input>` for anything else. Run 43 of this workflow handed it
+      # "0.1.20260904" and all five jobs died in the install step (see CHANGELOG.md).
+      # Installing a pinned toolchain by hand instead is not available either: on
+      # 2026-09-21 every versioned key on cli.moonbitlang.com answered 403 AccessDenied -
+      # ten version strings probed across binaries/ and cores/, as .tar.gz, .zip and
+      # .sha256 - while `latest`, `nightly` and `pre-release` answer 200 and a Range
+      # request on `latest` answers 206, so the 403 is the CDN's policy and not a probe
+      # artefact. There is no downloadable pinned artefact to be deterministic against.
+      #
+      # What replaces pinning, then, is three things. (1) This repository has to be clean
+      # on the current `latest`, checked locally against the released toolchain before a
+      # push, so a compiler release is answered in the round that meets it instead of by
+      # five red jobs. (2) The toolchain each run actually used is written into the run's
+      # annotations - a job log needs credentials to read, an annotation does not, and an
+      # unpinned toolchain that is not recorded leaves a verdict nobody can attribute.
+      # (3) The benchmark reports say which toolchain produced them, since a report is only
+      # evidence about the thing that CI runs if the two are the same compiler.
       - name: install
         uses: moonbit-community/setup-moonbit@04293a8a813bfd4b6c2fce22701b52ae1050d100
-        with:
-          version: "0.1.20260904"
 
+      # Emitted as a notice on purpose: the annotation is readable from the run page
+      # without credentials, the step's own output is not.
       - name: moon version
-        run: moon version --all
+        shell: bash
+        run: |
+          moon version --all
+          version=$(moon version --all 2>&1 | tr '\n' ' ')
+          printf '%s\n' "$version" | sed -e 's/%/%25/g' -e 's/\r//g' | while IFS= read -r line; do
+            echo "::notice title=toolchain::${line}"
+          done
 
       - name: moon update
         run: moon update
@@ -138,10 +156,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Unpinned for the reason recorded in the `check` job: the action rejects a version
+      # string and the CDN serves no versioned artefact, so `latest` is what runs here.
       - name: install
         uses: moonbit-community/setup-moonbit@04293a8a813bfd4b6c2fce22701b52ae1050d100
-        with:
-          version: "0.1.20260904"
+
+      - name: moon version
+        shell: bash
+        run: |
+          moon version --all
+          version=$(moon version --all 2>&1 | tr '\n' ' ')
+          printf '%s\n' "$version" | sed -e 's/%/%25/g' -e 's/\r//g' | while IFS= read -r line; do
+            echo "::notice title=toolchain::${line}"
+          done
 
       - name: moon update
         run: moon update

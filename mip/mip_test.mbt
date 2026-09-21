@@ -53,14 +53,14 @@ fn unbounded_relaxation_mip() -> @model.Model {
 
 ///|
 /// The name of a status, so a failure message says which one it got instead of a record.
-fn status_name(status : MipStatus) -> String {
+fn status_name(status : @mip.MipStatus) -> String {
   match status {
-    MipStatus::Optimal => "optimal"
-    MipStatus::Infeasible => "infeasible"
-    MipStatus::NodeLimit => "node limit"
-    MipStatus::UnboundedRelaxation => "unbounded relaxation"
-    MipStatus::Unverified => "unverified"
-    MipStatus::Invalid => "invalid"
+    @mip.MipStatus::Optimal => "optimal"
+    @mip.MipStatus::Infeasible => "infeasible"
+    @mip.MipStatus::NodeLimit => "node limit"
+    @mip.MipStatus::UnboundedRelaxation => "unbounded relaxation"
+    @mip.MipStatus::Unverified => "unverified"
+    @mip.MipStatus::Invalid => "invalid"
   }
 }
 
@@ -187,7 +187,7 @@ fn best_by_enumeration(
 /// variables are integers, and its objective is the objective of that point.
 fn assert_answer_at_point(
   model : @model.Model,
-  result : MipResult,
+  result : @mip.MipResult,
   tolerance : Double,
 ) -> Unit raise {
   assert_eq(result.values.length(), model.num_vars())
@@ -221,9 +221,9 @@ fn assert_answer_at_point(
 ///|
 /// A relaxation that always claims the same thing, whatever model it is handed. Used to
 /// show the verifier stands between a node solver and the answer.
-fn claims_optimal_at_origin(_problem : @model.Model) -> NodeSolution {
+fn claims_optimal_at_origin(_problem : @model.Model) -> @mip.NodeSolution {
   {
-    status: NodeStatus::Optimal,
+    status: @mip.NodeStatus::Optimal,
     values: [0.0, 0.0],
     objective: 0.0,
     duals: [0.0],
@@ -234,9 +234,9 @@ fn claims_optimal_at_origin(_problem : @model.Model) -> NodeSolution {
 ///|
 /// A relaxation that claims the model is infeasible, with a Farkas ray of the right shape
 /// and the wrong arithmetic.
-fn claims_infeasible(problem : @model.Model) -> NodeSolution {
+fn claims_infeasible(problem : @model.Model) -> @mip.NodeSolution {
   {
-    status: NodeStatus::Infeasible,
+    status: @mip.NodeStatus::Infeasible,
     values: [],
     objective: 0.0,
     duals: Array::make(problem.num_constraints(), 1.0),
@@ -247,9 +247,9 @@ fn claims_infeasible(problem : @model.Model) -> NodeSolution {
 ///|
 /// A relaxation that reaches no verdict at all, which is what a node solve does when its
 /// budget runs out.
-fn never_finishes(_problem : @model.Model) -> NodeSolution {
+fn never_finishes(_problem : @model.Model) -> @mip.NodeSolution {
   {
-    status: NodeStatus::Unfinished,
+    status: @mip.NodeStatus::Unfinished,
     values: [],
     objective: 0.0,
     duals: [],
@@ -284,15 +284,18 @@ test "the primal heuristic finds an incumbent the tree has not reached yet" {
   // relaxations are the root and two children, neither of which is whole. Cuts are
   // switched off because this test is about the walk: with the root's row rounded away,
   // the same three-relaxation budget proves optimality instead of running out.
-  let without = solve_mip(
+  let without = @mip.solve_mip(
     model,
-    MipOptions::with_max_nodes(3).without_primal_dive().without_cuts(),
+    @mip.MipOptions::with_max_nodes(3).without_primal_dive().without_cuts(),
   )
-  assert_eq(without.status, MipStatus::NodeLimit)
+  assert_eq(without.status, @mip.MipStatus::NodeLimit)
   assert_eq(without.values.length(), 0)
   assert_eq(without.verified, without.nodes)
-  let dived = solve_mip(model, MipOptions::with_max_nodes(3).without_cuts())
-  assert_eq(dived.status, MipStatus::NodeLimit)
+  let dived = @mip.solve_mip(
+    model,
+    @mip.MipOptions::with_max_nodes(3).without_cuts(),
+  )
+  assert_eq(dived.status, @mip.MipStatus::NodeLimit)
   // The point it found is a real answer to the model, checked without the search's own
   // routines: it satisfies the rows, sits on whole numbers and its objective is its own.
   assert_answer_at_point(model, dived, 1.0e-6)
@@ -311,8 +314,8 @@ test "the primal heuristic finds an incumbent the tree has not reached yet" {
 /// to finish, the run still ends at the limit rather than at an answer.
 test "the primal heuristic does not turn a limit into an answer" {
   let model = one_fractional_step_mip()
-  let result = solve_mip(model, MipOptions::with_max_nodes(2))
-  assert_eq(result.status, MipStatus::NodeLimit)
+  let result = @mip.solve_mip(model, @mip.MipOptions::with_max_nodes(2))
+  assert_eq(result.status, @mip.MipStatus::NodeLimit)
   assert_true(result.message.length() > 0)
   if result.values.length() > 0 {
     assert_answer_at_point(model, result, 1.0e-6)
@@ -323,8 +326,8 @@ test "the primal heuristic does not turn a limit into an answer" {
 /// The relaxation is fractional, so the answer only appears after branching.
 test "branching finds the integer optimum of a fractional relaxation" {
   let model = two_variable_mip()
-  let result = solve_mip(model, MipOptions::default())
-  assert_eq(result.status, MipStatus::Optimal)
+  let result = @mip.solve_mip(model, @mip.MipOptions::default())
+  assert_eq(result.status, @mip.MipStatus::Optimal)
   assert_true(@core.approx_eq(result.objective, 10.0, rel=1.0e-9, abs=1.0e-9))
   assert_answer_at_point(model, result, 1.0e-6)
   assert_true(result.nodes > 1)
@@ -336,8 +339,8 @@ test "branching finds the integer optimum of a fractional relaxation" {
 /// A feasible relaxation with no integer point: proved infeasible, with no incumbent.
 test "a model with no integer point is proved infeasible" {
   let model = no_integer_point_mip()
-  let result = solve_mip(model, MipOptions::default())
-  assert_eq(result.status, MipStatus::Infeasible)
+  let result = @mip.solve_mip(model, @mip.MipOptions::default())
+  assert_eq(result.status, @mip.MipStatus::Infeasible)
   assert_eq(result.values.length(), 0)
   assert_eq(result.verified, result.nodes)
   assert_true(result.nodes > 1)
@@ -348,8 +351,8 @@ test "a model with no integer point is proved infeasible" {
 /// is unbounded, because an improving ray carries no integrality of its own.
 test "an unbounded relaxation is not reported as an unbounded model" {
   let model = unbounded_relaxation_mip()
-  let result = solve_mip(model, MipOptions::default())
-  assert_eq(result.status, MipStatus::UnboundedRelaxation)
+  let result = @mip.solve_mip(model, @mip.MipOptions::default())
+  assert_eq(result.status, @mip.MipStatus::UnboundedRelaxation)
   assert_eq(result.values.length(), 0)
   assert_eq(result.nodes, 1)
   assert_eq(result.verified, 1)
@@ -363,8 +366,11 @@ test "a node budget stops the run without claiming optimality" {
   let model = two_variable_mip()
   // Cuts off: this is a test about what a budget of one relaxation leaves behind, and a
   // round of cuts at the root would spend a second relaxation to tighten it.
-  let result = solve_mip(model, MipOptions::with_max_nodes(1).without_cuts())
-  assert_eq(result.status, MipStatus::NodeLimit)
+  let result = @mip.solve_mip(
+    model,
+    @mip.MipOptions::with_max_nodes(1).without_cuts(),
+  )
+  assert_eq(result.status, @mip.MipStatus::NodeLimit)
   assert_eq(result.nodes, 1)
   assert_eq(result.values.length(), 0)
   assert_true(@core.approx_eq(result.bound, 73.0 / 6.0, rel=1.0e-9, abs=1.0e-9))
@@ -378,9 +384,9 @@ test "a node budget stops the run without claiming optimality" {
 /// at a limit and say so, not stop as `Unverified`.
 test "a relaxation that reaches no verdict ends the run at a limit" {
   let model = two_variable_mip()
-  let options = MipOptions::default().with_node_solver(never_finishes)
-  let result = solve_mip(model, options)
-  assert_eq(result.status, MipStatus::NodeLimit)
+  let options = @mip.MipOptions::default().with_node_solver(never_finishes)
+  let result = @mip.solve_mip(model, options)
+  assert_eq(result.status, @mip.MipStatus::NodeLimit)
   assert_eq(result.nodes, 1)
   assert_eq(result.verified, 0)
   assert_eq(result.values.length(), 0)
@@ -396,8 +402,8 @@ test "the sentinel upper bound does not stop branching" {
   let x = model.add_var("x", lb=0.0, is_int=true)
   model.set_objective([(x, 1.0)])
   model.add_constraint([(x, 1.0)], @model.Rel::LessEqual, 5.5)
-  let result = solve_mip(model, MipOptions::default())
-  assert_eq(result.status, MipStatus::Optimal)
+  let result = @mip.solve_mip(model, @mip.MipOptions::default())
+  assert_eq(result.status, @mip.MipStatus::Optimal)
   assert_true(@core.approx_eq(result.objective, 5.0, rel=1.0e-9, abs=1.0e-9))
   assert_answer_at_point(model, result, 1.0e-6)
 }
@@ -407,8 +413,11 @@ test "the sentinel upper bound does not stop branching" {
 /// off changes that count and nothing else about the answer.
 test "verification counts every node and changes nothing else" {
   let model = two_variable_mip()
-  let checked = solve_mip(model, MipOptions::default())
-  let unchecked = solve_mip(model, MipOptions::default().without_verification())
+  let checked = @mip.solve_mip(model, @mip.MipOptions::default())
+  let unchecked = @mip.solve_mip(
+    model,
+    @mip.MipOptions::default().without_verification(),
+  )
   assert_eq(checked.verified, checked.nodes)
   assert_eq(unchecked.verified, 0)
   assert_eq(unchecked.nodes, checked.nodes)
@@ -432,9 +441,11 @@ test "verification counts every node and changes nothing else" {
 /// which leave `x` with an improving direction.
 test "a plausible but wrong relaxation is refused" {
   let model = two_variable_mip()
-  let options = MipOptions::default().with_node_solver(claims_optimal_at_origin)
-  let result = solve_mip(model, options)
-  assert_eq(result.status, MipStatus::Unverified)
+  let options = @mip.MipOptions::default().with_node_solver(
+    claims_optimal_at_origin,
+  )
+  let result = @mip.solve_mip(model, options)
+  assert_eq(result.status, @mip.MipStatus::Unverified)
   assert_eq(result.nodes, 1)
   assert_eq(result.verified, 0)
   assert_true(result.message.length() > 0)
@@ -446,9 +457,9 @@ test "a plausible but wrong relaxation is refused" {
 /// Farkas ray rather than about a missing array.
 test "a wrong infeasibility claim is refused" {
   let model = two_variable_mip()
-  let options = MipOptions::default().with_node_solver(claims_infeasible)
-  let result = solve_mip(model, options)
-  assert_eq(result.status, MipStatus::Unverified)
+  let options = @mip.MipOptions::default().with_node_solver(claims_infeasible)
+  let result = @mip.solve_mip(model, options)
+  assert_eq(result.status, @mip.MipStatus::Unverified)
   assert_true(result.message.length() > 0)
 }
 
@@ -459,8 +470,8 @@ test "a malformed model is not called infeasible" {
   let model = @model.Model::new(@model.Sense::Minimize)
   let x = model.add_var("x", lb=2.0, ub=1.0, is_int=true)
   model.set_objective([(x, 1.0)])
-  let result = solve_mip(model, MipOptions::default())
-  assert_eq(result.status, MipStatus::Invalid)
+  let result = @mip.solve_mip(model, @mip.MipOptions::default())
+  assert_eq(result.status, @mip.MipStatus::Invalid)
   assert_eq(result.nodes, 0)
   assert_true(result.message.length() > 0)
 }
@@ -560,16 +571,16 @@ test "the search agrees with enumeration on a random corpus" {
   for sample = 0; sample < 60; sample = sample + 1 {
     let model = random_mip_model(lcg)
     let expected = best_by_enumeration(model, tolerance)
-    let result = solve_mip(model, MipOptions::default())
+    let result = @mip.solve_mip(model, @mip.MipOptions::default())
     assert_eq(result.verified, result.nodes)
     match expected {
       None => {
         infeasible = infeasible + 1
-        assert_eq(result.status, MipStatus::Infeasible)
+        assert_eq(result.status, @mip.MipStatus::Infeasible)
       }
       Some(value) => {
         optimal = optimal + 1
-        if result.status != MipStatus::Optimal {
+        if result.status != @mip.MipStatus::Optimal {
           fail(
             "sample " +
             sample.to_string() +

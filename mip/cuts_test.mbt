@@ -62,14 +62,14 @@ fn mixed_cut_mip() -> @model.Model {
 
 ///|
 /// The name of a status, so a failure says which one it got instead of a record.
-fn cut_status_name(status : MipStatus) -> String {
+fn cut_status_name(status : @mip.MipStatus) -> String {
   match status {
-    MipStatus::Optimal => "optimal"
-    MipStatus::Infeasible => "infeasible"
-    MipStatus::NodeLimit => "node-limit"
-    MipStatus::UnboundedRelaxation => "unbounded-relaxation"
-    MipStatus::Unverified => "unverified"
-    MipStatus::Invalid => "invalid"
+    @mip.MipStatus::Optimal => "optimal"
+    @mip.MipStatus::Infeasible => "infeasible"
+    @mip.MipStatus::NodeLimit => "node-limit"
+    @mip.MipStatus::UnboundedRelaxation => "unbounded-relaxation"
+    @mip.MipStatus::Unverified => "unverified"
+    @mip.MipStatus::Invalid => "invalid"
   }
 }
 
@@ -78,13 +78,13 @@ fn cut_status_name(status : MipStatus) -> String {
 /// whole optimum — which the search also reaches without cuts, by branching.
 test "the root tightens itself with a cut and still proves the whole optimum" {
   let model = cut_friendly_mip()
-  let base = MipOptions::default()
-  let with_cuts = solve_mip(model, base)
+  let base = @mip.MipOptions::default()
+  let with_cuts = @mip.solve_mip(model, base)
   assert_eq(cut_status_name(with_cuts.status), "optimal")
   assert_true(with_cuts.cuts > 0)
   assert_eq(with_cuts.verified, with_cuts.nodes)
   assert_true(@core.fabs(with_cuts.objective - 2.0) < 1.0e-7)
-  let without_cuts = solve_mip(model, base.without_cuts())
+  let without_cuts = @mip.solve_mip(model, base.without_cuts())
   assert_eq(without_cuts.cuts, 0)
   assert_eq(cut_status_name(without_cuts.status), "optimal")
   assert_true(@core.fabs(without_cuts.objective - 2.0) < 1.0e-7)
@@ -102,9 +102,9 @@ test "cut generation never changes the answer" {
     mixed_cut_mip(),
   ]
   for model in models {
-    let base = MipOptions::default()
-    let with_cuts = solve_mip(model, base)
-    let without_cuts = solve_mip(model, base.without_cuts())
+    let base = @mip.MipOptions::default()
+    let with_cuts = @mip.solve_mip(model, base)
+    let without_cuts = @mip.solve_mip(model, base.without_cuts())
     assert_eq(
       cut_status_name(with_cuts.status),
       cut_status_name(without_cuts.status),
@@ -125,10 +125,10 @@ test "cut generation never changes the answer" {
 /// treat it as a bound it had earned.
 test "a deliberately weakened cut is refused rather than added" {
   let model = cut_friendly_mip()
-  let options = MipOptions::default().with_cut_hook(fn(cut) {
+  let options = @mip.MipOptions::default().with_cut_hook(fn(cut) {
     { terms: cut.terms, rel: cut.rel, rhs: cut.rhs - 1.0, }
   })
-  let result = solve_mip(model, options)
+  let result = @mip.solve_mip(model, options)
   assert_eq(cut_status_name(result.status), "unverified")
   assert_eq(result.cuts, 0)
   assert_true(result.message.length() > 0)
@@ -141,10 +141,10 @@ test "a deliberately weakened cut is refused rather than added" {
 /// the integer optimum — the outcome this whole file is about.
 test "a cut that removes the integer optimum is refused" {
   let model = cut_friendly_mip()
-  let options = MipOptions::default().with_cut_hook(fn(cut) {
+  let options = @mip.MipOptions::default().with_cut_hook(fn(cut) {
     { terms: cut.terms, rel: cut.rel, rhs: cut.rhs + 1.0, }
   })
-  let result = solve_mip(model, options)
+  let result = @mip.solve_mip(model, options)
   assert_eq(cut_status_name(result.status), "unverified")
   assert_eq(result.cuts, 0)
 }
@@ -155,12 +155,12 @@ test "a cut that removes the integer optimum is refused" {
 /// having remembered to turn it on.
 test "no cuts means nothing to refuse" {
   let model = cut_friendly_mip()
-  let options = MipOptions::default()
+  let options = @mip.MipOptions::default()
     .without_cuts()
     .with_cut_hook(fn(cut) {
       { terms: cut.terms, rel: cut.rel, rhs: cut.rhs + 1.0, }
     })
-  let result = solve_mip(model, options)
+  let result = @mip.solve_mip(model, options)
   assert_eq(cut_status_name(result.status), "optimal")
   assert_eq(result.cuts, 0)
   assert_true(@core.fabs(result.objective - 2.0) < 1.0e-7)

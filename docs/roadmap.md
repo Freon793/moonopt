@@ -582,9 +582,35 @@ presolve 的其余归约、DeVex 定价）与两条遗留（`fast0507` 类实例
   同轮还处理了 CI 的一次"无代码改动变红"：工具链跟踪 `latest`，当天发布的编译器开始把
   `implicit_impl_as_method`（E0079）与 `test_unqualified_package` 当作默认开启的警告，`--deny-warn` 因此全红。
   **E0079 已完整迁移**（9 个包的 `extends.mbt`、31 类型 / 51 条声明，`#doc(hidden)` 保证 `.mbti` 未变），
-  第二项（黑盒测试里 `@pkg.Name` 限定，实测 5 个文件约 144 处）**留作下一轮**（改测试文件要重跑全部报告，
-  那是单独一轮的账），并把 **CI 的工具链版本钉住 `0.1.20260904`** —— 跟踪 `latest` 会让一次发布
-  在零代码改动时让 CI 全红，而四份报告记录的正是那个版本的产出（详见 `CHANGELOG.md`）。
+  第二项（黑盒测试里 `@pkg.Name` 限定，当时估计 5 个文件约 144 处 —— **该估计过宽，第二十轮实测是 3 个文件
+  81 处**）**留作下一轮**（改测试文件要重跑全部报告，那是单独一轮的账），并把 **CI 的工具链版本钉住
+  `0.1.20260904`** —— 跟踪 `latest` 会让一次发布在零代码改动时让 CI 全红，而四份报告记录的正是那个版本的产出
+  （详见 `CHANGELOG.md`）。**这条钉版政策在第二十轮被实测推翻**（action 拒绝版本号，CDN 也没有钉版制品），
+  且它自己就是那次全红的直接原因，见下。
+- **第二十轮（已落地：CI 从"钉版本"改成"钉事实"，并完成 `test_unqualified_package` 迁移）**：上一轮给
+  `setup-moonbit` 加的 `with: version: "0.1.20260904"` 让**五个 job 全部死在 `install` 步骤**
+  （`unsupported version: 0.1.20260904`）。读一手来源量清了两件事：
+  ① 该 action 的 `normalizeVersion()` 只认 `latest|nightly|pre-release|stable|bleeding` 五个关键字，
+  其余一律抛错 —— **通过它钉版本在接口层面不存在**；② 官方安装脚本本身**接受**版本参数
+  （`unix.sh:105`、`powershell.ps1` 的 `$env:MOONBIT_INSTALL_VERSION`），但
+  **`cli.moonbitlang.com` 上 10 个版本号的制品全部 403 AccessDenied**（`binaries/` 与 `cores/`、
+  `.tar.gz`/`.zip`/`.sha256` 都试过），只有 `latest`/`nightly`/`pre-release` 返回 200，
+  对 `latest` 发 Range 请求返回 206 ⇒ **403 是 CDN 策略、不是探测假象**，没有可钉的制品。
+  ⇒ **改回 `latest`**，用三件事替代钉版：**(a)** 推送前在本机对着已发布工具链验干净
+  （本轮把 `latest`＝`moon 0.1.20260920` / `moonc v0.10.14+7d59c7ec9` 装进独立 `MOON_HOME`，
+  压缩包 sha256 与公布值一致）；**(b)** 两个 job 各加 `::notice title=toolchain::`，
+  把每次运行真正用的工具链写进**注解**（注解匿名可读，job 日志要鉴权 —— 不钉版又不记版本，
+  留下的结论就没人能归因）；**(c)** 报告跟着 CI 的工具链重生成（四份报告本来就记录 `- Toolchain:`，
+  `report.ps1` 在不一致时会写 `(reports disagree)`）。
+  迁移：权威清单来自**本机一次不带 `--deny-warn` 的 `moon check`**（`--deny-warn` 会在第一个有警告的包上停下），
+  实测 **81 条 `[0025]`、0 错误、3 个文件**；本轮替换 **81 处**（`mip/mip_test.mbt` 58、`mip/cuts_test.mbt` 19、
+  `simplex/differential_test.mbt` 4）。验证（两套工具链都跑）：清 `_build` 全量重编译 **38 个任务、0 警告 0 错误**，
+  `--deny-warn` 退出码 **0**；测试 native / wasm-gc / js 各 **172/172**；`moon info` 后 **`.mbti` 一行未变**。
+  还量到一条对本项目长期有用的事实：**两版 `moon fmt` 的输出逐字节相同**（三个文件 SHA256 逐一比对），
+  所以开发机停在旧工具链不会和 CI 的 `format diff` 步骤打架；`fmt`/`info` 这两步靠 `git diff --exit-code`，
+  新工具链只要重排一行就会在零语义改动下变红，本轮实测它没有。
+  另一条过程教训：**增量缓存会让"0 警告"变成空话** —— 改完第一次 `moon check` 报 `ran 2 tasks, now up to date`
+  （没有真正重编译），删掉 `_build` 全量重编译才拿到 `ran 38 tasks` 与不带警告后缀的摘要行。
 - **已知缺陷（仍未修，与上一轮无关）**：**Farkas 射线的构造本身**（"Phase I 的对偶解即射线"）
   仍然没有证据 —— 第九轮修掉的是那个可复现的被拒案例（它是假不可行），不是这条构造。
   能说的是：校验器每次独立复核，没有证据的射线不可能通过。要给它证据，需要一条**真的不可行**且

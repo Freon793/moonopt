@@ -214,7 +214,7 @@ test "a model that is feasible by construction is never called infeasible" {
   let mut optimal = 0
   for sample = 0; sample < 40; sample = sample + 1 {
     let model = feasible_model_by_construction(10000 + sample)
-    let result = match solve_model(model) {
+    let result = match @simplex.solve_model(model) {
       Ok(value) => value
       Err(reason) => fail("kernel refused the model: " + reason)
     }
@@ -275,7 +275,7 @@ test "kernel agrees with the reference solver on random LPs" {
   let mut unbounded = 0
   for seed = 1; seed <= 200; seed = seed + 1 {
     let (variables, cost, rows) = random_case(seed)
-    let kernel = solve_standard(variables, cost, rows)
+    let kernel = @simplex.solve_standard(variables, cost, rows)
     // The reference solver maximises, so it receives the negated cost.
     let negated : Array[Double] = []
     for j = 0; j < variables; j = j + 1 {
@@ -398,7 +398,7 @@ test "kernel agrees with the reference solver on random bounded LPs" {
       }
       model.add_constraint(terms, rel, rhs)
     }
-    let kernel = match solve_model(model) {
+    let kernel = match @simplex.solve_model(model) {
       Ok(result) => result
       Err(reason) => fail("kernel refused a continuous model: " + reason)
     }
@@ -501,7 +501,7 @@ test "kernel respects the row data on shifted and rounded instances" {
       }
       scaled.push((tweaked, rel, rhs * 0.5 + 0.25))
     }
-    let kernel = solve_standard(variables, cost, scaled)
+    let kernel = @simplex.solve_standard(variables, cost, scaled)
     match kernel.status {
       Optimal => {
         if !is_feasible(kernel.values, scaled, 1.0e-6) {

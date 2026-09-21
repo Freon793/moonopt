@@ -5,6 +5,81 @@
 
 ## [Unreleased]
 
+### Fixed — CI 的"钉住工具链"政策实测不可执行，改回 `latest` 并用三件事替代；同时完成 `test_unqualified_package` 迁移
+
+**现象**：`56c6c7b` 推送后 CI 五个 job 全红，失败步骤都是 `install`，报错原文
+`unsupported version: 0.1.20260904` —— 上一轮为了"钉住工具链"给 `setup-moonbit` 加的
+`with: version:` 正是失败原因本身。
+
+**排查（两条都读一手来源，不猜）**：
+
+① **该 action 不接受版本号**。读它被钉住的那个 SHA 的源码：`normalizeVersion()` 只认
+`latest | nightly | pre-release | stable | bleeding` 五个关键字（`stable`→`latest`、`bleeding`→`nightly`），
+其余一律 `throw new Error("unsupported version: ${input}")`。它安装的方式是把官方脚本**用关键字**管道执行
+（`curl -fsSL .../unix.sh | bash -s latest`；Windows 走 `MOONBIT_INSTALL_VERSION=latest` + `irm ... | iex`），
+带版本号的 URL 只被 `fetchSha256` 用来算缓存键，且那里失败只 `warning` 不失败。
+⇒ 通过这个 action 钉版本**在接口层面就不存在**。
+
+② **绕开 action 自行安装钉版工具链也没有货**。官方安装脚本**确实**接受版本参数
+（`unix.sh` 第 105 行 `version=${ARGUMENTS[0]:-${MOONBIT_INSTALL_VERSION:-latest}}`；
+`powershell.ps1` 读 `$env:MOONBIT_INSTALL_VERSION`，用的是 `cores/core-$Version.zip` 并硬链 `moonx.exe`），
+所以堵点不在脚本，在 CDN：**2026-09-21 探测 `cli.moonbitlang.com`，10 个版本号**
+（`0.1.20260921/20/19/14/07/04`、`v0.1.…`、`0.1.20260920%2B7d59c7ec9` 等，覆盖 `binaries/` 与 `cores/`、
+`.tar.gz`/`.zip`/`.sha256`）**全部返回 S3 风格的 `403 <Error><Code>AccessDenied</Code></Error>`**，
+只有 `latest` / `nightly` / `pre-release` 返回 200；对 `latest` 发 `Range: bytes=0-0` 返回 **206**
+⇒ **403 是 CDN 的策略，不是探测手法造成的假象**。没有可下载的钉版制品，"确定性"就无处可钉。
+
+**决定：选项 A —— 回到 action 默认的 `latest`，用三件事替代钉版**（选项 B = 自装钉版工具链，被上面②否掉）：
+
+1. **推送前在本机对着"已发布的那套工具链"验干净**，而不是让五个红 job 去发现。本轮把 `latest`
+   （`moon 0.1.20260920 (914d7da 2026-09-20)` / `moonc v0.10.14+7d59c7ec9 (2026-09-18)` / `moonrun 0.1.20260920`）
+   装进独立 `MOON_HOME`（`%TEMP%\moon-latest`，用 `Path` 前缀切换，不动系统 PATH）；
+   下载的是 `binaries/latest/moonbit-windows-x86_64.zip` + `cores/core-latest.zip`，
+   **压缩包 sha256 `faae225a8287d0ce69e44b5b3f754af988e97f4446056d8f32ceb3ddb998fce7` 与官方公布值一致**，
+   随后在 `lib/core` 里跑安装脚本自己会跑的两条 `moon bundle`。
+2. **每次运行把工具链写进注解**：两个 job 各加一条 `::notice title=toolchain::$(moon version --all)`。
+   理由是本轮再次确认的那条事实 —— **job 日志要鉴权才读得到，annotations 匿名可读**，
+   而一套不钉版又不记录版本的工具链，留下的是一份**没人能归因**的结论。
+3. **报告用 CI 所跑的那套工具链重生成**（四份报告本来就在头部记录 `- Toolchain:`，
+   `bench/report.ps1` 还会在几份报告的工具链行不一致时写出 `(reports disagree)`）。
+   上一轮"钉版本"的第二个理由正是"报告与 CI 要说同一件事"，在无法钉版的前提下，
+   唯一能满足它的做法是让报告跟着 CI 走。
+
+**迁移本身（上一轮留下的第二项）**：权威清单不是 grep 估的，是**本机用新工具链跑一次不带
+`--deny-warn` 的 `moon check`** 得到的 —— **81 条 `[0025] test_unqualified_package`、0 错误、3 个文件**。
+本轮替换 **81 处**：`mip/mip_test.mbt` 58、`mip/cuts_test.mbt` 19、`simplex/differential_test.mbt` 4
+（`@mip.MipStatus/MipOptions/MipResult/NodeStatus/NodeSolution/solve_mip`、`@simplex.solve_model/solve_standard`）。
+**上一轮"5 个文件约 144 处"的估计过宽**：`model/model_test.mbt`、`verify/verify_test.mbt`、`verify/cuts_test.mbt`
+一条警告都没有（它们引用的是别的包，本来就写着 `@pkg.`）。替换用带词边界与 `(?<![\w.@])` 反向断言的正则，
+所以 `@oracle.solve_standard` 这类已限定的引用不会被二次前缀化，`solve_mip` 也不会误伤更长的同前缀标识符。
+
+**验证（两套工具链都跑，数字如下）**：
+
+| 项目 | `0.1.20260920`（CI 将跑的） | `0.1.20260904`（开发机默认） |
+| --- | --- | --- |
+| 清 `_build` 全量 `moon check` | 38 个任务，**0 警告 0 错误** | — |
+| `moon check --deny-warn` | 退出码 **0** | 退出码 **0** |
+| `moon test`（native / wasm-gc / js） | **172/172** ×3 | native **172/172** |
+| `moon fmt` 后 `git diff` | 空 | **与新版输出逐字节相同**（三个文件 SHA256 逐一比对） |
+| `moon info` 后 `.mbti` | **一行未变** | `git status` 只有那 3 个测试文件 |
+
+`fmt`/`info` 两行是本轮专门量的 CI 风险点：`format diff` 与 `info check` 两步都靠 `git diff --exit-code`，
+只要新工具链重排一行源码或改一行 `.mbti`，**在零语义改动下也会红**。实测两版排版一致、`.mbti` 不动，
+所以这两步在 `latest` 上过得去，也不需要提交任何重生成产物。
+
+**两处过程事实（值得长期记住）**：
+
+① **编辑器缓存可能给出与磁盘不符的文件内容**。本轮 `read` 工具渲染 `mip/mip_test.mbt` 时给出了一份
+**旧版内容**（含磁盘上并不存在的 `with_node_hook(solve_node=…, verify_node=…)` 与
+`solve_mip_with_failing_node`），而真实 API 是 `with_node_solver(…)`。三处独立读法互相印证才定案：
+`[IO.File]::ReadAllBytes` 量出 603 行纯 LF、`Select-String` 的行列号、以及**编译器自己报的行列号**
+（`435:16`、`436:16`、`437:28` 与磁盘一致，与那份渲染不一致）；`git hash-object` 也确认磁盘 == `HEAD`
+（blob `544de71`）。⇒ **动手改之前，用第二个读法核对将要匹配的字面串**；`edit` 按字面匹配（不按行号）
+正是这次没被带偏的原因。
+② **增量缓存会让"0 警告"变成空话**。改完第一次 `moon check` 报的是 `ran 2 tasks, now up to date`
+（缓存命中、没有真正重编译，那份"0 警告"不作数）；**删掉 `_build` 全量重编译**得到 `ran 38 tasks` 且
+摘要行**不再带 `(81 warnings, 0 errors)` 后缀**，才是证据。CI 每次都是全新 checkout，天然全量。
+
 ### Fixed — 新工具链的 E0079：把 trait 方法的隐式提升写成显式声明（含完整的排查链）
 
 **现象**：推送 `cf7667a` 后 CI 五个 job 全红，失败步骤是 `moon check --deny-warn`（三个平台）与
