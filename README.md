@@ -8,7 +8,7 @@
 presolve/postsolve、可复用的分支切割框架，以及**可被第三方独立校验**的最优性（对偶可行解）、
 不可行性（Farkas）与无界（射线）证书。纯 MoonBit 实现，无 FFI 依赖。
 
-> 状态：**v0.1.0**，已发布到 mooncakes.io（`moon add Freon793/moonopt`）。`M1`（基础层与模型层）、`M2`（标准模型输入）、`M4`（证书与独立校验器）已完成，
+> 状态：**v0.1.1**，已发布到 mooncakes.io（`moon add Freon793/moonopt`）。`M1`（基础层与模型层）、`M2`（标准模型输入）、`M4`（证书与独立校验器）已完成，
 > `M3`（稀疏求解内核）完成标准已满足，`M5`（整数规划）完成标准①②③全部满足：分支定界 + 根割 + **每个松弛都由独立校验器复核**。这条复核先后拦下六次被拒证书，
 > 基准报告的入口是 [`bench/report.md`](bench/report.md)（`bench/report.ps1` 生成）：四份报告的索引、
 > 一键复现命令，以及**每份报告是否仍被当前代码支持**（按报告自己记的提交与它依赖的源路径差分判定，
@@ -29,7 +29,7 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 > 同一份清单是 **20 个求到最优**，只有 `fast0507` 仍到上限 —— 两个上限下的计数是两场实验，不可互相比较；
 > 18 个重建解全部在原模型上通过行、界与目标值三项检查，18 项松弛值经 MIPLIB 官方最优值表
 > 交叉校验、**0 违反**，见 [`bench/solve-report.md`](bench/solve-report.md)）。
-> 已发布到 mooncakes.io（首版 `0.1.0`）：`moon add Freon793/moonopt`。
+> 已发布到 mooncakes.io（当前 `0.1.1`）：`moon add Freon793/moonopt`。
 > 分支定界的第一份报告已经写出（[`bench/mip-report.md`](bench/mip-report.md)：32 个实例
 > **1 最优 / 14 节点预算 / 17 跳过 / 0 被拒证书**，`22433` 与官方最优值取等、0 违反）。
 > 报告指出的缺口是"到预算的实例没有整数点、界因此剪不掉东西"，第四轮据此加了**取整启发式（下潜）**：
@@ -77,7 +77,7 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 > （`cmd/main` 的演示里能看到松弛给 12.1667、整数答案是 10，以及一次"预算到顶"的诚实报告）。
 > 里程碑划分、范围闸门与明确**不做**的内容见 [`docs/roadmap.md`](docs/roadmap.md)。
 
-## 当前能力（M1、M2 已落地；M3 完成标准已满足；M4 已完成；M5 十五轮已落地）
+## 当前能力（M1、M2、M4 已完成；M3 完成标准已满足；M5 完成标准①②③全部满足）
 
 已经可用并且有测试覆盖的部分：
 
@@ -122,7 +122,8 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
   `--solve` / `--relax` / `--presolve` / `--max-rows` / `--max-iterations` 求解开关、
   `--verify` / `--certificate` 证书校验、`--reoptimize` 热启动实测、
   `--mip --max-nodes` 分支定界并在报告里独立复核解的行/界/整数性，失败返回非零退出码）；
-- CLI 与两个可运行示例，`moon test` 140 个测试全绿，CI 覆盖 Linux/macOS/Windows 与 wasm-gc/js 目标。
+- CLI 与两个可运行示例，`moon test` 172 个测试全绿，CI 覆盖 Linux/macOS/Windows 与 wasm-gc/js 目标
+  （检查 / 构建 / 测试三步各有独立步骤）。
 
 **当前内核的能力边界（明确写出来，不夸大）**：
 
@@ -130,7 +131,7 @@ presolve/postsolve、可复用的分支切割框架，以及**可被第三方独
 | --- | --- |
 | 连续变量、任意有限上下界、自由变量 | — |
 | **整数 / 0-1 变量**（`mip` 分支定界，每个松弛过 `verify`；公开入口 `Model::solve` 与 `cmd/parse --mip` 都走它；实测**四个** MIPLIB 实例证到官方最优值） | **节点上的割与多行 MIR 聚合**、整数无界性的证明（需要整数射线，松弛无界当前只报 `NotSolved`/`UnboundedRelaxation`）；割目前只在根节点做（`--cut-rounds`，默认 2 轮）；内核不为一组写不出符号约定的乘子另找一份证明，而是把该松弛记成"无结论"（因此丢掉它的界，见 CHANGELOG 第十五轮的限度） |
-| **带证明的割**（根松弛的表行按混合整数舍入成割，每条割附"由哪一行舍入而来"的证明，`verify_cut` 独立**重新推导**后才允许进入模型；拒绝即停成 `Unverified`；`MipResult::cuts` 与报告的 `cuts` 列可追溯） | 割族目前只有对**单行**的舍入（多行 MIR 聚合第十六轮实测净收益为负、已回退，补割未做）；割轮次不改善根松弛时整轮丢弃；一轮里各候选割的违背量**完全并列**，所以上限在候选多于它时实际是按行序截断 —— 第十六~十八轮量了五种选择/规模规则（efficacy、按候选实测抬起的界、联合增益贪心、上限翻倍），**没有一种在"界"与"证明成本"两个轴上同时赢过行序取满上限**（详见 `CHANGELOG.md` 与 `docs/roadmap.md`）：割的价值是**树**的属性而不是**根松弛**的属性 |
+| **带证明的割**（根松弛的表行按混合整数舍入成割，每条割附"由哪一行舍入而来"的证明，`verify_cut` 独立**重新推导**后才允许进入模型；拒绝即停成 `Unverified`；`MipResult::cuts` 与报告的 `cuts` 列可追溯） | 割族目前只有对**单行**的舍入（多行 MIR 聚合第十六、二十一轮实测净收益为负、已回退，补割未做）；割轮次不改善根松弛时整轮丢弃；一轮里各候选割的违背量**完全并列**，所以上限在候选多于它时实际是按行序截断 —— 第十六~十八轮量了五种选择/规模规则（efficacy、按候选实测抬起的界、联合增益贪心、上限翻倍），**没有一种在"界"与"证明成本"两个轴上同时赢过行序取满上限**（详见 `CHANGELOG.md` 与 `docs/roadmap.md`）：割的价值是**树**的属性而不是**根松弛**的属性 |
 | `≤`、`≥`、`=` 任意混合，含负右端项 | — |
 | min / max | — |
 | **对偶单纯形热启动**：`SimplexBasis` + `solve_model_with_basis`，改界后重解不再重建 Phase I（实测真实实例枢轴数 1–49 vs 冷启 21–1008） | 化简模型上的热启动（基与化简后模型同构时才能用） |
@@ -237,7 +238,7 @@ Phase II 仍是最大的一道墙 —— 而它的成因在**定价**：Dantzig 
 | 报告是否仍被当前代码支持，有机械化判定 | `bench/report.md` 的 `generated at` 与 `code behind it` 两列（`STALE (N changed since)`） | 判据保守：改注释也算改 |
 | 依赖边界（可被审阅的架构事实） | `verify/moon.pkg` 不 import `simplex`；库包不引 `moonbitlang/x`（只有 `cmd/parse` 引） | 这是"校验器与求解器不共享状态"的可检查形式 |
 | 三目标全绿 | `moon test --deny-warn`、`--target wasm-gc`、`--target js`（当前 172 个测试） | 发布前必须重跑（M6 完成标准之一） |
-| 已发布（mooncakes.io 的 `Freon793/moonopt` 0.1.0） | `moon.mod` 的 `version = "0.1.0"`；注册表页面；发布物的自包含与公开面四项契约的验收见 `docs/roadmap.md` 的 M6 E 轮 | 首版；语义版本号从 `0.1.0` 起，之后按 SemVer 递增 |
+| 已发布（mooncakes.io 的 `Freon793/moonopt`，当前 `0.1.1`） | `moon.mod` 的 `version`；注册表页面；发布物的自包含与公开面四项契约的验收见 `docs/roadmap.md` 的 M6 E 轮 | 语义版本号从 `0.1.0` 起，之后按 SemVer 递增（`0.1.1` 是元数据与文档修正，无行为改动） |
 
 ## 为什么需要它
 
@@ -274,7 +275,7 @@ MoonBit 生态已经有一批排产、排班、路由、装箱、约束模型库
 ## 快速开始
 
 ```bash
-moon add Freon793/moonopt   # 发布到 mooncakes.io 后可用
+moon add Freon793/moonopt   # 从 mooncakes.io 安装（当前 0.1.1）
 ```
 
 ```moonbit

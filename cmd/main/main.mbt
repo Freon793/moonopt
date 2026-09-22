@@ -1,17 +1,18 @@
 ///|
 /// `moonopt` command line interface.
 ///
-/// The first milestone keeps the surface deliberately small: it runs the built-in
-/// demos and prints a report, so that the project has a runnable entry point from
-/// day one. Argument parsing for `solve` / `verify` / `fmt` / `bench` arrives
-/// with the report layer — see `docs/roadmap.md`.
+/// It runs the built-in demos and prints a report for each one, including the model
+/// whose answer is "not solved" — a CLI that only ever shows successes would be
+/// hiding the boundary the library documents. Model files, certificates and the
+/// benchmark entry point live in the `parse` command (`cmd/parse`); this one stays a
+/// runnable entry point that needs no arguments or data files.
 ///
 /// Run with: `moon run cmd/main`
 
 ///|
 /// Reported version string. Kept in sync with `moon.mod` by hand until the CLI
 /// grows a real release command.
-let version : String = "0.1.0-dev"
+let version : String = "0.1.1"
 
 ///|
 /// Prints a solve result in a stable, greppable format.

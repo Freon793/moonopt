@@ -92,6 +92,13 @@ jobs:
           fi
           exit $code
 
+      # The repository requirements this project is submitted against ask CI to cover
+      # checking, building and testing. Testing does compile, but a reader of this file
+      # should not have to know that: the build is its own step so the coverage is visible
+      # where it is being looked for.
+      - name: moon build
+        run: moon build
+
       - name: format diff
         run: |
           moon fmt
@@ -172,6 +179,9 @@ jobs:
 
       - name: moon update
         run: moon update
+
+      - name: moon build (${{ matrix.target }})
+        run: moon build --target ${{ matrix.target }}
 
       - name: moon test (${{ matrix.target }})
         shell: bash

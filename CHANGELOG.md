@@ -7,6 +7,31 @@
 
 （下一轮开发在此累积。）
 
+## [0.1.1] — 2026-09-21
+
+补丁版本，起因是发布后对着参赛章程与 MoonBit 发布文档逐条核对（`0.1.0` 发布当天）。没有功能改动，
+但其中三项会让外部看到的东西与本仓库不一致，所以按语义化版本约定升 PATCH 重新发布：
+
+- **CI 补上显式的构建步骤**：章程的仓库要求是"使用持续集成工具并且覆盖**检查、构建、测试**流程"，
+  而工作流此前只有 `moon check` / `format diff` / `info check` / `moon test` —— 测试当然会编译，
+  但"构建"应当是读者能在工作流里直接看到的一步，而不是需要知道"测试顺带编译"才能推出来的结论。
+  现在 `check` job 有 `moon build`，`targets` job 有 `moon build --target <t>`。
+- **命令行打印的版本号此前是 `0.1.0-dev`**：它硬编码在 `cmd/main/main.mbt` 里、是 `moon run cmd/main`
+  的第一行输出，与 `moon.mod` 的版本脱节；现改为 `0.1.1`。
+- **`homepage` 没有加，这是本轮量出来的一个"文档 vs 实现"差**：MoonBit 的发布文档把 `homepage` 与
+  `license` / `keywords` / `repository` / `description` 并列为 `moon.mod` 的元数据，但**当前发布的工具链
+  直接拒绝它** —— 本机 `moon 0.1.20260920`（也就是 CI 装的 `latest`）实测原文是
+  `Unexpected key 'homepage' found in moon.mod.`，加上之后连 `moon check` / `moon test` 都无法开始
+  （`Failed to calculate build plan`）。按"CI 必须绿"优先撤下该字段，并把结论记在这里：
+  **文档列出但工具链不接受的字段不能用**，等工具链接受时再加。
+- **`cmd/main` 的包文档与包 README**：包文档此前还写着"第一个里程碑只跑内置示例，`solve` / `verify` /
+  `fmt` / `bench` 的参数解析将来才到"（早已落地），且该包在 mooncakes 上因"无公开 API + README 为空"
+  被自动标注为 "documentation contains no information"；两处都改成实际形态。
+- 顺带修掉 README 里两处过期表述：测试数 `140` → `172`；M5 从"十五轮已落地"改为"完成标准①②③全部满足"。
+
+**发布物仍按同样三件事验收**：归档自包含（解出来 `moon check --deny-warn` 干净、`moon test` 172/172）、
+不含任何第三方实例数据、以及一个只使用公开面的外部工程能编译并通过四项契约检查。
+
 ## [0.1.0] — 2026-09-21
 
 首发版本。它的内容就是下面这一整份日志：四份基准报告（解析 / 求解 / 分支定界两张口径）、
