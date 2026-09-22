@@ -115,7 +115,14 @@ You can browse and install extra skills here:
   - `cmd/main/`: demo CLI. `cmd/parse/`: model file inspection CLI. `examples/`:
     runnable examples. `bench/`: data policy, fetch and report scripts, reports.
     `docs/`: design notes, technical roadmap and the ecosystem survey that
-    defines the design boundary.
+    defines the design boundary. The documents have one job each and should not
+    overlap: `docs/design.md` (architecture, package boundaries), `docs/algorithms.md`
+    (what actually runs, each section ending in a checkable number), `docs/api.md`
+    (public contracts and statuses), `docs/acceptance.md` (submission requirements
+    mapped to evidence), `docs/ecosystem-survey.md` + `docs/related-work.md`
+    (external survey and its raw evidence). The root `README.md` is an entry point
+    only — capability table, promise-to-evidence table and pointers; the
+    round-by-round detail belongs to `CHANGELOG.md` and `docs/roadmap.md`.
 
 ## Coding convention
 
