@@ -200,6 +200,33 @@ fn State::row_multiplier_is_negative(
 }
 
 ///|
+/// Whether a Phase I optimum may be read as an infeasibility proof.
+///
+/// Phase I minimises the artificial sum subject to `A x + a = b`, so at its optimum the
+/// artificials are exactly what makes the rows hold: for a row the point violates by `v`, the
+/// artificial in it is `v`. The total artificial value therefore cannot be *smaller* than the
+/// largest violation it is supposed to be explaining — `Σ a ≥ max v` is what the two
+/// measurements have to satisfy before one of them can be read as a proof by the other.
+///
+/// That is not a formality. On MIPLIB's `noswot`, node 1558 (a 212 row relaxation) measured a
+/// raw row violation of `1.94e-6` while Phase I's artificials totalled `1.2e-11` — five orders
+/// of magnitude apart, about the same rows — and the dual solution offered as the Farkas ray
+/// for it certified nothing at all: the independent checker measured a margin of exactly zero.
+/// A point Phase I satisfied to eleven digits is not a point that violates the rows, so there
+/// is no certificate to write; a producer that writes one anyway hands the checker a claim it
+/// has to refuse, which stops a search that had nothing wrong with it.
+///
+/// `infeasibility_margin` is the same factor the residual test uses, on purpose: the two
+/// measurements come out of the same arithmetic and have to be judged on that footing rather
+/// than against a constant of their own.
+fn infeasibility_is_certified(
+  artificial_sum : Double,
+  raw_residual : Double,
+) -> Bool {
+  artificial_sum * infeasibility_margin >= raw_residual
+}
+
+///|
 /// The recession direction of an unbounded verdict, one entry per model variable.
 ///
 /// In kernel columns the direction is a single vector: the entering column moves by

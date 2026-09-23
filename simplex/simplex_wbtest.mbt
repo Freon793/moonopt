@@ -696,3 +696,25 @@ test "an optimal run emits the multipliers it measured" {
   }
   assert_true(optimal > 0)
 }
+
+///|
+/// The necessary condition between the two Phase I measurements, which is what decides whether
+/// an infeasibility claim may be made at all. A total artificial value that cannot absorb the
+/// violation it would be proving is not a proof of anything; the numbers below are the ones
+/// measured on MIPLIB's `noswot` node 1558, where the kernel used to claim infeasibility and
+/// the independent checker then measured a Farkas margin of exactly zero — stopping a search
+/// that had nothing wrong with it.
+test "an infeasibility claim needs artificials that can account for the violation" {
+  // The measured failure: five orders of magnitude apart, about the same rows.
+  assert_false(
+    infeasibility_is_certified(1.204507679712393e-11, 1.942741867821951e-6),
+  )
+  // Real infeasibilities on the same instance: the artificials dwarf the violation.
+  assert_true(infeasibility_is_certified(2.5840360220461505, 0.833001000000003))
+  assert_true(infeasibility_is_certified(1.6667000000082763, 1.0))
+  // The boundary is the margin, not equality: `Σ a = raw` passes, `Σ a = raw/20` does not.
+  assert_true(infeasibility_is_certified(1.0, 10.0))
+  assert_false(infeasibility_is_certified(0.5, 10.0))
+  // An exact zero artificial sum is the trivial combination whatever the residual says.
+  assert_false(infeasibility_is_certified(0.0, 1.0e-6))
+}

@@ -1560,13 +1560,40 @@ fn solve_once(
     )
     let artificial_sum = state.artificial_sum()
     if phase1_scaled > infeasibility_margin * options.feasibility_tolerance {
+      // The residual above measures a violation. Whether the run may *claim* infeasibility is
+      // a question about the certificate, and the certificate is the dual solution of this
+      // same Phase I optimum. When the artificials cannot account for the violation they would
+      // be proving, that dual solution proves nothing (see `infeasibility_is_certified`), so
+      // no claim is made: the run reports that it has no proof rather than a claim the checker
+      // has to refuse — and a refusal is what stops a search that has nothing wrong with it.
+      // Same choice, and the same rule, as the dual sign self-check on the optimality side.
+      if !infeasibility_is_certified(artificial_sum, phase1_raw) {
+        return {
+          status: NumericalFailure,
+          values: [],
+          objective: 0.0,
+          iterations: state.iterations,
+          duals: [],
+          ray: [],
+          basis: None,
+          message: "the rows measure as violated but phase one satisfied them, so there is no infeasibility certificate: scaled row residual " +
+          phase1_model_scaled.to_string() +
+          ", raw " +
+          phase1_raw.to_string() +
+          ", artificial sum " +
+          artificial_sum.to_string() +
+          " (artificials below raw/" +
+          infeasibility_margin.to_string() +
+          " cannot absorb the violation they would be proving)",
+        }
+      }
       return {
         status: Infeasible,
         values: [],
         objective: 0.0,
         iterations: state.iterations,
-        // The duals of the Phase I optimum are a Farkas ray: they certify that no
-        // point satisfies the rows, which the residual above only measures.
+        // The duals of the Phase I optimum are a Farkas ray *when* the artificials account for
+        // the violation; the check above is what makes that conditional instead of assumed.
         duals: state.model_duals(),
         ray: [],
         basis: None,
