@@ -122,7 +122,7 @@ moon run cmd/parse -- solve <file.mps> --relax --json           # 机器可读�
 | **每个松弛都经过独立校验器** | `bench/mip-report.md` 与 `bench/mip-report-small.md` 的 `verified` 列；`mip/mip_test.mbt` 断言 `verified == nodes` | `verified < nodes` 的差额是"到达不了结论的松弛"（迭代上限或写不出符号约定的证书），按**开着的活**计 |
 | 小规模整数实例证到**公开已知最优值** | `bench/mip-report-small.md`（4/10）+ `bench/check-mip-objectives.ps1` 对 4 项**取等**通过 | 另外 6 个到节点预算（`markshare1`/`markshare2`/`pk1` 界贴下界） |
 | 证书可被第三方独立复核（含 JSON） | `verify/verify_test.mbt`（含"故意做坏的解必须被拒"）；`cmd/parse -- verify <file> --certificate <json>` | 证书只对**内核收到的模型**成立，故校验路径不化简；Farkas 射线由 `Σ a ≥ max v` 这条必需条件把门（不成立就不发证书，第二十三轮），校验端对每一份证书仍独立复核 |
-| 每条割都能被独立**再推导** | `verify/cuts_test.mbt`（穷举小模型所有整数点、确认无效割确实砍掉一个可行整点）；`mip/cuts_test.mbt`（做坏的割被拒且运行停 `Unverified`） | 割族只有单行舍入；选择规则五条与多行 MIR 聚合一族均已实测无净收益（`CHANGELOG.md`） |
+| 每条割都能被独立**再推导** | `verify/cuts_test.mbt`（穷举小模型所有整数点、确认无效割确实砍掉一个可行整点）；`mip/cuts_test.mbt`（做坏的割被拒且运行停 `Unverified`） | 割族只有单行舍入；选择规则五条、多行 MIR 聚合一族与**节点上的割**均已实测无净收益（`CHANGELOG.md`） |
 | 公开入口的取舍口径（`NodeLimit` / `NotSolved`） | `docs/api.md` 的契约表；`moonopt_test.mbt` | 整数模型**不做化简** |
 | 不可行 / 无界 / 预算到顶各有明确状态 | `mip/mip_test.mbt`（松弛无界报 `UnboundedRelaxation`、非法模型报 `Invalid`） | 整数无界性证明（整数射线）未做 |
 | 规模门禁：行数上限与填充预算 | `bench/README.md` 的两张表；`simplex` 的 `TooLarge` / `max_factor_entries` | 行数上限是粗闸门，真正的界是枢轴数与每次枢轴增益 |

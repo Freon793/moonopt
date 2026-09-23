@@ -24,7 +24,7 @@ pub(all) enum SolveStatus { Optimal, Infeasible, Unbounded, NodeLimit, NotSolved
 | --- | --- | --- |
 | 整数模型走分支定界，**不做化简** | 答案不能取决于化简碰巧定住了什么；`presolve` 选项对整数模型不生效 | `moonopt_test.mbt`（根目录）；`cmd/parse` 在整数模型上打印 `mip=presolve-skipped(...)` |
 | 只承认搜索证明过的结论 | `MipStatus::Optimal`/`Infeasible` → 同名公开状态；节点预算到顶 → `NodeLimit` | `moonopt_test.mbt` |
-| 三类情况一律 `NotSolved` 并带原话 | 松弛无界（改善射线不含整数性）、证书被拒（那是关于内核的陈述，不是关于模型的结论）、模型非法 | 同上 |
+| 三类情况一律 `NotSolved` 并带原话 | 松弛无界（改善射线不含整数性）、证书被拒（那是关于内核的陈述，不是关于模型的结论）、模型非法；**另加**"量到违反却写不出不可行证书"——Phase I 的人工和不足以解释它要证明的违反量时内核报 `NumericalFailure`（`CHANGELOG.md` 第二十三轮） | 同上 |
 | `values` 非空时才有 `objective` | 预算到顶且没找到整数点时 `objective` 为 0，`message` 用文字说"还没有整数点" | `cmd/parse` 的 `"(no integer point yet)"`；`moonopt_test.mbt` |
 | `bound`/`gap` 在所有路径同义 | 线性求解下 `bound = objective`、`gap = 0`（线性解就是它自己的界）；`NodeLimit` 下是仍在开的界 | `moonopt_test.mbt` |
 
