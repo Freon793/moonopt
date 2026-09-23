@@ -273,3 +273,51 @@ test "the open bound is the best of what is left in the queue" {
   mirror.pop() |> ignore
   assert_eq(open_bound(maximizing, mirror, -1.0), 4.0)
 }
+
+///|
+/// The cutoff, spent on a node's box instead of on a new row: a variable is bounded by the
+/// cutoff and the smallest the *other* terms could take over their own boxes. The three cases
+/// that matter are that it tightens what it can, that it leaves alone what it cannot, and that
+/// a box it empties is the node being pruned with no solve at all.
+test "the incumbent's cutoff narrows a node's box" {
+  // min 2x + 3y + z, boxes [0,10] / [0,4] / [0,1], and an incumbent at 12.
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let x = model.add_var("x", lb=0.0, ub=10.0, is_int=true)
+  let y = model.add_var("y", lb=0.0, ub=4.0, is_int=true)
+  let z = model.add_var("z", lb=0.0, ub=1.0, is_int=true)
+  model.set_objective([(x, 2.0), (y, 3.0), (z, 1.0)])
+  // Every term's smallest value is zero, so each budget is the cutoff itself: x ≤ 6 is a real
+  // tightening, y ≤ 4 and z ≤ 12 are not, and the ones that are not must not be written.
+  assert_true(propagate_cutoff(model, 1.0, 12.0, 1.0e-7))
+  assert_eq(model.get_var(x).ub, 6.0)
+  assert_eq(model.get_var(y).ub, 4.0)
+  assert_eq(model.get_var(z).ub, 1.0)
+  assert_eq(model.get_var(x).lb, 0.0)
+  // A cutoff below the smallest value the objective can take empties the box, which is the
+  // node pruned: no point in it could beat the incumbent.
+  assert_false(propagate_cutoff(model, 1.0, -1.0, 1.0e-7))
+  // A maximisation is the same argument with the sign carried: better means larger, and the
+  // cutoff bounds from below. With both boxes [0,10] and an incumbent at 12, each variable has
+  // to be at least 2 for the pair to beat it.
+  let maxed = @model.Model::new(@model.Sense::Maximize)
+  let a = maxed.add_var("a", lb=0.0, ub=10.0, is_int=true)
+  let b = maxed.add_var("b", lb=0.0, ub=10.0, is_int=true)
+  maxed.set_objective([(a, 1.0), (b, 1.0)])
+  assert_true(propagate_cutoff(maxed, -1.0, 12.0, 1.0e-7))
+  assert_eq(maxed.get_var(a).lb, 2.0)
+  assert_eq(maxed.get_var(b).lb, 2.0)
+  // A term whose variable has no bound on the side its coefficient needs has no minimum, and
+  // then neither has the sum: the argument is unavailable for the whole model, so nothing is
+  // changed — not even the variable that could have been bounded on its own.
+  let unbounded = @model.Model::new(@model.Sense::Minimize)
+  let free = unbounded.add_var(
+    "free",
+    lb=-@model.infinite_bound,
+    ub=@model.infinite_bound,
+    is_int=true,
+  )
+  let bounded = unbounded.add_var("bounded", lb=0.0, ub=5.0, is_int=true)
+  unbounded.set_objective([(free, 1.0), (bounded, 1.0)])
+  assert_true(propagate_cutoff(unbounded, 1.0, 3.0, 1.0e-7))
+  assert_eq(unbounded.get_var(bounded).ub, 5.0)
+}

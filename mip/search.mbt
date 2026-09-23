@@ -438,6 +438,97 @@ fn dive_for_incumbent(
 /// differs from its parent by one tightened bound, and a bound change leaves the reduced
 /// costs alone, so the parent's optimal basis is still dual feasible on the child and the
 /// dual simplex only has to repair primal feasibility.
+
+///|
+/// Tightens a node's variables with the incumbent's cutoff, and says whether anything is left.
+///
+/// Every point still worth finding is better than the incumbent, and that is a constraint on
+/// the objective. The objective is a sum of one term per variable, so bounding one term by the
+/// cutoff and the *smallest value the other terms could take over their own boxes* bounds that
+/// single variable. It is the information a cutoff row would carry, spent on the box instead of
+/// on a new row: a row is only active where the relaxation already knows it can beat the
+/// incumbent, while a narrowed box also narrows the branching that follows — and it needs no
+/// certificate of its own, because what the node is handed is still a model with bounds.
+///
+/// This is not a claim about the model's feasible set. The cutoff comes from the incumbent, and
+/// an incumbent is a point the search verified against the model it was given; what the
+/// tightening drops are *integer* points that cannot beat it, which is exactly what a search
+/// for a better point is allowed to ignore. The box is only ever narrowed, never widened, and
+/// when it comes out empty the node holds nothing better — pruned with no solve at all.
+fn propagate_cutoff(
+  model : @model.Model,
+  sign : Double,
+  incumbent_objective : Double,
+  tolerance : Double,
+) -> Bool {
+  let terms = model.objective()
+  if terms.length() == 0 {
+    return true
+  }
+  let cutoff = sign * incumbent_objective
+  // The smallest each term can be over its own box, and the sum of those minima. A term whose
+  // variable has no bound on the side its coefficient needs has no minimum, and then neither
+  // has the sum: there is no cutoff argument to make here, so nothing is changed.
+  let minima : Array[Double] = Array::make(terms.length(), 0.0)
+  let total = @core.CompensatedSum::new()
+  for k = 0; k < terms.length(); k = k + 1 {
+    let (variable, coefficient) = terms[k]
+    let value = sign * coefficient
+    let bounds = model.get_var(variable)
+    let minimum = if value > 0.0 {
+      if has_lower_bound(bounds.lb) {
+        value * bounds.lb
+      } else {
+        return true
+      }
+    } else if value < 0.0 {
+      if has_upper_bound(bounds.ub) {
+        value * bounds.ub
+      } else {
+        return true
+      }
+    } else {
+      0.0
+    }
+    minima[k] = minimum
+    total.add(minimum)
+  }
+  let sum_of_minima = total.value()
+  for k = 0; k < terms.length(); k = k + 1 {
+    let (variable, coefficient) = terms[k]
+    let value = sign * coefficient
+    if value == 0.0 {
+      continue
+    }
+    // `value · x_k ≤ cutoff − (everything else's smallest possible value)`.
+    let budget = cutoff - (sum_of_minima - minima[k])
+    let bounds = model.get_var(variable)
+    if value > 0.0 {
+      let candidate = budget / value
+      if candidate < bounds.ub - tolerance * (1.0 + @core.fabs(bounds.ub)) {
+        model.set_var_bounds(variable, bounds.lb, candidate)
+      }
+    } else {
+      let candidate = budget / value
+      if candidate > bounds.lb + tolerance * (1.0 + @core.fabs(bounds.lb)) {
+        model.set_var_bounds(variable, candidate, bounds.ub)
+      }
+    }
+    // An integer variable whose box no longer holds a whole number, or any variable whose box
+    // came out reversed, has no point that could beat the incumbent.
+    let after = model.get_var(variable)
+    if after.lb > after.ub + tolerance * (1.0 + @core.fabs(after.ub)) {
+      return false
+    }
+    if after.is_int && ceil_of(after.lb) > floor_of(after.ub) + tolerance {
+      return false
+    }
+  }
+  true
+}
+
+///|
+/// Solves one node's relaxation.
 fn kernel_node(
   model : @model.Model,
   options : MipOptions,
@@ -545,6 +636,12 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
       continue
     }
     let mut problem = node_model(root_model, nodes, index)
+    // The incumbent's cutoff, spent on the node's box before the node is solved. A node the
+    // cutoff empties holds nothing better than the incumbent and costs no solve at all.
+    if has_incumbent &&
+      !propagate_cutoff(problem, sign, incumbent_objective, options.tolerance) {
+      continue
+    }
     let (started, started_basis) = match options.node_solver {
       // A node solver supplied from outside carries no basis, so its children restart.
       Some(injected) => (injected(problem), None)
