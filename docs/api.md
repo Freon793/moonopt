@@ -103,7 +103,8 @@ pub fn tableau_rows(model, options, basis) -> Result[Array[TableauRow], String]
   不是"没解出来"；后者由 `SimplexStatus` 表达：
   `Optimal` / `Infeasible` / `Unbounded` / `IterationLimit` / `NumericalFailure` / `TooLarge`。
 - **`NumericalFailure` 的含义**：内核**有答案但证据不成立**时选择不报（原始可行性、非负性、
-  行乘子符号约定任一项过不了自检），而不是给一个看起来合理的解。见 `CHANGELOG.md` 第三、十五轮。
+  行乘子符号约定、对偶间隙任一项过不了自检），而不是给一个看起来合理的解。见 `CHANGELOG.md`
+  第三、十五、二十八轮。
 - **热启动**：`solve_model_with_basis` 只在基**对偶可行**时走对偶单纯形；形状不匹配、对偶可行性丢失、
   数值失败一律回退冷启动——**热启动只是提速，永远不会给出不同的答案**。`SimplexBasis` 由上一次运行的
   `SimplexResult::basis` 提供。
