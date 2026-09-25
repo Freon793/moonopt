@@ -239,9 +239,9 @@ test "the open bound is the best of what is left in the queue" {
   queue.push(1)
   queue.push(2)
   // Minimisation: the best node is the one that can reach the smallest objective.
-  assert_eq(open_bound(minimizing, queue, 1.0), 4.0)
+  assert_eq(open_bound(minimizing, queue, [], 1.0), 4.0)
   queue.pop() |> ignore
-  assert_eq(open_bound(minimizing, queue, 1.0), 7.0)
+  assert_eq(open_bound(minimizing, queue, [], 1.0), 7.0)
   // Maximisation stores the negation, so the same bounds come back the right way up.
   let maximizing : Array[Node] = [
     node_of(-1, -1, 0.0, 0.0),
@@ -269,9 +269,43 @@ test "the open bound is the best of what is left in the queue" {
   let mirror = NodeQueue::new(maximizing)
   mirror.push(1)
   mirror.push(2)
-  assert_eq(open_bound(maximizing, mirror, -1.0), 7.0)
+  assert_eq(open_bound(maximizing, mirror, [], -1.0), 7.0)
   mirror.pop() |> ignore
-  assert_eq(open_bound(maximizing, mirror, -1.0), 4.0)
+  assert_eq(open_bound(maximizing, mirror, [], -1.0), 4.0)
+}
+
+///|
+/// A node that was popped and never answered is still part of the open set. Its key is the parent's
+/// relaxation objective, which bounds the whole region below it, and the node is gone from the
+/// queue because a second solve would repeat the same work — so this is the only place that key can
+/// be counted. Counting only the queue's keys reported a bound the run had not established, and in
+/// the direction that flatters it: this is a best-bound search, so the node that failed is the one
+/// that came in with one of the queue's *smallest* keys, which is what the reported bound is.
+test "the open bound counts the keys of nodes that were never judged" {
+  let nodes : Array[Node] = [
+    node_of(-1, -1, 0.0, 0.0),
+    {
+      parent: 0,
+      depth: 1,
+      variable: 0,
+      lb: 0.0,
+      ub: 1.0,
+      basis: None,
+      bound: 4.0,
+      key: 4.0,
+    },
+  ]
+  let queue = NodeQueue::new(nodes)
+  queue.push(1)
+  // The queue alone says 4; the region a failed node stands for can only be better than that.
+  assert_eq(open_bound(nodes, queue, [2.0], 1.0), 2.0)
+  // A key that is worse than the queue's best does not move the bound.
+  assert_eq(open_bound(nodes, queue, [9.0], 1.0), 4.0)
+  // Maximisation is the same picture upside down.
+  assert_eq(open_bound(nodes, queue, [-2.0], -1.0), 2.0)
+  // With nothing open the sentinel the queue-only version returned is kept.
+  let empty = NodeQueue::new(nodes)
+  assert_eq(open_bound(nodes, empty, [], 1.0), 0.0)
 }
 
 ///|

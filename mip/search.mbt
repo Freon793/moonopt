@@ -100,17 +100,42 @@ fn NodeQueue::pop(self : NodeQueue) -> Int {
 }
 
 ///|
-/// The best bound still open, in the model's own sense: the smallest key in the queue turned
-/// back into an objective value. This is what an unfinished run's incumbent has to be
-/// measured against, because every remaining node is somewhere below its own bound.
-fn open_bound(nodes : Array[Node], queue : NodeQueue, sign : Double) -> Double {
+/// The best bound still open, in the model's own sense: the smallest key over the queue and
+/// over the regions the run left without a verdict. This is what an unfinished run's incumbent
+/// has to be measured against, because every remaining node is somewhere below its own bound.
+///
+/// `unjudged` holds the keys of nodes that were popped and never answered. Such a node is not
+/// re-queued — solving it again would repeat the same work — but the region below it is still
+/// unexplored, and the bound it was queued with (its parent's relaxation objective) bounds
+/// every point in that region. Leaving those keys out reported a bound the run had not
+/// established, and in the direction that flatters it: this is a best-bound search, so the
+/// nodes that fail early are the ones with the smallest keys, and the smallest key is exactly
+/// what this function returns. On the small manifest `blend2` and `noswot` end at the node
+/// budget with 34 and 93 such nodes, so the bound those rows reported was the best of a
+/// strictly smaller open set than the one the run actually had.
+fn open_bound(
+  nodes : Array[Node],
+  queue : NodeQueue,
+  unjudged : Array[Double],
+  sign : Double,
+) -> Double {
   let mut best = 0.0
+  let mut seen = false
   for k = 0; k < queue.heap.length(); k = k + 1 {
     let key = nodes[queue.heap[k]].key
-    if k == 0 || key < best {
+    if !seen || key < best {
       best = key
+      seen = true
     }
   }
+  for k = 0; k < unjudged.length(); k = k + 1 {
+    if !seen || unjudged[k] < best {
+      best = unjudged[k]
+      seen = true
+    }
+  }
+  // An open set that is empty keeps the `0.0` this function has always returned for "the run
+  // has not established a bound at all".
   sign * best
 }
 
@@ -614,6 +639,10 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
   let mut solved = 0
   let mut verified = 0
   let mut unfinished_nodes = 0
+  // The keys of the nodes that were popped and never answered. They are part of the open set
+  // the reported bound is taken over, even though they are no longer in the queue: see
+  // `open_bound`.
+  let unjudged : Array[Double] = []
   let mut dives_launched = 0
   // The model the tree is built on: the caller's model plus the cuts the root earned.
   // Every node below the root is rebuilt from this one, so a cut added here is inherited
@@ -623,8 +652,8 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
   while !queue.is_empty() {
     if solved >= options.max_nodes {
       return limit_result(
-        nodes, queue, incumbent, incumbent_objective, has_incumbent, solved, verified,
-        cuts_added, sign, options,
+        nodes, queue, unjudged, incumbent, incumbent_objective, has_incumbent, solved,
+        verified, unfinished_nodes, cuts_added, sign, options,
       )
     }
     let index = queue.pop()
@@ -791,8 +820,8 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
               }
               if solved >= options.max_nodes {
                 return limit_result(
-                  nodes, queue, incumbent, incumbent_objective, has_incumbent, solved,
-                  verified, cuts_added, sign, options,
+                  nodes, queue, unjudged, incumbent, incumbent_objective, has_incumbent,
+                  solved, verified, unfinished_nodes, cuts_added, sign, options,
                 )
               }
               // Either the tightened relaxation is whole (the round has done its job and
@@ -825,10 +854,15 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
           cuts: cuts_added,
           message: "a relaxation is unbounded, which does not prove the integer problem is",
         }
-      NodeStatus::Unfinished =>
+      NodeStatus::Unfinished => {
         // The node could not be judged, so the tree cannot be called exhausted. Recorded
-        // and counted, not silently pruned.
+        // and counted, not silently pruned — and its bound stays open with it: the node is not
+        // re-queued (a second solve would repeat the same work and reach the same verdict), but
+        // the region below it is unexplored, and the bound it was queued with is the parent's
+        // relaxation objective, which bounds that whole region.
         unfinished_nodes = unfinished_nodes + 1
+        unjudged.push(node.key)
+      }
       NodeStatus::Optimal => {
         let fractional = most_fractional(
           problem,
@@ -928,8 +962,8 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
               }
               if solved >= options.max_nodes {
                 return limit_result(
-                  nodes, queue, incumbent, incumbent_objective, has_incumbent, solved,
-                  verified, cuts_added, sign, options,
+                  nodes, queue, unjudged, incumbent, incumbent_objective, has_incumbent,
+                  solved, verified, unfinished_nodes, cuts_added, sign, options,
                 )
               }
             }
@@ -976,7 +1010,7 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
     }
   }
   if unfinished_nodes > 0 {
-    let bound = open_bound(nodes, queue, sign)
+    let bound = open_bound(nodes, queue, unjudged, sign)
     return {
       status: MipStatus::NodeLimit,
       values: incumbent,
@@ -1026,18 +1060,20 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
 fn limit_result(
   nodes : Array[Node],
   queue : NodeQueue,
+  unjudged : Array[Double],
   incumbent : Array[Double],
   incumbent_objective : Double,
   has_incumbent : Bool,
   solved : Int,
   verified : Int,
+  unfinished : Int,
   cuts_added : Int,
   sign : Double,
   options : MipOptions,
 ) -> MipResult {
-  // The nodes still in the queue are the uncertainty: the best of their bounds is what the
-  // incumbent is measured against.
-  let bound = open_bound(nodes, queue, sign)
+  // The nodes still in the queue, and the regions whose node reached no verdict, are the
+  // uncertainty: the best of their bounds is what the incumbent is measured against.
+  let bound = open_bound(nodes, queue, unjudged, sign)
   {
     status: MipStatus::NodeLimit,
     values: incumbent,
@@ -1056,6 +1092,14 @@ fn limit_result(
     " reached with " +
     queue.heap.length().to_string() +
     " tree node(s) still open" +
+    // A budget that ran out while relaxations were reaching no verdict leaves two kinds of open
+    // work behind, and the counts alone do not say which: the message names both, the same way a
+    // run whose queue emptied under it does.
+    (if unfinished > 0 {
+      ", and " + unfinished.to_string() + " relaxation(s) reached no verdict"
+    } else {
+      ""
+    }) +
     (if has_incumbent { "" } else { "; no integer point found yet" }),
   }
 }

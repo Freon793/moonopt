@@ -394,6 +394,101 @@ test "a relaxation that reaches no verdict ends the run at a limit" {
 }
 
 ///|
+/// `max x + 2y  s.t.  x + y <= 3.5`, `x, y` integers in `[0, 4]`.
+///
+/// The relaxation is worth 7 along the edge `x + y = 3.5`, and the tree's first branch is on
+/// `y` (3.5 is the only fractional value at `(0, 3.5)`). That makes the two children carry the
+/// root's 7 as their bound while the child `y <= 3` answers 6.5 — the two numbers the test below
+/// tells apart.
+fn one_row_three_and_a_half_mip() -> @model.Model {
+  let model = @model.Model::new(@model.Sense::Maximize)
+  let x = model.add_var("x", lb=0.0, ub=4.0, is_int=true)
+  let y = model.add_var("y", lb=0.0, ub=4.0, is_int=true)
+  model.set_objective([(x, 1.0), (y, 2.0)])
+  model.add_constraint([(x, 1.0), (y, 1.0)], @model.Rel::LessEqual, 3.5)
+  model
+}
+
+///|
+/// A node solver that answers exactly two models by hand — the root and the child `y <= 3` — and
+/// leaves every other model without a verdict.
+///
+/// Both answers are real certificates: `7` at `(0, 3.5)` with the row's multiplier `2`, and `6.5`
+/// at `(0.5, 3)` with the multiplier `1`, which the independent verifier accepts (the residual is
+/// zero, the multipliers are non-negative on a `≤` row, the reduced costs point at bounds the
+/// points sit on, and the Lagrangian bound meets the objective). Writing them down is what makes
+/// the test about *accounting* rather than about the kernel: the state it examines — a node
+/// popped, unjudged, and out of the queue while the queue still holds work — is set up, not
+/// stumbled into.
+fn answers_the_root_and_the_first_child(
+  problem : @model.Model,
+) -> @mip.NodeSolution {
+  let x = problem.get_var(0)
+  let y = problem.get_var(1)
+  let near = fn(a : Double, b : Double) {
+    @core.approx_eq(a, b, rel=1.0e-12, abs=1.0e-12)
+  }
+  if near(x.ub, 4.0) && near(y.lb, 0.0) && near(y.ub, 4.0) {
+    {
+      status: @mip.NodeStatus::Optimal,
+      values: [0.0, 3.5],
+      objective: 7.0,
+      duals: [2.0],
+      ray: [],
+    }
+  } else if near(x.ub, 4.0) && near(y.lb, 0.0) && near(y.ub, 3.0) {
+    {
+      status: @mip.NodeStatus::Optimal,
+      values: [0.5, 3.0],
+      objective: 6.5,
+      duals: [1.0],
+      ray: [],
+    }
+  } else {
+    never_finishes(problem)
+  }
+}
+
+///|
+/// A node whose relaxation reached no verdict does not take its bound out of the tree with it.
+///
+/// The node is popped and not re-queued — a second solve would repeat the same work and reach the
+/// same verdict — but the region below it is still unexplored, and the bound it was queued with
+/// (its parent's relaxation objective) bounds every point in that region. Counting only the
+/// queue's keys reported a bound the run had not established, and in the direction that flatters
+/// it: this is a best-bound search, so a node that fails came in with one of the queue's
+/// *smallest* keys, which is exactly what the reported bound is.
+///
+/// The trace here: the root answers 7 and branches on `y`; the child `y >= 4` reaches no verdict
+/// (key -7, a maximisation), and the child `y <= 3` answers 6.5 and branches on `x`. When the
+/// budget of three relaxations runs out, the queue holds only the two grandchildren, keyed at the
+/// 6.5 they inherit, while the unjudged node's key is still the 7. The open set is both, and its
+/// best bound is 7.
+test "an unjudged node keeps its bound in the open set" {
+  let model = one_row_three_and_a_half_mip()
+  // Cuts and the primal walk are off: the three-relaxation budget has to go to the root, the
+  // child that answers and the child that does not, which is the state this test is about.
+  let base = @mip.MipOptions::with_max_nodes(3)
+  let options = base
+    .without_cuts()
+    .without_primal_dive()
+    .with_node_solver(answers_the_root_and_the_first_child)
+  let result = @mip.solve_mip(model, options)
+  assert_eq(result.status, @mip.MipStatus::NodeLimit)
+  // Three relaxations: the root, the child that answered, and the child that did not.
+  assert_eq(result.nodes, 3)
+  assert_eq(result.verified, 2)
+  assert_eq(result.values.length(), 0)
+  // 6.5 is the queue's best key, and the number this run used to report — a bound for the
+  // grandchildren that says nothing about the region the unjudged node stands for.
+  assert_true(@core.approx_eq(result.bound, 7.0, rel=1.0e-12, abs=1.0e-12))
+  assert_true(result.gap > 1.0e299)
+  // The text says which of the two kinds of open work the run is leaving behind: a budget that
+  // ran out, and a relaxation that reached no verdict.
+  assert_true(result.message.contains("reached no verdict"))
+}
+
+///|
 /// The model's default upper bound is a large finite sentinel rather than an infinity, so
 /// a variable that carries it still gets branched on: `max x  s.t.  x <= 5.5` over the
 /// integers is 5, and the child `x >= 6` is infeasible.
