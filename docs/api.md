@@ -168,7 +168,7 @@ pub(all) struct MipOptions { max_nodes, max_iterations, tolerance, verify_nodes,
 | 证书被拒**停整轮**为 `Unverified` | 不拿一个没人能复核的答案去分支；消息带校验器原话 | `mip/mip_test.mbt`（`with_node_solver` 注入错误求解器）、`mip/cuts_test.mbt` |
 | 松弛无界 ≠ 模型无界 | 报 `UnboundedRelaxation`，因为改善射线不含整数性 | `mip/mip_test.mbt` |
 | 模型非法 ≠ 不可行 | 报 `Invalid` | 同上 |
-| `NodeLimit` 给出当前整数点与仍在开的界 | 两者一起才是调用方需要的（"能到多好"与"已经多好"） | `bench/mip-report*.md` 的 `bound`/`gap` 列 |
+| `NodeLimit` 给出当前整数点与仍在开的界 | 两者一起才是调用方需要的（"能到多好"与"已经多好"）。界取自**全部开着的活**：队列里的节点，**以及**松弛到达不了结论、因此不再入队的那些节点所在的子树（它们的键是父节点的松弛目标值） | `bench/mip-report*.md` 的 `bound`/`gap` 列；`mip/search_wbtest.mbt` 的 `open_bound` 用例 |
 | 割必须能被独立再推导 | 每条割带"由哪一行舍入而来"的证明，`verify_cut` 复核后才进模型 | `mip/cuts_test.mbt`、`bench/*.md` 的 `cuts` 列 |
 | 取整启发式只**提供**当前解 | 它的松弛走同一条求解+校验路径、计入 `nodes`/`verified`、受同一预算约束，永不主张最优 | `mip/search_wbtest.mbt`、`dive_*` 选项 |
 | `node_solver`/`cut_hook` 只给测试用 | 用来演示"做坏的松弛/割会被拒" | `mip/mip_test.mbt`、`mip/cuts_test.mbt` |
