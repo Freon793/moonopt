@@ -24,6 +24,26 @@ priv struct Node {
 }
 
 ///|
+/// Whether a run may spend its reserve on one more walk.
+///
+/// The reserve exists for one state: the run has spent half its budget and does not have a single
+/// integer point, so there is nothing to prune against and nothing to report — the state the
+/// reports show for `blend2`, whose row says "no integer point found yet" and whose gap is the
+/// `1e300` sentinel. A walk is worth taking there, but only a walk that can *finish*: a launch
+/// cut short by the reserve discovers what the tree was about to discover anyway, which is why
+/// the reserve has to be able to afford `dive_steps` steps before it is used at all. That
+/// condition is also what keeps the policy out of small budgets: at 300 nodes the reserve is 18
+/// steps, less than one walk, and the run is left alone.
+fn reserve_allows_walk(
+  extra_dive_budget : Int,
+  dive_steps : Int,
+  solved : Int,
+  max_nodes : Int,
+) -> Bool {
+  extra_dive_budget >= dive_steps && solved * 2 >= max_nodes
+}
+
+///|
 /// `-1` for a minimisation, `+1` for a maximisation: the sign that turns "better" into
 /// "smaller", so one comparison serves both senses.
 fn sense_sign(model : @model.Model) -> Double {
@@ -644,6 +664,14 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
   // `open_bound`.
   let unjudged : Array[Double] = []
   let mut dives_launched = 0
+  // What a run keeps in reserve for the walks it takes *after* it has spent half its budget
+  // without finding a single integer point — the state the reports show for `blend2`, a bound
+  // with nothing to measure it against. The launch conditions below say when a walk is worth
+  // starting, not when it is worth trying: with no point at all, an extra walk is the only
+  // thing the run can learn about the answer from, and its cost is a *share* of the budget
+  // (`max_nodes / 16`) rather than a count, because the same count is a sixteenth of the
+  // budget at 20000 nodes and all of it at 300.
+  let mut extra_dive_budget = options.max_nodes / 16
   // The model the tree is built on: the caller's model plus the cuts the root earned.
   // Every node below the root is rebuilt from this one, so a cut added here is inherited
   // by the whole tree — which is exactly why it has to be checked before it lands.
@@ -907,8 +935,16 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
           // `markshare2` only produced an incumbent at sixty. What the walk spends is what
           // the tree does not get, so it stays bounded by `dive_attempts × dive_steps`.
           if options.dive_steps > 0 &&
-            dives_launched < options.dive_attempts &&
-            !has_incumbent {
+            !has_incumbent &&
+            (
+              dives_launched < options.dive_attempts ||
+              reserve_allows_walk(
+                extra_dive_budget,
+                options.dive_steps,
+                solved,
+                options.max_nodes,
+              )
+            ) {
             let fractional = fractional_count(
               problem,
               solution.values,
@@ -916,11 +952,11 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
             )
             let needed = 2 * fractional
             let remaining = options.max_nodes - solved
-            let budget = if remaining < options.dive_steps {
-              remaining
-            } else {
-              options.dive_steps
-            }
+            // Walks past `dive_attempts` are paid out of the reserve, and the reserve is only
+            // ever opened when it can afford a whole walk — so every launch here gets the same
+            // step budget the first ones get, and the last one cannot overdraw.
+            let wanted = options.dive_steps
+            let budget = if remaining < wanted { remaining } else { wanted }
             if needed > 0 &&
               needed <= options.dive_steps &&
               budget > 0 &&
@@ -929,6 +965,9 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
               let dive = dive_for_incumbent(
                 problem, options, solution, node_basis, budget,
               )
+              if dives_launched > options.dive_attempts {
+                extra_dive_budget = extra_dive_budget - dive.relaxations
+              }
               // The dive's relaxations are the run's relaxations: they are solved with the
               // same solver and checked by the same verifier, so they count in both totals
               // and the node budget bounds them.

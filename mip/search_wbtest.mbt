@@ -355,3 +355,25 @@ test "the incumbent's cutoff narrows a node's box" {
   assert_true(propagate_cutoff(unbounded, 1.0, 3.0, 1.0e-7))
   assert_eq(unbounded.get_var(bounded).ub, 5.0)
 }
+
+///|
+/// The reserve a run keeps for the walks it takes *after* it has spent half its budget without a
+/// single integer point, and the two conditions that keep it from being a way of not searching:
+/// it is only opened when it can afford a whole walk, and only after that halfway mark.
+///
+/// Both halves were measured rather than reasoned. At 300 nodes the reserve is 18 steps — less
+/// than the 60 a walk takes — and opening it there moved five rows of the 300-node report down
+/// without finding one point; at 20000 nodes it is 1250 steps, and the walks it pays for are what
+/// gives `blend2` its first integer point at all.
+test "the dive reserve is spent only on a walk it can afford, after the halfway mark" {
+  // 300 nodes: 18 steps, less than one walk, at any point in the run.
+  assert_false(reserve_allows_walk(300 / 16, 60, 150, 300))
+  assert_false(reserve_allows_walk(300 / 16, 60, 300, 300))
+  // 20000 nodes: 1250 steps, enough for whole walks — but not before half the budget is gone.
+  assert_false(reserve_allows_walk(20000 / 16, 60, 9999, 20000))
+  assert_true(reserve_allows_walk(20000 / 16, 60, 10000, 20000))
+  // A reserve spent down to less than one walk stops the extra launches; the run goes on with
+  // the launches it always had.
+  assert_false(reserve_allows_walk(59, 60, 20000, 20000))
+  assert_false(reserve_allows_walk(0, 60, 20000, 20000))
+}
