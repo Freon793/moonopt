@@ -20,7 +20,7 @@
 | 5 | 使用持续集成工具并覆盖**检查、构建、测试**流程 | [`.github/workflows/check.yml`](../.github/workflows/check.yml)：`check` 任务在 Linux / macOS / Windows 上跑 `moon check` → `moon build` → `format diff` → `info check` → `moon test` → 报告陈旧性；`targets` 任务在 wasm-gc / js 上跑 `moon build --target <t>` → `moon test --target <t>` | GitHub Actions 运行页；每个任务都在注解里写出本次使用的工具链版本 |
 | 6 | 提供至少一个可运行示例或最小使用样例 | `examples/production_plan`（最优 21）、`examples/transportation`（最优 11）、`cmd/main`（含一个"当前不支持"的诚实案例），README 另给最小 API 片段 | `moon run examples/production_plan` |
 | 7 | 提供完整测试，覆盖核心功能路径 | **180 个测试**在 native / wasm-gc / js 三目标全绿，覆盖：与 `oracle` 的随机 LP 差分、presolve/postsolve 还原一致性、证书"故意做坏必须被拒"、无效割必须被拒、`verified == nodes` 不变量、CLI 文本与 JSON 两条路径、"不可行主张必须能被人工和解释"这条内核自检判据、cutoff 收紧节点盒子的四种情形、以及 `box_minimum` 在真实实例量级上的带内行为与"内核量与校验器量是同一个数" | `moon test`（及 `--target wasm-gc` / `--target js`） |
-| 8 | 发布到 mooncakes.io | `Freon793/moonopt` 已发布（`0.1.0`、`0.1.1`、`0.1.2`），注册表可解析、可安装；发布物自包含且不含第三方数据 | `moon add Freon793/moonopt`（见下方第 3 节） |
+| 8 | 发布到 mooncakes.io | `Freon793/moonopt` 已发布（`0.1.0`、`0.1.1`、`0.1.2`），注册表可解析、可安装；发布物自包含且不含第三方数据。`0.1.2` 的发布动作与消费都实测过：`moon publish` 返回 `Server status: 200 OK`；空白工程里 `moon add Freon793/moonopt@0.1.2` 下载成功、`moon check --deny-warn` 退出 0 | `moon add Freon793/moonopt`（见下方第 3 节） |
 | 9 | 采用 OSI 认可的开源许可证；参考/移植需符合原项目许可证 | **Apache-2.0**（`LICENSE` + `moon.mod` 的 `license`）；项目为**原创实现**，未移植任何第三方代码；基准数据（MIPLIB 2017）只下载、不入库、且被 `.moonignore` 排除在发布归档之外 | `LICENSE`；`bench/README.md` 的数据政策；`.moonignore` |
 
 ## 2. 五分钟复现（评审可执行）
