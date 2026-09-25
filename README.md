@@ -8,8 +8,8 @@
 分支定界与**带证明的割**，以及**可被第三方独立校验**的最优性、Farkas 不可行性与无界性证书。
 纯 MoonBit 实现，**无 FFI 依赖**。
 
-> **状态**：`0.1.1`，已发布到 mooncakes.io（`moon add Freon793/moonopt`）。M1–M6 的完成标准全部达成：
-> 解析、求解、证书校验、分支定界四条路径都有可复现的基准报告与测试覆盖（172 个测试，native / wasm-gc / js
+> **状态**：`0.1.2`，已发布到 mooncakes.io（`moon add Freon793/moonopt`）。M1–M6 的完成标准全部达成：
+> 解析、求解、证书校验、分支定界四条路径都有可复现的基准报告与测试覆盖（180 个测试，native / wasm-gc / js
 > 三目标全绿）。CI 在 Linux / macOS / Windows 上执行**检查 / 构建 / 测试**三步，另有两个目标平台的测试任务。
 > **本文件只做入口**：逐版变化见 [`CHANGELOG.md`](CHANGELOG.md)，逐轮技术决策与实测数字见
 > [`docs/roadmap.md`](docs/roadmap.md)，各文档的职责见下面的[文档导航](#文档导航)。
@@ -47,7 +47,7 @@ moon version --all                   # 需要 MoonBit 0.10.7 以上
 git clone https://github.com/Freon793/moonopt && cd moonopt
 moon run examples/production_plan    # 两产品生产计划：最优 21 at (3, 1.5)
 moon run cmd/main                    # 打印三个模型的状态报告（含一个"当前不支持"的诚实案例）
-moon check --deny-warn && moon test  # 172 个测试
+moon check --deny-warn && moon test  # 180 个测试
 ```
 
 真实实例（MIPLIB 2017，仓库**不再分发**数据，用脚本下载）：
@@ -130,8 +130,8 @@ moon run cmd/parse -- solve <file.mps> --relax --json           # 机器可读�
 | 报告是证据：脚本拒绝写不可靠报告 | 四个脚本各自的拒绝条件（退出码非零 / 条目数不符 / 出现被拒证书 / 点未通过复核），`bench/README.md` 逐条写出 | 拒绝即非零退出且**不落盘** |
 | 报告是否仍被当前代码支持，有机械化判定 | `bench/report.md` 的 `generated at` 与 `code behind it` 两列（`STALE (N changed since)`） | 判据保守：改注释也算改 |
 | 依赖边界（可被审阅的架构事实） | `verify/moon.pkg` 不 import `simplex`；库包不引 `moonbitlang/x`（只有 `cmd/parse` 引） | 这是"校验器与求解器不共享状态"的可检查形式 |
-| 三目标全绿 | `moon test --deny-warn`、`--target wasm-gc`、`--target js`（当前 172 个测试） | CI 每次运行重跑 |
-| 已发布（mooncakes.io 的 `Freon793/moonopt`，当前 `0.1.1`） | `moon.mod` 的 `version`；注册表页面；发布物的自包含与公开面四项契约的验收见 `docs/roadmap.md` 的 M6 轮次 | 语义版本从 `0.1.0` 起，之后按 SemVer 递增（`0.1.1` 是元数据与文档修正，无行为改动） |
+| 三目标全绿 | `moon test --deny-warn`、`--target wasm-gc`、`--target js`（当前 180 个测试） | CI 每次运行重跑 |
+| 已发布（mooncakes.io 的 `Freon793/moonopt`，当前 `0.1.2`） | `moon.mod` 的 `version`；注册表页面；发布物的自包含与公开面四项契约的验收见 `docs/roadmap.md` 的 M6 轮次 | 语义版本从 `0.1.0` 起，之后按 SemVer 递增（`0.1.1` 是元数据与文档修正、`0.1.2` 修的是校验器算错的一个量） |
 
 ## 生态位
 

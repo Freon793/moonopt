@@ -40,12 +40,16 @@ MIP 层变成"没有结论的松弛"（`verified < nodes`、计入 open work）�
 | 其中第一个与校验器当初拒签的数字 | **逐位相同**（这就是"两边量同一个东西"的证据） |
 | 三次 `refactorize()` 重测之后 | **0 次仍在容差外 ⇒ 0 次拒签**，证书随后被校验器接受 |
 | 该实例整轮结果 | `mip=node-limit nodes=20000 verified=19907`，exit 0，报告写得出来 |
-| `bench/mip-report.md`（32 实例 / 300 节点） | 除头部 commit 行外**逐字节相同** |
-| `bench/parse-report.md` / `bench/solve-report.md` | 除头部 commit 行外**逐字节相同** |
+| `bench/parse-report.md` / `bench/solve-report.md` | 除头部 commit 行外**逐字节相同**（各只差那 1 行） |
+| `bench/mip-report.md`（32 实例 / 300 节点） | 除头部 commit 行与**重写的那段 `verify` 列说明**外，32 个实例**逐字相同** |
 | `bench/mip-report-small.md`（10 实例 / 20000 节点） | 除头部 commit 行与本轮改过的那段说明外，**只有 `noswot` 一行动了**：`verified` 19 905 → **19 907**、界 `-43.000000000044906` → `-43.000000000045816`（相对量 2e-14）、gap `9.00000000003675` → `9.000000000037659`、仍开着的树节点 14 861 → **14 853**；汇总里 `relaxations verified` 134 601 → **134 603** |
 | 4 个已证最优实例 | 节点数**一字未动**（`flugpl` 13 806 / `khb05250` 305 / `p0201` 586 / `22433` 33）⇒ 没有丢覆盖 |
 | `bench/check-mip-objectives.ps1` 两项 | `violations 0, not in the table 0, unverified nodes 0`（分别 checked 1 与 checked 4） |
 | `bench/report.ps1` | 4 report(s)、**0 stale** |
+
+**更正（发布 `0.1.2` 时补）**：本表初版把 300 节点那份 `bench/mip-report.md` 也写成"除头部 commit 行外逐字节
+相同"，实际上它还带着本轮重写的那段 `verify` 列说明（只有 `bench/parse-report.md` / `bench/solve-report.md`
+是只差头部）。`git diff c10ada4^ c10ada4 -- bench/` 可复核：解析 / 求解各 2 行，两份 mip 报告各 10 / 14 行。
 
 **测试（174 → 180）**：新建 `verify/checks_wbtest.mbt` **4 条**白盒（带内按界计入、带外按指向的界取值、
 带内不能报"没有界"，量级取真实实例的 `10²~10³` 界与 `10⁻⁶` 检验数）；新建
@@ -75,6 +79,15 @@ MIP 层变成"没有结论的松弛"（`verified < nodes`、计入 open work）�
   于是内核算 `y·(a+b)` 而校验器算 `y·a + y·b`（代码注释里写了）。是舍入级的差别，不是不同的量。
 - 本轮只要求内核"要么修好、要么不写"：`refactorize()` **修不好**时该节点就是 `verified < nodes` 的 open work
   （本语料上三次都修好了；修不好的情形没有实测样本，只有构造出的路径）。
+- **这条新自检不覆盖"修复后的证书"**：`mip/duals.mbt::repaired_duals` 会把符号越界的乘子夹到 0 再交给
+  校验器，而内核量的是**夹之前**的对偶解。也就是"生产者量与校验器判的量是同一个"有一个例外 —— 那条路上
+  被拒仍然**整轮停下**（设计上分得开：内核明说自己没有证书 ⇒ 记成 open work；被校验器当场抓住 ⇒ 说明生产者
+  错了，不该用降级掩盖）。本语料上没有走到这条分支。
+- **"修不好"那一支没有测试**：语料里三次都被 `refactorize()` 修回容差内，"间隙在重新分解之后仍超容差 ⇒
+  `NumericalFailure`"只有构造出的路径。MIP 侧"没有结论 ⇒ 记成 open work"由注入式节点求解器的测试兜着，
+  内核侧这一支没有。
+- **带内且那个方向没有有限界**时仍然丢掉这一项（宽松的一侧，与"带内不指向任何方向"是同一套读法；
+  代码注释里写了，本清单补上）。
 
 **顺带**：`bench/report-mip.ps1` 里那段解释"`verify` 列何时小于节点数"的文字，原来只举了乘子符号约定一个例子，
 现在把它写成**一个类别**（发证书之前内核量两件：符号约定、以及乘子证明的界与点上的目标值之间的间隙），
@@ -514,6 +527,43 @@ native / wasm-gc / js 三目标 **173/173**（新增一条判据单测，用的�
 **过程事实（又踩一次，值得写下来）**：本轮第一次生成报告是在**提交代码之前**做的，报告因此记录的是改动前的
 commit，按 `bench/report.ps1` 的判据它们立刻就是 `STALE`（CI 的"benchmark reports are current"会红），
 于是重跑了一遍（34.5 分钟）。**顺序只能是：代码 commit → 生成报告 → 报告 commit → 推送**。
+
+## [0.1.2] — 2026-09-25
+
+补丁版本，起因是一条**已经发布出去的正确性缺陷**：`0.1.1` 里的独立校验器（`verify/checks.mbt::box_minimum`）
+在 `|rⱼ| ≤ tolerance · scale` 时把 Lagrangian 下界的一整项丢掉，而那一项的大小是 `|界| · |rⱼ|` ——
+由**检验数指向的那个界**决定，与容差无关。在 `blend2` 这类界为 `10²~10³` 的实例上，一个 `10⁻⁶` 的检验数
+就是 `10⁻³` 的一项，是这个检查自身容差（`1e-7`）的一万倍 ⇒ 旧版本可能**接受一份真实对偶间隙超容差的
+最优性证书**（也可能在另一头误拒正确的证书 —— 第二十六轮那条 `5.54e-5` 的拒签就是同一个算错量的另一面）。
+修正后箱极小值在界有限时是精确的，容差只负责判断"这个检验数指向哪个方向"。
+
+生产端同时补齐，否则修好校验器的代价是"整轮搜索在一条擦边证书上停下"（实测：只装校验器那半，
+`noswot` 在节点 6454 被拒、`bench/report-mip.ps1` 拒绝写报告）：`simplex/revised.mbt::finish_optimal`
+在宣布基最优之前现在量**三件** —— 残差、乘子符号约定、以及**对偶间隙** —— 形状与既有两件相同
+（超容差先 `refactorize()` 重测，仍在容差外才报 `NumericalFailure`，于是那个节点是"没有结论的松弛"、
+搜索继续）。内核在自己的归一化空间算、校验器在模型空间算，所以模型自己的量是**带过来**的而不是反推的
+（`KernelProblem` 新增 `model_cost` / `model_lower` / `model_upper` / `model_rhs`），
+`simplex/certificate.mbt::duality_gap_violation` 逐字复现校验器那一条式子（同 cost、同 `r = c − Aᵀy`
+且累加顺序相同、同行关系符号、同框极小值规则、同分母、同"没有有限界"哨兵）。
+
+- **行为影响**：本语料上除 `noswot` 一行的 `verified` 19 905 → 19 907、界 2e-14 相对量以外**没有数字变化**；
+  四个已证最优实例的节点数一字未动（`flugpl` 13 806 / `khb05250` 305 / `p0201` 586 / `22433` 33）；
+  300 节点口径与解析 / 求解两份报告逐字节相同。**覆盖面一个没多** —— 这一版修的是"答案可不可信"，
+  不是"能解多大"。三条诚实边界（修复后的证书不在自检覆盖内、`refactorize()` 修不好那一支没有测试、
+  带内且无有限界仍丢项）记在第二十八轮条目里。
+- **测试**：174 → **180**。新增 `verify/checks_wbtest.mbt` 4 条白盒（带内按界计入、带外按指向的界取值、
+  带内不能报"没有界"）与 `simplex/certificate_wbtest.mbt` 2 条（6 个模型在内核侧与校验器侧量同一个数，
+  `rel = 1e-15`；以及专打带内路径的那条 —— **它在旧语义下会失败**）。
+- 四份报告在含本修正的代码提交上重生成（`bench/report.ps1` 读出 4 report(s)、0 stale），
+  `bench/check-mip-objectives.ps1` 两项 `violations 0 / not in the table 0 / unverified nodes 0`。
+
+**发布物验收（本轮重跑的部分，做法见 `docs/roadmap.md` 的 M6 轮次）**：归档
+`_build/publish/Freon793-moonopt-0.1.2.zip` 是 **125 个条目 / 462 588 字节**，`bench/data` 只剩本项目自己写的
+清单 `small.txt` ⇒ **不含**任何 MIPLIB 第三方实例数据；把它解出来当模块根，`moon check --deny-warn`
+退出 0、`moon test` 180/180 全绿 ⇒ 归档自包含。**没有重跑**的是"外部包只用公开面"那条，理由是可查的：
+`git diff v0.1.1 HEAD -- '*.mbti'` 只有 4 行，全部是 `pub struct KernelProblem` 新增的字段
+（`pub` 而非 `pub(all)`，包外既不能构造也不能读），也就是**可用公开面在本版一位没变**；
+四项契约（线性 21 / 整数 20 / 不可行 / 预算 1 报 `node-limit`）的实测记录见 `docs/roadmap.md` 的 M6 E 轮。
 
 ## [0.1.1] — 2026-09-21
 

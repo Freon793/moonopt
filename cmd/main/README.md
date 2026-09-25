@@ -14,7 +14,7 @@ moon run cmd/main
 输出示例（首行是版本）：
 
 ```text
-moonopt 0.1.1
+moonopt 0.1.2
 == production plan
 status     : Optimal
 objective  : 21.00000000002238
