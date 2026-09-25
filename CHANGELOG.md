@@ -27,7 +27,7 @@
 | 同报告 `noswot` 的 gap | `9.000000000037659` | `9.000000000094794` |
 | `relaxations verified` 汇总 | 134 603 | **134 603**（一字未动） |
 | 4 个已证最优实例 | `flugpl` 13 806 / `khb05250` 305 / `p0201` 586 / `22433` 33 | **一字未动** |
-| `bench/mip-report.md`（32 实例 / 300 节点） | — | 除 commit 行外**逐字节相同** |
+| `bench/mip-report.md`（32 实例 / 300 节点） | — | 除 commit 行与本轮改过的那段 `verify` 列说明外，32 个实例行**逐字未动** |
 | `bench/check-mip-objectives.ps1` 两项 | — | `violations 0, not in the table 0, unverified nodes 0` |
 
 **更正（本轮开工时写错的一条推论，必须留痕）**：`ef4a31e` 的提交信息说"300 节点口径下 `mod010` 与 `noswot` 各留下
