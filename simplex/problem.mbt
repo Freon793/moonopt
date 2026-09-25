@@ -92,6 +92,35 @@ pub struct KernelProblem {
   /// the slack column the assembly happened to add would be reading one field for another,
   /// which is how a cut witness came to carry a sign error on every `≤` row.
   row_relation : Array[@model.Rel]
+  /// The model's own objective coefficients, in the minimisation sense `verify` reads them
+  /// in (`sense_sign · c`, the same number `verify`'s `dense_cost` accumulates).
+  ///
+  /// The kernel's cost vector is not this one: it is stated on kernel columns, carries the
+  /// negation of a maximisation and the sign of a free variable's split. A certificate is
+  /// judged against the *model's* numbers, so a self-check that stands in for the checker has
+  /// to measure them — `simplex/certificate.mbt::duality_gap_violation` does, and this is
+  /// where it gets them. Carrying them is the point: re-deriving a model coefficient from the
+  /// normalized image means composing sign flips that the model layer already made once, and
+  /// a producer that measures a *reconstruction* of the checker's input is measuring a
+  /// different thing, which is a mistake this project has made three times.
+  model_cost : Array[Double]
+  /// The model's variable lower bounds, `lⱼ` — not the kernel's, which are all zero because
+  /// the model's were absorbed into `var_offset`.
+  ///
+  /// The duality gap's box minimum is taken over each variable's *own* range, so recovering
+  /// `lⱼ` as `var_offset[j]` is right for an ordinary variable and wrong for a variable the
+  /// kernel split in two (where the offset is zero and the bound is a row).
+  model_lower : Array[Double]
+  /// The model's variable upper bounds, `uⱼ`, with `@model.infinite_bound` where there is
+  /// none. `upper` is the kernel's column bound, which is `uⱼ − lⱼ` for an ordinary variable
+  /// and absent for a split one; this is the number the checker multiplies a reduced cost by.
+  model_upper : Array[Double]
+  /// The model's own right hand sides, one per model row, in model row order.
+  ///
+  /// `rhs` is the normalized kernel right hand side, which has the row's sign and every
+  /// variable offset folded into it, so the model's `bᵢ` cannot be read back out of it without
+  /// re-summing `Σⱼ aᵢⱼ·lⱼ` in an order the model layer did not use.
+  model_rhs : Array[Double]
 } derive(Debug)
 
 ///|
@@ -170,10 +199,18 @@ pub fn KernelProblem::from_standard(
   let var_columns : Array[Array[(Int, Double)]] = []
   let var_offset : Array[Double] = []
   let structural_upper : Array[Double] = []
+  // The standard form has no model layer of its own: its variables are non-negative with no
+  // upper bound, so the model `verify` is handed for a result of this entry point is exactly
+  // that. (`oracle/dense_tableau.mbt` solves the same shape, which is what makes the two
+  // comparable.)
+  let model_lower : Array[Double] = []
+  let model_upper : Array[Double] = []
   for j = 0; j < num_vars; j = j + 1 {
     var_columns.push([(j, 1.0)])
     var_offset.push(0.0)
     structural_upper.push(@model.infinite_bound)
+    model_lower.push(0.0)
+    model_upper.push(@model.infinite_bound)
   }
   let row_entries : Array[Array[(Int, Double)]] = []
   let row_rels : Array[@model.Rel] = []
@@ -195,7 +232,7 @@ pub fn KernelProblem::from_standard(
   }
   assemble(
     num_vars, cost, 0.0, 1.0, var_columns, var_offset, structural_upper, row_entries,
-    row_rels, row_rhs, row_sources,
+    row_rels, row_rhs, row_sources, cost, model_lower, model_upper, row_rhs,
   )
 }
 
@@ -218,18 +255,33 @@ pub fn from_model_with(
   relax_integrality : Bool,
 ) -> Result[KernelProblem, String] {
   let nvars = model.num_vars()
+  // The multiplier that turns the model's sense into the minimisation the kernel solves, and
+  // the same number `verify`'s `sense_sign` returns: a certificate is stated in the model's
+  // sense, so both halves of it need this one.
+  let model_sign = if model.sense() == @model.Sense::Maximize {
+    -1.0
+  } else {
+    1.0
+  }
   // Pass 1: decide a kernel representation for every model variable.
   let var_columns : Array[Array[(Int, Double)]] = []
   let var_offset : Array[Double] = []
   // Upper bound of each structural column, in column order. Only the explicit row
   // case (below) leaves it at infinity.
   let structural_upper : Array[Double] = []
+  // The model's own bounds, kept next to the kernel's, because the duality gap is stated
+  // over the model's box: a reduced cost points at `lⱼ` or at `uⱼ`, and for a split
+  // variable neither is a kernel column bound or an offset.
+  let model_lower : Array[Double] = []
+  let model_upper : Array[Double] = []
   let mut next_column = 0
   // Row form of an upper bound, used only where a column bound cannot express it:
   // a split pair `p − n ≤ ub`, or bounds that contradict each other.
   let bound_rows : Array[(Array[(Int, Double)], Double)] = []
   for j = 0; j < nvars; j = j + 1 {
     let variable = model.get_var(j)
+    model_lower.push(variable.lb)
+    model_upper.push(variable.ub)
     if variable.is_int && !relax_integrality {
       return Err(
         "integer variables are not supported by the linear kernel (planned for the branch and bound stage); use SimplexOptions::relaxed() for the LP relaxation",
@@ -278,7 +330,15 @@ pub fn from_model_with(
   // Which model row each kernel row came from; the rows this package adds below are
   // not model rows and get -1.
   let row_sources : Array[Int] = []
+  // The model's own right hand sides, the numbers a certificate's multipliers are paired
+  // with. `row_rhs` below is the kernel's: the same row with every variable offset already
+  // moved to the other side, which is not a number the checker ever sees.
+  let model_rhs : Array[Double] = []
   let mut objective_constant = 0.0
+  // The model's objective in the minimisation sense `verify` reads it in. Accumulated in the
+  // model's own term order, which is the order `verify`'s `dense_cost` accumulates in, so the
+  // two agree digit for digit rather than to within a re-summation.
+  let model_cost : Array[Double] = Array::make(nvars, 0.0)
   let model_objective = model.objective()
   for i = 0; i < model.num_constraints(); i = i + 1 {
     let constraint = model.constraint(i)
@@ -303,12 +363,15 @@ pub fn from_model_with(
     row_entries.push(entries)
     row_rels.push(constraint.rel)
     row_sources.push(i)
+    model_rhs.push(constraint.rhs)
     row_rhs.push(adjusted_rhs)
   }
   for k = 0; k < model_objective.length(); k = k + 1 {
     let (variable_index, coefficient) = model_objective[k]
     objective_constant = objective_constant +
       coefficient * var_offset[variable_index]
+    model_cost[variable_index] = model_cost[variable_index] +
+      model_sign * coefficient
   }
   for b = 0; b < bound_rows.length(); b = b + 1 {
     let (entries, ub) = bound_rows[b]
@@ -319,11 +382,6 @@ pub fn from_model_with(
   }
   // Pass 3: objective in kernel columns, negated for a maximisation.
   let kernel_cost : Array[Double] = Array::make(structural, 0.0)
-  let model_sign = if model.sense() == @model.Sense::Maximize {
-    -1.0
-  } else {
-    1.0
-  }
   for k = 0; k < model_objective.length(); k = k + 1 {
     let (variable_index, coefficient) = model_objective[k]
     let parts = var_columns[variable_index]
@@ -346,6 +404,10 @@ pub fn from_model_with(
       row_rels,
       row_rhs,
       row_sources,
+      model_cost,
+      model_lower,
+      model_upper,
+      model_rhs,
     ),
   )
 }
@@ -357,6 +419,10 @@ pub fn from_model_with(
 /// `structural_upper` gives the upper bound of each structural column; the columns
 /// this function adds (slacks, surpluses, artificials) are all unbounded above,
 /// which is what a slack variable is.
+///
+/// The four `model_*` parameters are the model layer's own numbers, carried through
+/// unchanged because a certificate is stated against the model and never against this
+/// normal form. They are documented field by field on `KernelProblem`.
 fn assemble(
   structural : Int,
   structural_cost : Array[Double],
@@ -369,6 +435,10 @@ fn assemble(
   row_rels : Array[@model.Rel],
   row_rhs : Array[Double],
   row_sources : Array[Int],
+  model_cost : Array[Double],
+  model_lower : Array[Double],
+  model_upper : Array[Double],
+  model_rhs : Array[Double],
 ) -> KernelProblem {
   let m = row_entries.length()
   // Row sign normalisation: every right hand side becomes non-negative, which is
@@ -495,6 +565,10 @@ fn assemble(
     row_dual_factor: dual_factors,
     row_sign: signs,
     row_relation: row_rels,
+    model_cost,
+    model_lower,
+    model_upper,
+    model_rhs,
   }
 }
 

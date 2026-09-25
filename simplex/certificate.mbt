@@ -200,6 +200,180 @@ fn State::row_multiplier_is_negative(
 }
 
 ///|
+/// `true` when a model variable has a real lower bound, by the same rule `verify` uses.
+///
+/// The comparison is `verify`'s, threshold and all, rather than a tolerance of this file's
+/// own: a producer that judges "is there a bound here" differently from the checker can put a
+/// term into the bound it is about to claim that the checker leaves out, or the reverse, and
+/// the two would then be measuring different numbers while both look right.
+fn model_has_lower(lb : Double) -> Bool {
+  !is_unbounded_below(lb)
+}
+
+///|
+/// `true` when a model variable has a real upper bound, by the same rule `verify` uses.
+fn model_has_upper(ub : Double) -> Bool {
+  !is_unbounded_above(ub)
+}
+
+///|
+/// The model-space reduced cost of one variable and the scale `verify` judges it against,
+/// both read out of the kernel column the variable came from.
+///
+/// `verify` states these over the model's rows, in the model's numbers:
+///
+///   `rⱼ = cⱼ + Σ_{≤} yᵢaᵢⱼ − Σ_{≥} yᵢaᵢⱼ − Σ_{=} yᵢaᵢⱼ`, accumulated in ascending row
+///   order with plain addition, and `scaleⱼ = 1 + |cⱼ| + Σᵢ|aᵢⱼyᵢ|` with compensated
+///   summation.
+///
+/// Both are reproduced here term for term rather than re-derived. The coefficients come out
+/// of the kernel's column instead of the model's row: a kernel entry for model variable `j` is
+/// `±aᵢⱼ` — the column bound shift contributes a sign, the row's own sign normalisation
+/// another, and a free variable's split a third, all of them `±1` — and multiplying a float by
+/// `±1` is exact, so the value that comes back is the model's coefficient and not a
+/// re-computation of it. The order comes out right too: `normalize_terms` merges a row's terms
+/// and sorts them by variable index, one term per variable, so a column's entries are already
+/// the model rows in ascending order, which is the order `verify` accumulates in.
+///
+/// The one place the two can part company is a row that lists the same variable twice: the
+/// model layer sums those into one term, while the kernel's CSC packing merges the two entries
+/// of the same column-and-row pair, so this adds `yᵢ·(a + b)` where `verify` adds `yᵢ·a +
+/// yᵢ·b`. That is a rounding of the last place rather than a different quantity, and it cannot
+/// be removed without giving the kernel a second copy of the matrix.
+fn State::model_reduced_cost(
+  self : State,
+  j : Int,
+  duals : Array[Double],
+) -> (Double, Double) {
+  let problem = self.problem
+  // Any part of the variable names the same rows with the same magnitudes; the first is the
+  // one whose sign the assembly recorded in `var_columns`.
+  let (column, part_sign) = problem.var_columns[j][0]
+  let mut reduced = problem.model_cost[j]
+  let scale_acc = @core.CompensatedSum::new()
+  let pointers = problem.matrix.col_pointers()
+  let rows = problem.matrix.row_indices()
+  let values = problem.matrix.values_view()
+  let mut k = pointers[column]
+  let end = pointers[column + 1]
+  while k < end {
+    let row = rows[k]
+    let source = problem.row_source[row]
+    if source >= 0 && source < duals.length() {
+      let coefficient = values[k] * problem.row_sign[row] * part_sign
+      // A row with a zero multiplier contributes nothing, which is also how `verify` skips it.
+      // The zero is skipped rather than added so that a `-0.0` cannot turn into a `+0.0`.
+      if duals[source] != 0.0 {
+        let sign = match problem.row_relation[row] {
+          @model.Rel::LessEqual => 1.0
+          @model.Rel::GreaterEqual => -1.0
+          @model.Rel::Equal => -1.0
+        }
+        reduced = reduced + sign * duals[source] * coefficient
+      }
+      scale_acc.add(@core.fabs(coefficient * duals[source]))
+    }
+    k = k + 1
+  }
+  (reduced, 1.0 + @core.fabs(problem.model_cost[j]) + scale_acc.value())
+}
+
+///|
+/// The duality gap this run's multipliers give — `|primal − L| / (1 + |primal| + |L|)`, with
+/// `L` the Lagrangian bound of `min cᵀx` over the box the variables live in — together with
+/// the two numbers it is made of.
+///
+/// This is the third of the three measurements an optimality proof consists of, and the last
+/// one the kernel was not making. The residual check says the point satisfies the rows; the
+/// sign check says the multipliers can be read in the convention a certificate is written in;
+/// neither says the *bound those multipliers prove* meets the *objective that point has*, and
+/// that equality is the whole content of an optimality claim. A basis can satisfy the first
+/// two and miss the third: on MIPLIB's `noswot`, node 6454 of a branch and bound run, the
+/// multipliers of a 182 row relaxation proved a bound `1.2169280658914303e-7` short of the
+/// objective the relaxation claimed, against a tolerance of `1e-7` — a certificate that is
+/// *nearly* a proof, which the independent checker refused and which therefore stopped the
+/// whole search. Measuring it here is the same argument that put the residual and sign checks
+/// here: a producer that has not measured what it is about to claim cannot tell a run with
+/// nothing to say from one with something wrong to say, and only the kernel can repair the
+/// digits (`refactorize`) before it gives up on the relaxation.
+///
+/// Every operand is the model's own, carried through the standard-form construction rather
+/// than reconstructed from it (`KernelProblem::model_cost`, `model_lower`, `model_upper`,
+/// `model_rhs`), which is what makes this *the same measurement* as the checker's rather than a
+/// second opinion about it. The tolerance is the run's feasibility tolerance, the number the
+/// callers of this kernel hand the checker for the same purpose.
+///
+/// The "no finite bound" answer is the checker's too: a reduced cost that points at a
+/// direction the variable can travel forever gives no bound, and the gap is reported as the
+/// sentinel `1e300` that fails any tolerance rather than as a number that might pass one.
+fn State::duality_gap_violation(
+  self : State,
+  model_values : Array[Double],
+  duals : Array[Double],
+) -> (Double, Double, Double) {
+  let problem = self.problem
+  let tolerance = self.options.feasibility_tolerance
+  let nvars = problem.var_columns.length()
+  // `primal = Σⱼ costⱼ·xⱼ`, in the minimisation sense, over the model's variables.
+  let primal_acc = @core.CompensatedSum::new()
+  for j = 0; j < nvars && j < model_values.length(); j = j + 1 {
+    primal_acc.add(problem.model_cost[j] * model_values[j])
+  }
+  let primal = primal_acc.value()
+  // `D = −Σ_{≤} yᵢbᵢ + Σ_{≥} yᵢbᵢ + Σ_{=} yᵢbᵢ`, in model row order.
+  let constant_acc = @core.CompensatedSum::new()
+  for row = 0; row < problem.nrows; row = row + 1 {
+    let source = problem.row_source[row]
+    if source >= 0 &&
+      source < duals.length() &&
+      source < problem.model_rhs.length() {
+      let sign = match problem.row_relation[row] {
+        @model.Rel::LessEqual => -1.0
+        @model.Rel::GreaterEqual => 1.0
+        @model.Rel::Equal => 1.0
+      }
+      constant_acc.add(sign * duals[source] * problem.model_rhs[source])
+    }
+  }
+  // `Σⱼ min over [lⱼ, uⱼ] of rⱼ·xⱼ`. The direction is decided at the tolerance; the value
+  // follows the bound that direction points at, whenever there is one — a reduced cost inside
+  // the band is round-off as a direction and still worth `|bound| · |rⱼ|` as a number.
+  let box_acc = @core.CompensatedSum::new()
+  let mut unbounded = false
+  for j = 0; j < nvars; j = j + 1 {
+    let (reduced, scale) = self.model_reduced_cost(j, duals)
+    if reduced > tolerance * scale {
+      if !model_has_lower(problem.model_lower[j]) {
+        unbounded = true
+        break
+      }
+      box_acc.add(problem.model_lower[j] * reduced)
+    } else if reduced < -tolerance * scale {
+      if !model_has_upper(problem.model_upper[j]) {
+        unbounded = true
+        break
+      }
+      box_acc.add(problem.model_upper[j] * reduced)
+    } else if reduced > 0.0 {
+      if model_has_lower(problem.model_lower[j]) {
+        box_acc.add(problem.model_lower[j] * reduced)
+      }
+    } else if reduced < 0.0 {
+      if model_has_upper(problem.model_upper[j]) {
+        box_acc.add(problem.model_upper[j] * reduced)
+      }
+    }
+  }
+  if unbounded {
+    return (1.0e300, primal, -1.0e300)
+  }
+  let bound = box_acc.value() + constant_acc.value()
+  let gap = @core.fabs(primal - bound) /
+    (1.0 + @core.fabs(primal) + @core.fabs(bound))
+  (gap, primal, bound)
+}
+
+///|
 /// Whether a Phase I optimum may be read as an infeasibility proof.
 ///
 /// Phase I minimises the artificial sum subject to `A x + a = b`, so at its optimum the

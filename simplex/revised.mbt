@@ -1706,6 +1706,7 @@ fn State::finish_optimal(self : State) -> SimplexResult {
   let problem = self.problem
   let options = self.options
   let mut kernel_values = self.values()
+  let mut model_values = problem.solution(kernel_values)
   // Final self-check: never report an optimum for a point that does not satisfy
   // the rows or the non-negativity requirement, judged against the scale of the
   // numbers involved (see max_scaled_residual).
@@ -1726,14 +1727,22 @@ fn State::finish_optimal(self : State) -> SimplexResult {
   let mut duals = self.model_duals()
   let mut signs = self.max_dual_sign_violation(duals)
   let mut sign_violation = signs.0
+  // And the third measurement an optimality proof is made of: the two above say the point is
+  // feasible and the multipliers can be written down, and neither says the bound those
+  // multipliers prove meets the objective that point has. See `duality_gap_violation` for the
+  // node of `noswot` that made this concrete.
+  let mut gap_measure = self.duality_gap_violation(model_values, duals)
+  let mut gap = gap_measure.0
   if scaled_residual > tolerance ||
     negativity > tolerance ||
-    sign_violation > tolerance {
+    sign_violation > tolerance ||
+    gap > tolerance {
     // The product-form updates are exact in exact arithmetic but accumulate
     // round-off; folding them into a fresh factorization often restores the last
     // digits. Only a violation that survives that is a numerical failure.
     if self.refactorize() {
       kernel_values = self.values()
+      model_values = problem.solution(kernel_values)
       let retried = max_scaled_residual(
         problem,
         kernel_values,
@@ -1750,6 +1759,10 @@ fn State::finish_optimal(self : State) -> SimplexResult {
       duals = self.model_duals()
       signs = self.max_dual_sign_violation(duals)
       sign_violation = signs.0
+      // The gap is measured from the duals and the point, so a fresh factorization has to be
+      // followed by a fresh measurement of both halves of it.
+      gap_measure = self.duality_gap_violation(model_values, duals)
+      gap = gap_measure.0
     }
   }
   if scaled_residual > tolerance || negativity > tolerance {
@@ -1794,6 +1807,32 @@ fn State::finish_optimal(self : State) -> SimplexResult {
       ", so the optimality proof cannot be written down)",
     }
   }
+  if gap > tolerance {
+    // Both halves of the proof are in order and the proof still does not close: the
+    // multipliers give a bound short of the objective the point has. The basis is optimal by
+    // its reduced costs, so this is a statement about the arithmetic rather than about the
+    // problem — and the run has no certificate to offer for this model, which is what
+    // `NumericalFailure` says. The caller's accounting treats it as a relaxation that reached
+    // no verdict: the search is not stopped and the tree is not called exhausted.
+    return {
+      status: NumericalFailure,
+      values: [],
+      objective: 0.0,
+      iterations: self.iterations,
+      duals: [],
+      ray: [],
+      basis: None,
+      message: "the multipliers of the optimal basis do not prove the objective this point has (duality gap " +
+      gap.to_string() +
+      " against a tolerance of " +
+      tolerance.to_string() +
+      ": objective " +
+      gap_measure.1.to_string() +
+      ", bound " +
+      gap_measure.2.to_string() +
+      "), so the optimality proof cannot be written down",
+    }
+  }
   let acc = @core.CompensatedSum::new()
   acc.add(problem.objective_constant)
   for j = 0; j < problem.ncols; j = j + 1 {
@@ -1801,7 +1840,7 @@ fn State::finish_optimal(self : State) -> SimplexResult {
   }
   {
     status: Optimal,
-    values: problem.solution(kernel_values),
+    values: model_values,
     objective: problem.model_sign * acc.value(),
     iterations: self.iterations,
     // The duals of the final basis are the other half of an optimality proof. They

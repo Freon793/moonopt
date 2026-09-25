@@ -167,11 +167,20 @@ fn lagrangian_constant(model : @model.Model, duals : Array[Double]) -> Double {
 /// `min_{l ≤ x ≤ u} r·x`, or the "no finite bound" sentinel when a reduced cost
 /// points in a direction the variable can travel forever.
 ///
-/// A reduced cost is judged against the same tolerance the dual feasibility check
-/// uses, and for the same reason: a multiplier that is round-off small points nowhere,
-/// and calling it a direction to infinity would refuse a certificate whose every other
-/// measurement agrees. Getting these two out of step is how the first run of this
-/// verifier rejected an optimal solve of a real instance.
+/// The tolerance decides which *direction* a reduced cost points in, and nothing else.
+/// A reduced cost that is round-off small points nowhere, and calling it a direction to
+/// infinity would refuse a certificate whose every other measurement agrees — that is
+/// what the band `|rⱼ| ≤ tolerance · scale` is for.
+///
+/// The *value* of the term is a different question, and the tolerance has no say in it:
+/// the term is `|bound| · |rⱼ|`, decided by the bound the reduced cost points at, so a
+/// reduced cost inside the band is still worth what its bound makes it worth. Dropping
+/// it because it is small in the wrong units was this function's bug: on `blend2` the
+/// bounds are of order `1e3`, so a reduced cost of `1e-6` — one part in `1e7` of the
+/// scale the feasibility checks judge it against — is a term of order `1e-3`, ten
+/// thousand times the tolerance the duality gap is then measured against. The band is
+/// therefore only allowed to *drop* a term when the direction it points in has no finite
+/// bound to contribute (`rⱼ > 0` with no lower bound, `rⱼ < 0` with no upper bound).
 fn box_minimum(
   model : @model.Model,
   cost : Array[Double],
@@ -182,18 +191,27 @@ fn box_minimum(
   let acc = @core.CompensatedSum::new()
   for j = 0; j < model.num_vars() && j < r.length(); j = j + 1 {
     let scale = reduced_cost_scale(model, j, cost, duals)
+    let variable = model.get_var(j)
     if r[j] > tolerance * scale {
-      let variable = model.get_var(j)
       if !has_lower(variable.lb) {
         return -1.0e300
       }
       acc.add(variable.lb * r[j])
     } else if r[j] < -tolerance * scale {
-      let variable = model.get_var(j)
       if !has_upper(variable.ub) {
         return -1.0e300
       }
       acc.add(variable.ub * r[j])
+    } else if r[j] > 0.0 {
+      // Inside the band, and still pointing at the lower bound. The term is real and is
+      // counted whenever that bound exists.
+      if has_lower(variable.lb) {
+        acc.add(variable.lb * r[j])
+      }
+    } else if r[j] < 0.0 {
+      if has_upper(variable.ub) {
+        acc.add(variable.ub * r[j])
+      }
     }
   }
   acc.value()
