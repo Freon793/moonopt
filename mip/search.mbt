@@ -44,6 +44,30 @@ fn reserve_allows_walk(
 }
 
 ///|
+/// How much of the root bound one round of cuts has to add before another round is started.
+///
+/// Measured by counting the root bound after each round on four instances (the `--max-nodes r+2`
+/// probe): `khb05250` adds 5.6%, 2.4%, 1.5%, 0.4%, 0.3% over its first five rounds and its proof
+/// costs 305 nodes after two rounds, 185 after three and 114 after four; `p0201` adds 2.9%, 1.3%,
+/// 0.5%, 0.8%, 0.5% and its proof costs 586 nodes after two rounds against 1135 after three;
+/// `flugpl` adds 0.3%, 0.05%, 0.02% and costs 13806 against 14938; `dcmulti` adds 0.7%, 0.3%,
+/// 0.03%, 0.04%, 0.18%. A round that adds a percent of the bound does not pay for the tree it
+/// costs — and the instances that keep adding it are exactly the ones whose proof gets cheaper.
+let cut_round_gain : Double = 0.014
+
+///|
+/// The number of rounds a run does whatever that measurement says, which is the number the
+/// default always ran: two. The test can only stop rounds *after* these, so a run whose cuts stop
+/// paying early is left exactly as it was.
+let cut_rounds_always : Int = 2
+
+///|
+/// Whether a round that has just been taken is worth following with another one.
+fn another_round_pays(round : Int, added : Double) -> Bool {
+  round < cut_rounds_always || added >= cut_round_gain
+}
+
+///|
 /// `-1` for a minimisation, `+1` for a maximisation: the sign that turns "better" into
 /// "smaller", so one comparison serves both senses.
 fn sense_sign(model : @model.Model) -> Double {
@@ -791,6 +815,7 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
               // The added rows changed the shape of the problem, so the basis the
               // relaxation ended on no longer describes it: this re-solve is cold on
               // purpose, and it is counted and verified like every other relaxation.
+              let before_bound = solution.objective
               let tightened_problem = node_model(candidate, nodes, index)
               let (tightened, tightened_basis) = kernel_node(
                 tightened_problem,
@@ -843,6 +868,16 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
                 solution = tightened
                 node_basis = tightened_basis
                 cuts_added = cuts_added + cuts.length()
+                // What this round added to the root bound, in the model's own sense. A further
+                // round is only *started* while that is worth its cost; the first
+                // `cut_rounds_always` rounds happen whatever it says, so the measured behaviour
+                // of a run whose cuts stop paying early does not change.
+                let added = sign *
+                  (tightened.objective - before_bound) /
+                  (1.0 + @core.fabs(before_bound))
+                if !another_round_pays(round, added) {
+                  keep_going = false
+                }
               } else {
                 keep_going = false
               }

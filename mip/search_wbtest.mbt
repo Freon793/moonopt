@@ -377,3 +377,29 @@ test "the dive reserve is spent only on a walk it can afford, after the halfway 
   assert_false(reserve_allows_walk(59, 60, 20000, 20000))
   assert_false(reserve_allows_walk(0, 60, 20000, 20000))
 }
+
+///|
+/// Whether another round of cuts is worth starting: the rounds a run always took are taken
+/// whatever the measurement says, and beyond them a round that added less than `cut_round_gain`
+/// of the root bound is not followed by another.
+///
+/// The two sides of that line are measured (`khb05250` adds 2.4% on its second round and 1.5% on
+/// its third and proves 114 nodes instead of 305; `p0201` adds 1.3% on its second and 0.5% on its
+/// third and proves 586 instead of 1135), and the `cut_rounds_always` clause is what keeps the
+/// instances measured in earlier rounds — `flugpl` at 0.05%, `dcmulti` at 0.3% — exactly where
+/// they were.
+test "another cut round needs to have paid for itself" {
+  // After the first round another one always follows, so the rounds a run always took are taken.
+  assert_true(another_round_pays(1, 0.0))
+  // After the second, the measurement decides: that is why `p0201` / `flugpl` / `dcmulti` come
+  // back byte-identical to the runs that were measured before this rule existed.
+  assert_false(another_round_pays(2, 0.0))
+  // Past them, the line is `cut_round_gain`.
+  assert_true(another_round_pays(2, cut_round_gain))
+  assert_true(another_round_pays(2, 0.024))
+  assert_false(another_round_pays(2, 0.013))
+  assert_false(another_round_pays(3, 0.0005))
+  // A round that made the root bound *worse* is not followed either; the round itself is
+  // discarded where it happens, not here.
+  assert_false(another_round_pays(2, -1.0))
+}

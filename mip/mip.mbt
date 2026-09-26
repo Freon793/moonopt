@@ -173,6 +173,12 @@ pub(all) struct MipOptions {
   /// `@verify.verify_cut` and refused if the checker disagrees — a refused cut stops the
   /// run as `Unverified` exactly like a refused node certificate, because the alternative
   /// is to keep searching a model that is no longer the caller's.
+  ///
+  /// The ceiling on rounds at the root, not the number of them: a run always does the first two,
+  /// and past that it starts another round only while the last one added at least
+  /// `cut_round_gain` of the root bound (`mip/search.mbt` carries the per-round measurements that
+  /// rest on). A cap of two is therefore "two rounds, as it always was"; a larger cap gives the
+  /// rounds to the instances whose cuts keep paying.
   cut_rounds : Int
   /// Replaces the default node solver. Only tests use it.
   node_solver : ((@model.Model) -> NodeSolution)?
@@ -198,7 +204,7 @@ pub fn MipOptions::default() -> MipOptions {
     verify_nodes: true,
     dive_steps: 60,
     dive_attempts: 2,
-    cut_rounds: 2,
+    cut_rounds: 4,
     node_solver: None,
     cut_hook: None,
   }
