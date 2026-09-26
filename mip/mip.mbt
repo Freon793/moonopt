@@ -184,6 +184,15 @@ pub(all) struct MipOptions {
   /// rest on). A cap of two is therefore "two rounds, as it always was"; a larger cap gives the
   /// rounds to the instances whose cuts keep paying.
   cut_rounds : Int
+  /// Whether a relaxation may be rounded into a whole point and offered as the incumbent.
+  ///
+  /// On by default. It costs one pass over the model per solved relaxation and no solve at all,
+  /// and what it is for is the run with no integer point at all — the state in which a bound prunes
+  /// nothing. Measured on the wide manifest, where `50v-10` has no point under any other mechanism
+  /// and this one gives it one; on the instances that already have a point it changes nothing, since
+  /// only a strictly better point than the incumbent is taken. The tests turn it off to keep a
+  /// question about the walk about the walk.
+  primal_rounding : Bool
   /// Replaces the default node solver. Only tests use it.
   node_solver : ((@model.Model) -> NodeSolution)?
   /// Rewrites each generated cut just before it is verified. Only tests use it, and the
@@ -209,6 +218,7 @@ pub fn MipOptions::default() -> MipOptions {
     dive_steps: 60,
     dive_attempts: 2,
     cut_rounds: 4,
+    primal_rounding: true,
     node_solver: None,
     cut_hook: None,
   }
@@ -226,6 +236,7 @@ pub fn MipOptions::with_max_nodes(max_nodes : Int) -> MipOptions {
     dive_steps: base.dive_steps,
     dive_attempts: base.dive_attempts,
     cut_rounds: base.cut_rounds,
+    primal_rounding: base.primal_rounding,
     node_solver: base.node_solver,
     cut_hook: base.cut_hook,
   }
@@ -243,6 +254,7 @@ pub fn MipOptions::without_cuts(self : MipOptions) -> MipOptions {
     dive_steps: self.dive_steps,
     dive_attempts: self.dive_attempts,
     cut_rounds: 0,
+    primal_rounding: self.primal_rounding,
     node_solver: self.node_solver,
     cut_hook: self.cut_hook,
   }
@@ -264,6 +276,7 @@ pub fn MipOptions::with_cut_hook(
     dive_steps: self.dive_steps,
     dive_attempts: self.dive_attempts,
     cut_rounds: self.cut_rounds,
+    primal_rounding: self.primal_rounding,
     node_solver: self.node_solver,
     cut_hook: Some(hook),
   }
@@ -281,6 +294,7 @@ pub fn MipOptions::without_verification(self : MipOptions) -> MipOptions {
     dive_steps: self.dive_steps,
     dive_attempts: self.dive_attempts,
     cut_rounds: self.cut_rounds,
+    primal_rounding: self.primal_rounding,
     node_solver: self.node_solver,
     cut_hook: self.cut_hook,
   }
@@ -298,6 +312,25 @@ pub fn MipOptions::without_primal_dive(self : MipOptions) -> MipOptions {
     dive_steps: 0,
     dive_attempts: 0,
     cut_rounds: self.cut_rounds,
+    primal_rounding: self.primal_rounding,
+    node_solver: self.node_solver,
+    cut_hook: self.cut_hook,
+  }
+}
+
+///|
+/// The same options with the rounding switched off, for the tests that ask what the *walk* is worth:
+/// two primal mechanisms in one run make it impossible to say which of them found a point.
+pub fn MipOptions::without_primal_rounding(self : MipOptions) -> MipOptions {
+  {
+    max_nodes: self.max_nodes,
+    max_iterations: self.max_iterations,
+    tolerance: self.tolerance,
+    verify_nodes: self.verify_nodes,
+    dive_steps: self.dive_steps,
+    dive_attempts: self.dive_attempts,
+    cut_rounds: self.cut_rounds,
+    primal_rounding: false,
     node_solver: self.node_solver,
     cut_hook: self.cut_hook,
   }
@@ -318,6 +351,7 @@ pub fn MipOptions::with_node_solver(
     dive_steps: self.dive_steps,
     dive_attempts: self.dive_attempts,
     cut_rounds: self.cut_rounds,
+    primal_rounding: self.primal_rounding,
     node_solver: Some(solver),
     cut_hook: self.cut_hook,
   }

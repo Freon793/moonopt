@@ -689,6 +689,7 @@ fn mip_report(model : @model.Model, flags : SolveFlags) -> Bool {
     } else {
       base.cut_rounds
     },
+    primal_rounding: base.primal_rounding,
     node_solver: base.node_solver,
     cut_hook: base.cut_hook,
   }

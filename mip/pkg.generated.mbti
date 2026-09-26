@@ -21,6 +21,7 @@ pub(all) struct MipOptions {
   dive_steps : Int
   dive_attempts : Int
   cut_rounds : Int
+  primal_rounding : Bool
   node_solver : ((@model.Model) -> NodeSolution)?
   cut_hook : ((@verify.CutRow) -> @verify.CutRow)?
 }
@@ -30,6 +31,7 @@ pub fn MipOptions::with_max_nodes(Int) -> Self
 pub fn MipOptions::with_node_solver(Self, (@model.Model) -> NodeSolution) -> Self
 pub fn MipOptions::without_cuts(Self) -> Self
 pub fn MipOptions::without_primal_dive(Self) -> Self
+pub fn MipOptions::without_primal_rounding(Self) -> Self
 pub fn MipOptions::without_verification(Self) -> Self
 
 pub struct MipResult {

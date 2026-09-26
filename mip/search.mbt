@@ -953,6 +953,26 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
         unjudged.push(node.key)
       }
       NodeStatus::Optimal => {
+        // A whole point read off this relaxation by rounding, before anything is spent on it: one
+        // pass over the model and no solve at all (`rounded_point`). What it is for is the run with
+        // no point at all — `flugpl` spends the first 9000 of its 13806 relaxations unable to prune
+        // because it has nothing to prune against. It is offered on the same terms as everything
+        // else: only a strictly better point than the incumbent is taken, and only a point that
+        // passes the feasibility measurement the checker makes.
+        let rounded = if options.primal_rounding {
+          rounded_point(problem, solution.values, options.tolerance, sign)
+        } else {
+          []
+        }
+        if rounded.length() > 0 {
+          let value = point_objective(problem, rounded)
+          if !has_incumbent ||
+            sign * value < sign * incumbent_objective - options.tolerance {
+            incumbent = rounded
+            incumbent_objective = value
+            has_incumbent = true
+          }
+        }
         let fractional = most_fractional(
           problem,
           solution.values,

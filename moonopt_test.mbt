@@ -149,23 +149,54 @@ test "an integer model is solved to the integer optimum, not to its relaxation" 
 }
 
 ///|
-/// A node budget is a budget, not an answer: the run stops as `NodeLimit` with whatever
-/// integer point it has (here none, at one relaxation) and the bound still open.
+/// A node budget is a budget, not an answer: the run stops as `NodeLimit` with whatever integer
+/// point it has and the bound still open.
+///
+/// The point may exist even at one relaxation — the rounding heuristic reads one out of the root's
+/// own relaxation — which is why what is asserted here is the contract rather than the emptiness:
+/// the status is a limit, the bound is still the relaxation's, and a point, when there is one, is a
+/// point of the model and not an optimality claim.
 test "a node budget is reported as a budget rather than as an optimality claim" {
   // Cuts off: this is about what one relaxation's budget leaves behind, and a round of
   // cuts at the root would spend a second relaxation to tighten the same node.
-  let sol = @moonopt.solve_with(integer_mip(), {
+  let model = integer_mip()
+  let sol = @moonopt.solve_with(model, {
     max_iterations: 10000,
     presolve: true,
     max_nodes: 1,
     cut_rounds: 0,
   })
   assert_eq(sol.status, @moonopt.SolveStatus::NodeLimit)
-  assert_eq(sol.values.length(), 0)
   assert_true(@core.approx_eq(sol.bound, 73.0 / 6.0, rel=1.0e-9, abs=1.0e-9))
-  assert_true(sol.gap > 1.0e299)
   assert_true(sol.message.length() > 0)
   assert_eq(sol.nodes, 1)
+  if sol.values.length() > 0 {
+    // Whatever it has is a real integer point of the model, checked without the search's own
+    // routines, and its objective is that point's — not the relaxation's.
+    assert_eq(sol.values.length(), model.num_vars())
+    for j = 0; j < model.num_vars(); j = j + 1 {
+      if model.get_var(j).is_int {
+        // Whole to the last place, measured the way the search measures it: the distance to the
+        // nearest whole number, which is what `fractional_count` in the kernel decides a node on.
+        let truncated = Double::from_int(sol.values[j].to_int())
+        let distance = @core.fmin(
+          @core.fabs(sol.values[j] - truncated),
+          @core.fabs(sol.values[j] - truncated - 1.0),
+        )
+        assert_true(distance <= 1.0e-9)
+      }
+    }
+    let mut acc = 0.0
+    for term in model.objective() {
+      let (index, coefficient) = term
+      acc = acc + coefficient * sol.values[index]
+    }
+    assert_true(@core.approx_eq(sol.objective, acc, rel=1.0e-9, abs=1.0e-9))
+    // And the gap is the distance between those two numbers, not a claim that they meet.
+    assert_true(sol.gap > 0.0)
+  } else {
+    assert_true(sol.gap > 1.0e299)
+  }
 }
 
 ///|

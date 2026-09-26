@@ -283,17 +283,22 @@ test "the primal heuristic finds an incumbent the tree has not reached yet" {
   // Three relaxations: the root, then the walk's step. Without the walk the same three
   // relaxations are the root and two children, neither of which is whole. Cuts are
   // switched off because this test is about the walk: with the root's row rounded away,
-  // the same three-relaxation budget proves optimality instead of running out.
+  // the same three-relaxation budget proves optimality instead of running out. Rounding is
+  // switched off for the same reason — with a second primal mechanism running, the point could
+  // come from either of them and the test would no longer be about the walk.
   let without = @mip.solve_mip(
     model,
-    @mip.MipOptions::with_max_nodes(3).without_primal_dive().without_cuts(),
+    @mip.MipOptions::with_max_nodes(3)
+    .without_primal_dive()
+    .without_primal_rounding()
+    .without_cuts(),
   )
   assert_eq(without.status, @mip.MipStatus::NodeLimit)
   assert_eq(without.values.length(), 0)
   assert_eq(without.verified, without.nodes)
   let dived = @mip.solve_mip(
     model,
-    @mip.MipOptions::with_max_nodes(3).without_cuts(),
+    @mip.MipOptions::with_max_nodes(3).without_primal_rounding().without_cuts(),
   )
   assert_eq(dived.status, @mip.MipStatus::NodeLimit)
   // The point it found is a real answer to the model, checked without the search's own
@@ -365,10 +370,12 @@ test "an unbounded relaxation is not reported as an unbounded model" {
 test "a node budget stops the run without claiming optimality" {
   let model = two_variable_mip()
   // Cuts off: this is a test about what a budget of one relaxation leaves behind, and a
-  // round of cuts at the root would spend a second relaxation to tighten it.
+  // round of cuts at the root would spend a second relaxation to tighten it. Rounding off:
+  // it would find a point from the root's own relaxation, and "nothing is the incumbent yet"
+  // is the state this test is about.
   let result = @mip.solve_mip(
     model,
-    @mip.MipOptions::with_max_nodes(1).without_cuts(),
+    @mip.MipOptions::with_max_nodes(1).without_primal_rounding().without_cuts(),
   )
   assert_eq(result.status, @mip.MipStatus::NodeLimit)
   assert_eq(result.nodes, 1)
@@ -466,12 +473,13 @@ fn answers_the_root_and_the_first_child(
 /// best bound is 7.
 test "an unjudged node keeps its bound in the open set" {
   let model = one_row_three_and_a_half_mip()
-  // Cuts and the primal walk are off: the three-relaxation budget has to go to the root, the
+  // Cuts, the walk and the rounding are off: the three-relaxation budget has to go to the root, the
   // child that answers and the child that does not, which is the state this test is about.
   let base = @mip.MipOptions::with_max_nodes(3)
   let options = base
     .without_cuts()
     .without_primal_dive()
+    .without_primal_rounding()
     .with_node_solver(answers_the_root_and_the_first_child)
   let result = @mip.solve_mip(model, options)
   assert_eq(result.status, @mip.MipStatus::NodeLimit)
