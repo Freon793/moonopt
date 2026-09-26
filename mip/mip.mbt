@@ -128,7 +128,11 @@ pub(all) enum NodeStatus {
 pub(all) struct MipOptions {
   /// Largest number of nodes to process. Reaching it ends the run with `NodeLimit`.
   max_nodes : Int
-  /// Iteration cap handed to each relaxation.
+  /// Iteration cap handed to each relaxation, with one exception: the re-solve that decides a cut
+  /// round gets `cut_round_iteration_factor` times it (`mip/search.mbt` carries the measurement).
+  /// A verdict of "did not finish" there costs the whole round its cuts, and the re-solve is one
+  /// relaxation per round rather than one per node, so the longer cap is affordable where the
+  /// ordinary one is only a wrong answer about the round.
   max_iterations : Int
   /// Two objectives closer than this are the same objective, which is how "integral
   /// enough" and "the bound is closed" are decided.

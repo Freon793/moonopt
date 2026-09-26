@@ -403,3 +403,18 @@ test "another cut round needs to have paid for itself" {
   // discarded where it happens, not here.
   assert_false(another_round_pays(2, -1.0))
 }
+
+///|
+/// The cap a cut round's re-solve gets: longer than an ordinary relaxation, and long enough that a
+/// round whose model fits in the longer cap is not thrown away for the shorter one.
+///
+/// The measurement behind the factor is `mod010` at 300 nodes: with the 5000 iterations the report
+/// hands each relaxation, its second round's re-solve does not finish, the round is discarded and
+/// the run ends at the budget from a bound of 6540.4; 6000 and 7000 change nothing; at 20000 the
+/// round is kept and the instance is proved in 31 nodes. The cap is paid once per round rather than
+/// once per node, which is what makes paying it affordable.
+test "a cut round's re-solve gets a longer cap than an ordinary relaxation" {
+  assert_eq(cut_round_iteration_cap(5000), 20000)
+  assert_eq(cut_round_iteration_cap(20000), 80000)
+  assert_true(cut_round_iteration_cap(1) > 1)
+}

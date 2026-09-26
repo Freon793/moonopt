@@ -68,6 +68,26 @@ fn another_round_pays(round : Int, added : Double) -> Bool {
 }
 
 ///|
+/// How much longer than an ordinary relaxation the re-solve that decides a cut round may run.
+///
+/// The re-solve is one relaxation per round whose verdict decides whether a whole round of cuts is
+/// kept, and a verdict of "did not finish" says nothing about the round — it says the round's model
+/// did not fit in the cap every relaxation is given. Measured on `mod010` at 300 nodes, where the
+/// report hands each relaxation 5000 iterations: its second round's re-solve does not finish, the
+/// round is discarded, and the run ends at the budget with a bound of `6540.400000106969` against a
+/// published optimum of `6548`; 6000 and 7000 change nothing, and at 20000 the round is kept and
+/// the instance is proved **in 31 nodes**. The cap is paid once per round, so the whole run spends
+/// at most `cut_rounds × cut_round_iteration_factor × max_iterations` iterations on it — rounds,
+/// not nodes.
+let cut_round_iteration_factor : Int = 4
+
+///|
+/// The iteration cap a cut round's re-solve gets.
+fn cut_round_iteration_cap(max_iterations : Int) -> Int {
+  max_iterations * cut_round_iteration_factor
+}
+
+///|
 /// `-1` for a minimisation, `+1` for a maximisation: the sign that turns "better" into
 /// "smaller", so one comparison serves both senses.
 fn sense_sign(model : @model.Model) -> Double {
@@ -597,15 +617,16 @@ fn propagate_cutoff(
 }
 
 ///|
-/// Solves one node's relaxation.
+/// Solves one node's relaxation. `iterations` overrides the run's per-relaxation cap, which the
+/// cut round's retry uses.
 fn kernel_node(
   model : @model.Model,
   options : MipOptions,
   basis : @simplex.SimplexBasis?,
+  iterations? : Int = 0,
 ) -> (NodeSolution, @simplex.SimplexBasis?) {
-  let kernel_options = @simplex.SimplexOptions::relaxed().limit_iterations(
-    options.max_iterations,
-  )
+  let cap = if iterations > 0 { iterations } else { options.max_iterations }
+  let kernel_options = @simplex.SimplexOptions::relaxed().limit_iterations(cap)
   let outcome = match basis {
     Some(warm) => @simplex.solve_model_with_basis(model, kernel_options, warm)
     None => @simplex.solve_model_with(model, kernel_options)
@@ -817,10 +838,15 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
               // purpose, and it is counted and verified like every other relaxation.
               let before_bound = solution.objective
               let tightened_problem = node_model(candidate, nodes, index)
+              // The re-solve gets a longer cap than a node's relaxation: its verdict is what
+              // decides whether the whole round is kept, and "did not finish" is a statement
+              // about the cap rather than about the round (`cut_round_iteration_factor` carries
+              // the measurement).
               let (tightened, tightened_basis) = kernel_node(
                 tightened_problem,
                 options,
                 None,
+                iterations=cut_round_iteration_cap(options.max_iterations),
               )
               solved = solved + 1
               let mut refused = ""
