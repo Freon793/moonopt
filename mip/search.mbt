@@ -122,6 +122,25 @@ fn budget_left(max_nodes : Int, solved : Int) -> Bool {
 }
 
 ///|
+/// Whether a run's own point is far enough from what the search could still prove for another walk to
+/// be worth its relaxations. The walk exists for the run's current solution, and a run whose gap is
+/// already small has nothing to gain from it and something to lose: a walk's relaxations come out of
+/// the tree's. The line is the same tenth the repair uses, so no new constant is introduced.
+///
+/// A run with no point at all is not asked this question — the walk is started there whatever it says,
+/// which is why `has_incumbent` is part of the answer rather than of the caller's condition.
+fn run_point_is_far(
+  has_incumbent : Bool,
+  incumbent_objective : Double,
+  open_bound : Double,
+) -> Bool {
+  has_incumbent &&
+  @core.fabs(incumbent_objective - open_bound) /
+  (1.0 + @core.fabs(incumbent_objective)) >
+  0.1
+}
+
+///|
 /// `-1` for a minimisation, `+1` for a maximisation: the sign that turns "better" into
 /// "smaller", so one comparison serves both senses.
 fn sense_sign(model : @model.Model) -> Double {
@@ -235,6 +254,24 @@ fn open_bound(
   // An open set that is empty keeps the `0.0` this function has always returned for "the run
   // has not established a bound at all".
   sign * best
+}
+
+///|
+/// The best bound the run still has open, in the model's sense: the smallest key on the queue (a
+/// min-heap, so its root is the smallest) together with the smallest key among the relaxations that
+/// reached no verdict and were not re-queued. It is the same number `open_bound` computes for the
+/// report; this one exists so the search can ask the question at every node without walking the heap,
+/// and so the answer is in the units the incumbent is measured in.
+fn best_open_key(
+  queue : NodeQueue,
+  unjudged_min : Double,
+  sign : Double,
+) -> Double {
+  if queue.is_empty() {
+    return sign * unjudged_min
+  }
+  let top = queue.nodes[queue.heap[0]].key
+  sign * (if unjudged_min < top { unjudged_min } else { top })
 }
 
 ///|
@@ -775,6 +812,9 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
   // nothing at all on `dcmulti` and `rout`, the two runs the pump exists for. The root's point and
   // the model the whole tree is built from are what the run started with.
   let mut pump_seed : Array[Double] = []
+  // The smallest key among the nodes that reached no verdict and were not re-queued, kept so the
+  // search can ask "what is still open" at every node without walking the heap (`best_open_key`).
+  let mut unjudged_min = 1.0e300
   // The model the tree is built on: the caller's model plus the cuts the root earned.
   // Every node below the root is rebuilt from this one, so a cut added here is inherited
   // by the whole tree — which is exactly why it has to be checked before it lands.
@@ -1012,6 +1052,9 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
         // relaxation objective, which bounds that whole region.
         unfinished_nodes = unfinished_nodes + 1
         unjudged.push(node.key)
+        if node.key < unjudged_min {
+          unjudged_min = node.key
+        }
       }
       NodeStatus::Optimal => {
         if pump_seed.length() == 0 {
@@ -1049,6 +1092,12 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
           // incumbent 0.8% above its bound and the repairs bought it nothing at all — 977 nodes
           // instead, the whole budget spent — while `markshare1` and `pk1` are 100% and 78% away and
           // the repairs are what improves them. The line is drawn at a tenth.
+          // (Re-aimed at the run's *open bound* instead of this node's relaxation, this gate measured
+          // as a no-op on the four runs it was meant to help: `markshare1` 69 completions of 370
+          // attempts and 112 either way, `pk1` 2 of 65, `noswot` 0, `markshare2` 71 of 386. What those
+          // runs are short of is not repair budget: `markshare1` spends its whole allowance by
+          // relaxation 860 and its last three hundred attempts all come back worse than the 112 it
+          // already had — the chain is saturated.)
           @core.fabs(incumbent_objective - solution.objective) /
           (1.0 + @core.fabs(incumbent_objective)) >
           0.1 {
@@ -1229,16 +1278,38 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
           // of whole after thirty steps and landed within sixty, and `markshare1` and
           // `markshare2` only produced an incumbent at sixty. What the walk spends is what
           // the tree does not get, so it stays bounded by `dive_attempts × dive_steps`.
+          let far_from_its_bound = run_point_is_far(
+            has_incumbent,
+            incumbent_objective,
+            best_open_key(queue, unjudged_min, sign),
+          )
           if options.dive_steps > 0 &&
-            !has_incumbent &&
+            // The walk is started while the run has nothing, and — measured this round — also where
+            // its point is far from what the search could still prove: the runs whose current solution
+            // the reports show as far from the published optimum (`markshare1` 112 against 1, `pk1` 18
+            // against 11, `markshare2` 122 against 1, `noswot` −34 against −41) are exactly the ones
+            // whose incumbent stops moving, and the walk is the mechanism that has moved them before
+            // (rounds 4/6/26: with its gate opened, `gt2` went 44 073 → 21 166, `pk1` 36 → 17,
+            // `markshare2` 145 → 92). Where the run *can* still prove something the gap is small and
+            // the gate stays shut — the rows whose proofs round 26 cost by opening it were `flugpl`
+            // (1.9% away), `p0201` (5.3%) and `khb05250` (3% by the time it proves).
+            (!has_incumbent || far_from_its_bound) &&
             (
-              dives_launched < options.dive_attempts ||
-              reserve_allows_walk(
-                extra_dive_budget,
-                options.dive_steps,
-                solved,
-                options.max_nodes,
-              )
+              (
+                !has_incumbent &&
+                (
+                  dives_launched < options.dive_attempts ||
+                  reserve_allows_walk(
+                    extra_dive_budget,
+                    options.dive_steps,
+                    solved,
+                    options.max_nodes,
+                  )
+                )
+              ) ||
+              // A walk spent on a run that *has* a point is paid for out of the launches it was always
+              // allowed, never out of the reserve — the reserve exists for the run with nothing at all.
+              (far_from_its_bound && dives_launched < options.dive_attempts)
             ) {
             let fractional = fractional_count(
               problem,
