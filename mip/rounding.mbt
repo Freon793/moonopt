@@ -149,6 +149,22 @@ fn rounded_candidate(
 }
 
 ///|
+/// The node's model with every integer variable fixed at the value a rounding gave it.
+///
+/// This is the model a repair solves: the integers are decided, and the question is whether the
+/// continuous variables can complete them. It is a model like any other — the checker can judge a
+/// relaxation of it, which is what makes the repair a *solve* rather than a second rounding.
+fn fixed_integer_model(problem : @model.Model, point : Array[Double]) -> @model.Model {
+  let fixed = problem.clone()
+  for j = 0; j < fixed.num_vars() && j < point.length(); j = j + 1 {
+    if fixed.get_var(j).is_int {
+      fixed.set_var_bounds(j, point[j], point[j])
+    }
+  }
+  fixed
+}
+
+///|
 /// The best whole point one of the three roundings reaches, or `[]` when none of them satisfies the
 /// model. `sign` is the model's sense (`-1` for a maximisation), so "better" is one comparison for
 /// both senses — the same convention the search's incumbent update uses.
@@ -158,21 +174,45 @@ fn rounded_point(
   tolerance : Double,
   sign : Double,
 ) -> Array[Double] {
+  let (point, violation) = least_violating_rounding(model, values, tolerance, sign)
+  if point.length() == 0 || violation > 0.0 {
+    []
+  } else {
+    point
+  }
+}
+
+///|
+/// The rounding that comes *closest* to satisfying the model, feasible or not, with the violation it
+/// leaves behind.
+///
+/// The search needs this second answer as well as the first: a rounding that is nearly feasible is
+/// where a repair starts, and repairing it is a solve rather than a rounding. Which of the three is
+/// nearest is a different question from which of them is acceptable, and the measurements differ —
+/// on `flugpl` the nearest rounding leaves the rows 0.2% short, and no single variable mends that.
+fn least_violating_rounding(
+  model : @model.Model,
+  values : Array[Double],
+  tolerance : Double,
+  sign : Double,
+) -> (Array[Double], Double) {
   if values.length() != model.num_vars() {
-    return []
+    return ([], 1.0e300)
   }
   let mut best : Array[Double] = []
+  let mut best_violation = 1.0e300
   let mut best_value = 0.0
   for direction in [0, 1, -1] {
     let point = rounded_candidate(model, values, direction)
-    if point_violation(model, point, tolerance) > 0.0 {
-      continue
-    }
+    let violation = point_violation(model, point, tolerance)
     let value = point_objective(model, point)
-    if best.length() == 0 || sign * value < sign * best_value {
+    if best.length() == 0 ||
+      violation < best_violation ||
+      (violation == best_violation && sign * value < sign * best_value) {
       best = point
+      best_violation = violation
       best_value = value
     }
   }
-  best
+  (best, best_violation)
 }

@@ -717,6 +717,18 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
   // (`max_nodes / 16`) rather than a count, because the same count is a sixteenth of the
   // budget at 20000 nodes and all of it at 300.
   let mut extra_dive_budget = options.max_nodes / 16
+  // What a run may spend repairing a rounding it could not use: one relaxation per attempt, and a
+  // share of the node budget rather than a count, so the same number means the same thing at 300
+  // nodes and at 20000. A repair is a solve of the node's model with the integers fixed — the
+  // straightest way to mend a point whose rows are a fraction of their scale short.
+  let mut repair_attempts = 0
+  // A repair improves a point the run already has; it is not how a run gets its *first* one (the
+  // walk and the rounding are). The gate is that state and not a threshold: measured on `flugpl`,
+  // whose rounded integers the continuous variables cannot complete anywhere in its proof, every
+  // attempt before it has an incumbent is a relaxation the tree does not get — while the instances
+  // the repair is *for* have a poor incumbent from early on (`markshare1` 138 against an optimum of
+  // 1, `pk1` 36 against 11) and improve by a factor of two.
+  let repairs_allowed = options.max_nodes / 50
   // The model the tree is built on: the caller's model plus the cuts the root earned.
   // Every node below the root is rebuilt from this one, so a cut added here is inherited
   // by the whole tree — which is exactly why it has to be checked before it lands.
@@ -971,6 +983,76 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
             incumbent = rounded
             incumbent_objective = value
             has_incumbent = true
+          }
+        } else if options.primal_rounding &&
+          has_incumbent &&
+          repair_attempts < repairs_allowed &&
+          // A repair is worth its relaxation only where the point the run has is *far* from what the
+          // node's own relaxation says is reachable. Measured: `p0201` proves at 577 nodes with an
+          // incumbent 0.8% above its bound and the repairs bought it nothing at all — 977 nodes
+          // instead, the whole budget spent — while `markshare1` and `pk1` are 100% and 78% away and
+          // the repairs are what improves them. The line is drawn at a tenth.
+          @core.fabs(incumbent_objective - solution.objective) /
+            (1.0 + @core.fabs(incumbent_objective)) >
+          0.1 {
+          // The rounding read a whole point off the relaxation and the model refused it: what is
+          // left undecided is the continuous variables, so fix the integers at the nearest rounding
+          // and re-solve. That is the restricted-model solve the walk takes, verified the same way,
+          // and it is the one move that can mend a point whose rows are short by a fraction of their
+          // own scale — `flugpl` is in that state for the first 9000 relaxations of its proof, where
+          // the nearest rounding is 0.2% short and no single variable can mend it.
+          // Which of the three roundings to fix: the nearest one needs the least adjustment from the
+          // continuous variables, so it is the one to try first and most often, and the other two are
+          // a hedge — which rounding the continuous variables can complete is not decided by distance
+          // alone (a row forbidding it looks like any other). Measured: on `markshare1` the nearest
+          // alone reaches 67 where rotating through the three reaches 85, because two thirds of the
+          // attempts went to directions that never complete.
+          let direction = match repair_attempts % 4 {
+            2 => 1
+            3 => -1
+            _ => 0
+          }
+          let candidate = rounded_candidate(problem, solution.values, direction)
+          if candidate.length() > 0 {
+            repair_attempts = repair_attempts + 1
+            let fixed = fixed_integer_model(problem, candidate)
+            let (repaired, _) = kernel_node(fixed, options, None)
+            // One model, one solve, one counted relaxation — the repair is judged against the model
+            // it was solved on, which is the node's model with the integers fixed, exactly as the
+            // walk's steps are judged against theirs.
+            solved = solved + 1
+            let mut repair_refusal = ""
+            if options.verify_nodes && repaired.status != NodeStatus::Unfinished {
+              repair_refusal = node_refusal(fixed, repaired, options.tolerance)
+              if repair_refusal == "" {
+                verified = verified + 1
+              }
+            }
+            if repair_refusal != "" {
+              return {
+                status: MipStatus::Unverified,
+                values: [],
+                objective: 0.0,
+                bound: node.bound,
+                gap: 0.0,
+                nodes: solved,
+                verified,
+                cuts: cuts_added,
+                message: "a certificate was refused while the primal heuristic repaired a rounding of node " +
+                index.to_string() +
+                ": " +
+                repair_refusal,
+              }
+            }
+            if repaired.status == NodeStatus::Optimal {
+              let value = repaired.objective
+              if !has_incumbent ||
+                sign * value < sign * incumbent_objective - options.tolerance {
+                incumbent = repaired.values
+                incumbent_objective = value
+                has_incumbent = true
+              }
+            }
           }
         }
         let fractional = most_fractional(

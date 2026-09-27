@@ -71,3 +71,60 @@ test "a rounding that leaves a row violated is not offered" {
   assert_eq(point[0], 1.0)
   assert_eq(point_violation(model, point, 1.0e-7), 0.0)
 }
+
+///|
+/// `min x  s.t.  x + y = 2.5`, `x` a whole number in `[0, 4]`, `y ≥ 0` continuous.
+///
+/// Every rounding of the relaxation `(2.5, 0)` is infeasible — the continuous variable is left where
+/// the relaxation put it, and neither `x = 2` nor `x = 3` satisfies the row with `y = 0`. What makes
+/// it feasible is fixing `x` and letting `y` move, which is what a repair solves for.
+fn rounding_needs_a_repair_mip() -> @model.Model {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let x = model.add_var("x", lb=0.0, ub=4.0, is_int=true)
+  let y = model.add_var("y", lb=0.0, ub=@model.infinite_bound, is_int=false)
+  model.set_objective([(x, 1.0)])
+  model.add_constraint([(x, 1.0), (y, 1.0)], @model.Rel::Equal, 2.5)
+  model
+}
+
+///|
+/// Fixing the integers at a rounding is what turns a point the row refuses into one it accepts: the
+/// continuous variables are the ones left undecided, and the model re-solved with the integers
+/// pinned finds them. The point that comes out is whole where the model says whole, and the repair
+/// is a *solve* of a model the checker can judge, not a second rounding.
+test "fixing the integers and re-solving repairs a point the row refuses" {
+  let model = rounding_needs_a_repair_mip()
+  let values : Array[Double] = [2.5, 0.0]
+  // Rounding alone: wherever the integers land, `y` is left at zero and the equality breaks.
+  assert_eq(rounded_point(model, values, 1.0e-7, 1.0).length(), 0)
+  // Which rounding to fix is not settled by which is nearest: the nearest is `x = 3`, and no
+  // continuous completion of it satisfies the row, while the floor one - `x = 2` and `y = 0.5` -
+  // does. That is why the search rotates through the three directions rather than retrying one.
+  let nearest = rounded_candidate(model, values, 0)
+  assert_eq(nearest[0], 3.0)
+  let nearest_fixed = fixed_integer_model(model, nearest)
+  let nearest_outcome = match @simplex.solve_model_with(
+    nearest_fixed,
+    @simplex.SimplexOptions::relaxed(),
+  ) {
+    Ok(value) => value
+    Err(reason) => fail("the fixed model was refused: " + reason)
+  }
+  assert_eq(nearest_outcome.status, @simplex.SimplexStatus::Infeasible)
+  let down = rounded_candidate(model, values, -1)
+  assert_eq(down[0], 2.0)
+  let fixed = fixed_integer_model(model, down)
+  assert_eq(fixed.get_var(0).lb, 2.0)
+  assert_eq(fixed.get_var(0).ub, 2.0)
+  assert_eq(fixed.get_var(1).lb, 0.0)
+  let repaired = match @simplex.solve_model_with(
+    fixed,
+    @simplex.SimplexOptions::relaxed(),
+  ) {
+    Ok(value) => value
+    Err(reason) => fail("the fixed model was refused: " + reason)
+  }
+  assert_eq(repaired.status, @simplex.SimplexStatus::Optimal)
+  assert_eq(point_violation(model, repaired.values, 1.0e-7), 0.0)
+  assert_true(@core.approx_eq(repaired.values[1], 0.5, rel=1.0e-9, abs=1.0e-9))
+}
