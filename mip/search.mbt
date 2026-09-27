@@ -111,6 +111,17 @@ fn pump_window_open(max_nodes : Int, solved : Int) -> Bool {
 }
 
 ///|
+/// Whether the run's budget still has a relaxation to give. Every site that solves `solved =
+/// solved + 1` has to ask this first: a repair, a pump projection and a cut round's re-solve are
+/// relaxations like any other, and a budget a run reports as reached is a budget it must not have
+/// gone past. The one that was missing it was measured — a run with `max_nodes = 300` reported
+/// **301** relaxations (`rout`, when the last node's solve landed exactly on the budget and the
+/// repair that followed spent one more).
+fn budget_left(max_nodes : Int, solved : Int) -> Bool {
+  solved < max_nodes
+}
+
+///|
 /// `-1` for a minimisation, `+1` for a maximisation: the sign that turns "better" into
 /// "smaller", so one comparison serves both senses.
 fn sense_sign(model : @model.Model) -> Double {
@@ -845,7 +856,8 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
     // counted and verified like any other; what is not kept is the model change.
     if options.cut_rounds > 0 &&
       index == 0 &&
-      solution.status == NodeStatus::Optimal {
+      solution.status == NodeStatus::Optimal &&
+      budget_left(options.max_nodes, solved) {
       let mut round = 0
       let mut keep_going = true
       while keep_going && round < options.cut_rounds {
@@ -1028,6 +1040,10 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
         } else if options.primal_rounding &&
           has_incumbent &&
           repair_attempts < repairs_allowed &&
+          // A repair costs a relaxation, and the budget is the run's, not the heuristic's: without
+          // this, the last node of a run whose solve landed exactly on the budget would repair once
+          // more and report one relaxation past it.
+          budget_left(options.max_nodes, solved) &&
           // A repair is worth its relaxation only where the point the run has is *far* from what the
           // node's own relaxation says is reachable. Measured: `p0201` proves at 577 nodes with an
           // incumbent 0.8% above its bound and the repairs bought it nothing at all — 977 nodes

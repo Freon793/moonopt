@@ -386,6 +386,55 @@ test "a node budget stops the run without claiming optimality" {
 }
 
 ///|
+/// An instance whose relaxation has no whole point anywhere near it: the cheapest way to make 7 out
+/// of coins worth `1, 2, 4, 8` is `7/8` of the eight, and the only way to make exactly 7 out of
+/// whole coins is `1 + 2 + 4`, which costs three. That gap is what makes the repair fire — it is an
+/// *improvement* mechanism and it needs a point far from what the relaxation says is reachable —
+/// and it is what the budget test below needs to walk through that site.
+fn coin_equality_mip() -> @model.Model {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let c0 = model.add_var("c0", lb=0.0, ub=1.0, is_int=true)
+  let c1 = model.add_var("c1", lb=0.0, ub=1.0, is_int=true)
+  let c2 = model.add_var("c2", lb=0.0, ub=1.0, is_int=true)
+  let c3 = model.add_var("c3", lb=0.0, ub=1.0, is_int=true)
+  model.set_objective([(c0, 1.0), (c1, 1.0), (c2, 1.0), (c3, 1.0)])
+  model.add_constraint(
+    [(c0, 1.0), (c1, 2.0), (c2, 4.0), (c3, 8.0)],
+    @model.Rel::Equal,
+    7.0,
+  )
+  model
+}
+
+///|
+/// Whatever a run spends its budget on — a node's relaxation, a walk's step, a cut round's
+/// re-solve, a repair of a rounding, a pump's projection — the number it reports is the number it
+/// was allowed. Each of those sites spends one relaxation, so each has to ask the budget first;
+/// the two that did not were measured rather than argued. With cuts on, a `max_nodes = 1` run
+/// spent **two**: the root's relaxation landed on the budget and the cut round re-solved anyway.
+/// On `rout` at `max_nodes = 300` a run reported **301**, the same shape one step further in
+/// (the last node's solve landed exactly on the budget and the repair that followed spent one
+/// more).
+test "no path spends a relaxation past its budget" {
+  let models = [
+    one_fractional_step_mip(),
+    two_variable_mip(),
+    no_integer_point_mip(),
+    coin_equality_mip(),
+  ]
+  let budgets = [1, 2, 3, 4, 5, 6, 7, 8]
+  for model in models {
+    for budget in budgets {
+      let result = @mip.solve_mip(
+        model,
+        @mip.MipOptions::with_max_nodes(budget),
+      )
+      assert_true(result.nodes <= budget)
+    }
+  }
+}
+
+///|
 /// A relaxation that reaches no verdict is not a refused certificate. There is no claim to
 /// check, and what it leaves behind is work the tree has not finished: the run has to end
 /// at a limit and say so, not stop as `Unverified`.
