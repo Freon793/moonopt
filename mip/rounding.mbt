@@ -154,7 +154,10 @@ fn rounded_candidate(
 /// This is the model a repair solves: the integers are decided, and the question is whether the
 /// continuous variables can complete them. It is a model like any other — the checker can judge a
 /// relaxation of it, which is what makes the repair a *solve* rather than a second rounding.
-fn fixed_integer_model(problem : @model.Model, point : Array[Double]) -> @model.Model {
+fn fixed_integer_model(
+  problem : @model.Model,
+  point : Array[Double],
+) -> @model.Model {
   let fixed = problem.clone()
   for j = 0; j < fixed.num_vars() && j < point.length(); j = j + 1 {
     if fixed.get_var(j).is_int {
@@ -162,6 +165,38 @@ fn fixed_integer_model(problem : @model.Model, point : Array[Double]) -> @model.
     }
   }
   fixed
+}
+
+///|
+/// The node's model with its objective replaced by "move the integers toward this whole point".
+///
+/// This is the projection step of a feasibility pump, in the form that costs no rows: the L1
+/// distance to a whole point is not written down, it is *pulled* — each integer variable whose
+/// rounding went up gets a coefficient that pays the relaxation to raise it, each one that went down
+/// gets the mirror image. The relaxation is then asked for the point nearest that rounding rather
+/// than for the cheapest one, which is the question a pump asks when the rounding itself is refused
+/// by the model.
+///
+/// Nothing about the rows changes, which is what makes it affordable here: the kernel's cost follows
+/// its row count (each finite bound is a row), so a projection written with a penalty variable and a
+/// row per integer would double the model the relaxation has to solve.
+fn rounded_objective_model(
+  problem : @model.Model,
+  values : Array[Double],
+  point : Array[Double],
+  sign : Double,
+) -> @model.Model {
+  let model = problem.clone()
+  let terms : Array[(Int, Double)] = []
+  for j = 0; j < model.num_vars() && j < point.length(); j = j + 1 {
+    if model.get_var(j).is_int {
+      // `sign` is the model's sense (`-1` for a maximisation): to pull a variable up in a
+      // minimisation the objective pays `-1·x`, and the mirror image in a maximisation.
+      terms.push((j, if point[j] > values[j] { -sign } else { sign }))
+    }
+  }
+  model.set_objective(terms)
+  model
 }
 
 ///|
@@ -174,7 +209,9 @@ fn rounded_point(
   tolerance : Double,
   sign : Double,
 ) -> Array[Double] {
-  let (point, violation) = least_violating_rounding(model, values, tolerance, sign)
+  let (point, violation) = least_violating_rounding(
+    model, values, tolerance, sign,
+  )
   if point.length() == 0 || violation > 0.0 {
     []
   } else {

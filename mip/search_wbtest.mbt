@@ -27,6 +27,29 @@ test "rounding goes to the whole number on the correct side" {
 }
 
 ///|
+/// The pump's window: the last `pump_iterations` relaxations of a budget that has room for a slice.
+/// Both halves are load bearing — a budget of four pumps or fewer (the report instruments' and the
+/// tests' fixed budgets) is never pumped at, and inside a large budget the pump waits for the tail
+/// rather than taking the incumbent slot at the root, which is what used to cost the walk its turn.
+test "the pump's window is the tail of a budget with room for a slice" {
+  let pump = pump_iterations
+  // Too small to hold a slice: nothing pumps, however much of it is left.
+  assert_false(pump_window_open(pump * 4 - 1, 0))
+  assert_false(pump_window_open(pump * 4 - 1, pump * 4 - 1))
+  assert_false(pump_window_open(1, 0))
+  // Inside a budget that holds a slice, the window is open only in its last `pump_iterations`.
+  assert_true(pump_window_open(pump * 4, 3 * pump))
+  assert_true(pump_window_open(pump * 4, pump * 4 - 1))
+  assert_false(pump_window_open(pump * 4, 3 * pump - 1))
+  assert_true(pump_window_open(300, 295))
+  assert_true(pump_window_open(300, 299))
+  assert_false(pump_window_open(300, 294))
+  assert_false(pump_window_open(300, 0))
+  assert_true(pump_window_open(20000, 19995))
+  assert_false(pump_window_open(20000, 10000))
+}
+
+///|
 /// The size of the dive a launch would start, which is what decides whether the primal
 /// heuristic runs at all: the walk fixes one fractional integer per step and may spend two
 /// steps on a variable whose first side comes back infeasible.

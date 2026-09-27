@@ -73,8 +73,42 @@ test "a rounding that leaves a row violated is not offered" {
 }
 
 ///|
-/// `min x  s.t.  x + y = 2.5`, `x` a whole number in `[0, 4]`, `y ≥ 0` continuous.
-///
+/// The projection step of a pump: the objective is replaced by a pull toward the whole point, and
+/// the pull has to point the right way in both senses. A minimisation pays for raising a variable
+/// with a negative coefficient and for lowering it with a positive one; a maximisation is the mirror
+/// image. Only the integer variables are pulled — the continuous ones are what a pump lets move.
+test "the pump's objective pulls the integers toward the whole point" {
+  let minimise = @model.Model::new(@model.Sense::Minimize)
+  let x = minimise.add_var("x", lb=0.0, ub=10.0, is_int=true)
+  let y = minimise.add_var("y", lb=0.0, ub=10.0, is_int=false)
+  minimise.set_objective([(x, 3.0), (y, 1.0)])
+  minimise.add_constraint([(x, 1.0), (y, 1.0)], @model.Rel::GreaterEqual, 5.0)
+  // `x` was 1.5 and rounds up to 2: the relaxation is paid to raise it, so the coefficient is
+  // negative in a minimisation. `y` is not an integer and gets no term at all.
+  let pulled = rounded_objective_model(minimise, [1.5, 3.5], [2.0, 3.5], 1.0)
+  let terms = pulled.objective()
+  assert_eq(terms.length(), 1)
+  assert_eq(terms[0].0, x)
+  assert_eq(terms[0].1, -1.0)
+  // Rounded down instead: the coefficient flips.
+  let down = rounded_objective_model(minimise, [2.5, 2.0], [2.0, 2.0], 1.0)
+  let down_terms = down.objective()
+  assert_eq(down_terms.length(), 1)
+  assert_eq(down_terms[0].1, 1.0)
+  // The same pull in a maximisation has the opposite sign, and the rows are untouched.
+  let maximise = @model.Model::new(@model.Sense::Maximize)
+  let z = maximise.add_var("z", lb=0.0, ub=10.0, is_int=true)
+  maximise.set_objective([(z, 1.0)])
+  maximise.add_constraint([(z, 1.0)], @model.Rel::LessEqual, 6.0)
+  let up = rounded_objective_model(maximise, [3.5], [4.0], -1.0)
+  let up_terms = up.objective()
+  assert_eq(up_terms.length(), 1)
+  assert_eq(up_terms[0].1, 1.0)
+  assert_eq(up.num_constraints(), 1)
+  assert_true(@core.approx_eq(up.constraint(0).rhs, 6.0, rel=0.0, abs=1.0e-12))
+}
+
+///|
 /// Every rounding of the relaxation `(2.5, 0)` is infeasible — the continuous variable is left where
 /// the relaxation put it, and neither `x = 2` nor `x = 3` satisfies the row with `y = 0`. What makes
 /// it feasible is fixing `x` and letting `y` move, which is what a repair solves for.
@@ -103,10 +137,8 @@ test "fixing the integers and re-solving repairs a point the row refuses" {
   let nearest = rounded_candidate(model, values, 0)
   assert_eq(nearest[0], 3.0)
   let nearest_fixed = fixed_integer_model(model, nearest)
-  let nearest_outcome = match @simplex.solve_model_with(
-    nearest_fixed,
-    @simplex.SimplexOptions::relaxed(),
-  ) {
+  let nearest_outcome = match
+    @simplex.solve_model_with(nearest_fixed, @simplex.SimplexOptions::relaxed()) {
     Ok(value) => value
     Err(reason) => fail("the fixed model was refused: " + reason)
   }
@@ -117,10 +149,8 @@ test "fixing the integers and re-solving repairs a point the row refuses" {
   assert_eq(fixed.get_var(0).lb, 2.0)
   assert_eq(fixed.get_var(0).ub, 2.0)
   assert_eq(fixed.get_var(1).lb, 0.0)
-  let repaired = match @simplex.solve_model_with(
-    fixed,
-    @simplex.SimplexOptions::relaxed(),
-  ) {
+  let repaired = match
+    @simplex.solve_model_with(fixed, @simplex.SimplexOptions::relaxed()) {
     Ok(value) => value
     Err(reason) => fail("the fixed model was refused: " + reason)
   }

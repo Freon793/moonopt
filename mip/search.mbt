@@ -88,6 +88,29 @@ fn cut_round_iteration_cap(max_iterations : Int) -> Int {
 }
 
 ///|
+/// How many projections one pump attempt may spend before it gives up on that node.
+///
+/// A pump alternates round → project → round, and the alternation can cycle (the classic failure of
+/// the method), so the attempt is bounded rather than run to a fixpoint. Five is the number the
+/// measurements needed on the instances it is for; the cost of a cycle is five relaxations.
+let pump_iterations : Int = 5
+
+///|
+/// Whether a run may spend its last relaxations pumping.
+///
+/// The pump is a slice of the *tail* of the budget: a slice is only a slice where the budget is
+/// several times its length (`pump_iterations * 4` is the smallest budget that has room for one),
+/// and inside such a budget the pump waits until no more than `pump_iterations` relaxations are
+/// left. Firing it earlier is the form that was measured: it takes the incumbent slot at a node the
+/// walk has not been offered yet, and the walk's gate is "no incumbent", so a run that pumped early
+/// never walked again — `markshare1` reported the pump's 1242 where the walk had produced 274, and
+/// over the two manifests the early pump cost every proof it touched (`22433` 33 -> 91 relaxations,
+/// `p0201` 609 -> 819, `flugpl` 13806 -> 14306) for the same three points it earns here.
+fn pump_window_open(max_nodes : Int, solved : Int) -> Bool {
+  pump_iterations * 4 <= max_nodes && max_nodes - solved <= pump_iterations
+}
+
+///|
 /// `-1` for a minimisation, `+1` for a maximisation: the sign that turns "better" into
 /// "smaller", so one comparison serves both senses.
 fn sense_sign(model : @model.Model) -> Double {
@@ -729,10 +752,24 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
   // the repair is *for* have a poor incumbent from early on (`markshare1` 138 against an optimum of
   // 1, `pk1` 36 against 11) and improve by a factor of two.
   let repairs_allowed = options.max_nodes / 50
+  // What a run with no point at all may spend pumping: a share of the node budget, counted in
+  // relaxations (one per projection), and only until it has a point — a pump is how a run gets its
+  // first one, and a run that has one has no use for it.
+  let mut pump_attempts = 0
+  let pumps_allowed = options.max_nodes / 200
+  // The point the pump starts from, kept when the search first stands on a relaxation it could
+  // judge (the root, in every run measured here), together with the model that point was solved on.
+  // Both matter: pumping from the point the run happens to be on when its budget runs out — and
+  // against that node's model, which carries its own tightened bounds — was measured to land
+  // nothing at all on `dcmulti` and `rout`, the two runs the pump exists for. The root's point and
+  // the model the whole tree is built from are what the run started with.
+  let mut pump_seed : Array[Double] = []
   // The model the tree is built on: the caller's model plus the cuts the root earned.
   // Every node below the root is rebuilt from this one, so a cut added here is inherited
   // by the whole tree — which is exactly why it has to be checked before it lands.
   let mut root_model = model.clone()
+  // Where the pump's seed was solved: set together with the seed, never read before it.
+  let mut pump_root = model
   let mut cuts_added = 0
   while !queue.is_empty() {
     if solved >= options.max_nodes {
@@ -965,6 +1002,10 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
         unjudged.push(node.key)
       }
       NodeStatus::Optimal => {
+        if pump_seed.length() == 0 {
+          pump_seed = solution.values
+          pump_root = problem
+        }
         // A whole point read off this relaxation by rounding, before anything is spent on it: one
         // pass over the model and no solve at all (`rounded_point`). What it is for is the run with
         // no point at all — `flugpl` spends the first 9000 of its 13806 relaxations unable to prune
@@ -993,7 +1034,7 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
           // instead, the whole budget spent — while `markshare1` and `pk1` are 100% and 78% away and
           // the repairs are what improves them. The line is drawn at a tenth.
           @core.fabs(incumbent_objective - solution.objective) /
-            (1.0 + @core.fabs(incumbent_objective)) >
+          (1.0 + @core.fabs(incumbent_objective)) >
           0.1 {
           // The rounding read a whole point off the relaxation and the model refused it: what is
           // left undecided is the continuous variables, so fix the integers at the nearest rounding
@@ -1052,6 +1093,81 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
                 incumbent_objective = value
                 has_incumbent = true
               }
+            }
+          }
+        } else if options.primal_rounding &&
+          !has_incumbent &&
+          pump_attempts < pumps_allowed &&
+          pump_window_open(options.max_nodes, solved) {
+          // Neither the rounding nor a repair of it reaches a point the model accepts, and the run
+          // has nothing at all: this is the state `gt2`, `dcmulti` and `rout` are in for the whole
+          // wide manifest's budget, where the nearest rounding misses by 5% of a row's scale on the
+          // first and by 57% and 99% on the others. A pump alternates between the two things it has:
+          // round the relaxation to a whole point, then ask the relaxation for the point nearest that
+          // rounding (`rounded_objective_model` pulls instead of writing the distance down, which
+          // costs no rows). Each projection is a relaxation of a model of its own, solved, verified
+          // and counted like any other.
+          pump_attempts = pump_attempts + 1
+          let mut current = pump_seed
+          let mut landed : Array[Double] = []
+          for round = 0; round < pump_iterations; round = round + 1 {
+            let (candidate, violation) = least_violating_rounding(
+              pump_root,
+              current,
+              options.tolerance,
+              sign,
+            )
+            if candidate.length() == 0 {
+              break
+            }
+            if violation == 0.0 {
+              landed = candidate
+              break
+            }
+            if solved >= options.max_nodes {
+              break
+            }
+            let pulled = rounded_objective_model(
+              pump_root, current, candidate, sign,
+            )
+            let (projected, _) = kernel_node(pulled, options, None)
+            solved = solved + 1
+            let mut pull_refusal = ""
+            if options.verify_nodes &&
+              projected.status != NodeStatus::Unfinished {
+              pull_refusal = node_refusal(pulled, projected, options.tolerance)
+              if pull_refusal == "" {
+                verified = verified + 1
+              }
+            }
+            if pull_refusal != "" {
+              return {
+                status: MipStatus::Unverified,
+                values: [],
+                objective: 0.0,
+                bound: node.bound,
+                gap: 0.0,
+                nodes: solved,
+                verified,
+                cuts: cuts_added,
+                message: "a certificate was refused while the primal heuristic pumped node " +
+                index.to_string() +
+                ": " +
+                pull_refusal,
+              }
+            }
+            if projected.status != NodeStatus::Optimal {
+              break
+            }
+            current = projected.values
+          }
+          if landed.length() > 0 {
+            let value = point_objective(pump_root, landed)
+            if !has_incumbent ||
+              sign * value < sign * incumbent_objective - options.tolerance {
+              incumbent = landed
+              incumbent_objective = value
+              has_incumbent = true
             }
           }
         }
