@@ -171,6 +171,7 @@ pub(all) struct MipOptions { max_nodes, max_iterations, tolerance, verify_nodes,
 | `NodeLimit` 给出当前整数点与仍在开的界 | 两者一起才是调用方需要的（"能到多好"与"已经多好"）。界取自**全部开着的活**：队列里的节点，**以及**松弛到达不了结论、因此不再入队的那些节点所在的子树（它们的键是父节点的松弛目标值） | `bench/mip-report*.md` 的 `bound`/`gap` 列；`mip/search_wbtest.mbt` 的 `open_bound` 用例 |
 | 割必须能被独立再推导 | 每条割带"由哪一行舍入而来"的证明，`verify_cut` 复核后才进模型 | `mip/cuts_test.mbt`、`bench/*.md` 的 `cuts` 列 |
 | 取整 / 修复 / 泵只**提供**当前解 | 三者各走同一条求解+校验路径、计入 `nodes`/`verified`、受同一预算约束（泵只花预算的尾巴），永不主张最优 | `mip/search_wbtest.mbt`、`mip/rounding_wbtest.mbt`、`dive_*` 选项 |
+| `nodes` 永不超过 `max_nodes` | 每个"花掉一次松弛"的地方（节点松弛、割轮重解、修复、泵投影、走法的一步）都先问预算，`budget_left(max_nodes, solved)`；报出去说"预算到顶"的运行，就是真的到顶 | `mip/mip_test.mbt` 的 `no path spends a relaxation past its budget`（模型 × 预算 1..8 的遍历） |
 | `node_solver`/`cut_hook` 只给测试用 | 用来演示"做坏的松弛/割会被拒" | `mip/mip_test.mbt`、`mip/cuts_test.mbt` |
 
 ## CLI（`cmd/parse`）
