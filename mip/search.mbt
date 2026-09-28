@@ -125,7 +125,14 @@ fn budget_left(max_nodes : Int, solved : Int) -> Bool {
 /// Whether a run's own point is far enough from what the search could still prove for another walk to
 /// be worth its relaxations. The walk exists for the run's current solution, and a run whose gap is
 /// already small has nothing to gain from it and something to lose: a walk's relaxations come out of
-/// the tree's. The line is the same tenth the repair uses, so no new constant is introduced.
+/// the tree's.
+///
+/// The line is a fifth where the repair's is a tenth, and the reason is the price of the two moves: a
+/// repair spends one relaxation and a walk spends up to `dive_steps` of them, so a walk wants a wider
+/// margin before it is worth starting. Measured: with the repair's tenth the gate opened on `p0201`
+/// while its point was still 9% away from its (then far) open bound, and its proof cost 609 -> 617
+/// nodes; the runs the gate is *for* are further away than a fifth anyway — `markshare1` 100%,
+/// `markshare2` 100%, `pk1` 74%, `noswot` 26%, `misc07` 48%, `50v-10` 66%.
 ///
 /// A run with no point at all is not asked this question — the walk is started there whatever it says,
 /// which is why `has_incumbent` is part of the answer rather than of the caller's condition.
@@ -137,7 +144,7 @@ fn run_point_is_far(
   has_incumbent &&
   @core.fabs(incumbent_objective - open_bound) /
   (1.0 + @core.fabs(incumbent_objective)) >
-  0.1
+  0.2
 }
 
 ///|
@@ -815,6 +822,8 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
   // The smallest key among the nodes that reached no verdict and were not re-queued, kept so the
   // search can ask "what is still open" at every node without walking the heap (`best_open_key`).
   let mut unjudged_min = 1.0e300
+  // The sampler's stream for `sampled_candidate`: carried across nodes so the samples differ.
+  let mut rounding_stream = 1
   // The model the tree is built on: the caller's model plus the cuts the root earned.
   // Every node below the root is rebuilt from this one, so a cut added here is inherited
   // by the whole tree — which is exactly why it has to be checked before it lands.
@@ -1071,6 +1080,28 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
           rounded_point(problem, solution.values, options.tolerance, sign)
         } else {
           []
+        }
+        // With all three deterministic roundings gone, one *sample* from the same space: every integer
+        // goes up in with the probability of its own fractional part. It costs a scan of the model and
+        // no relaxation at all, and the space it draws from holds one point per assignment of the
+        // integers that are not whole yet — 65 536 of them at `gt2`'s root relaxation, of which the
+        // three deterministic roundings are three. Measured (CHANGELOG round 38): over twenty thousand
+        // nodes it is what takes `noswot`'s point from -35.000000000009315 to -40, against a published
+        // optimum of -41.00000885, and it moves no other row of either manifest.
+        let rounded = if rounded.length() == 0 && options.primal_rounding {
+          let (sampled, next_stream) = sampled_candidate(
+            problem,
+            solution.values,
+            rounding_stream,
+          )
+          rounding_stream = next_stream
+          if point_violation(problem, sampled, options.tolerance) == 0.0 {
+            sampled
+          } else {
+            []
+          }
+        } else {
+          rounded
         }
         if rounded.length() > 0 {
           let value = point_objective(problem, rounded)

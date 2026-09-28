@@ -149,6 +149,49 @@ fn rounded_candidate(
 }
 
 ///|
+/// One *sampled* rounding of a relaxation's point: every integer goes up with the probability of its
+/// own fractional part and down otherwise, which is the unbiased way to draw a whole point from a
+/// fractional one.
+///
+/// The three deterministic roundings are three points of a space with one point per assignment of the
+/// integers that are not whole yet — at the sixteen fractional integers `gt2`'s root relaxation has,
+/// that is 65 536 points, and offering the same three of them at every node is not looking at the
+/// space. A sample costs one scan of the model and no relaxation at all, so a run with no point can
+/// afford one at every node it stands on: over twenty thousand nodes that is twenty thousand
+/// different points.
+///
+/// The stream is an explicit `state` carried by the caller rather than a global: samples have to differ
+/// from each other, and the arithmetic stays exact in every target (`Int64` against a power of two, so
+/// no double rounding and no target-dependent result).
+fn sampled_candidate(
+  model : @model.Model,
+  values : Array[Double],
+  state : Int,
+) -> (Array[Double], Int) {
+  let point = values.copy()
+  let mut seed : Int64 = state.to_int64()
+  for j = 0; j < model.num_vars() && j < point.length(); j = j + 1 {
+    let variable = model.get_var(j)
+    if !variable.is_int {
+      continue
+    }
+    seed = (seed * 1103515245L + 12345L) % 2147483648L
+    let draw = (seed % 65536L).to_double() / 65536.0
+    let below = floor_of(values[j])
+    let target = if draw < values[j] - below { below + 1.0 } else { below }
+    let mut value = target
+    if has_lower_bound(variable.lb) && value < variable.lb {
+      value = ceil_of(variable.lb)
+    }
+    if has_upper_bound(variable.ub) && value > variable.ub {
+      value = floor_of(variable.ub)
+    }
+    point[j] = value
+  }
+  (point, seed.to_int())
+}
+
+///|
 /// The node's model with every integer variable fixed at the value a rounding gave it.
 ///
 /// This is the model a repair solves: the integers are decided, and the question is whether the

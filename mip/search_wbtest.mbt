@@ -30,18 +30,27 @@ test "rounding goes to the whole number on the correct side" {
 /// The walk's second gate: a run whose own point is far from what it could still prove is offered
 /// another walk, and one whose point is close is not — a walk's relaxations are the tree's, and the
 /// run that is close is the run that still has a proof to finish. Measured on the two manifests
-/// (`markshare1` 274 -> 257 wide, `noswot` −34 -> −35 against a bound of −43) the runs it opens on are
-/// the ones whose point had stopped moving; what it stays shut on is the proofs, and the price of
-/// opening it there was measured in round 26 (`flugpl` 13 806 -> 16 306, `p0201` 586 -> 938).
+/// (`markshare1` 274 -> 257 wide, `noswot` -34 -> -40 small against a bound of -43) the runs it opens
+/// on are the ones whose point had stopped moving; what it stays shut on is the proofs, and the price
+/// of opening it there was measured twice: round 26 opened it everywhere (`flugpl` 13 806 -> 16 306,
+/// `p0201` 586 -> 938), and round 37 opened it at the repair's own tenth and cost `p0201` eight nodes
+/// while its point was 13.7% off a bound that was itself still far away.
 test "a walk is offered again only where the run's point is far from its bound" {
   // No point to compare against: that is the walk's own condition, not this one.
   assert_false(run_point_is_far(false, 18.0, 4.0))
   // `pk1`'s shape: 18 against a bound of 4.
   assert_true(run_point_is_far(true, 18.0, 4.0))
-  // `noswot`'s shape: −34 against −43, which is the row the gate moved.
+  // `noswot`'s shape: -34 against -43 — 26%, which is where the gate has to be wide enough to open —
+  // and -40, which is what the walk left behind at the small budget and which closes it again.
   assert_true(run_point_is_far(true, -34.0, -43.0))
-  assert_false(run_point_is_far(true, -41.0, -43.0))
-  // The proofs the tenth exists to protect: `p0201` 7975 against 7555, `flugpl` 1 201 500 against
+  assert_false(run_point_is_far(true, -40.0, -43.0))
+  assert_false(run_point_is_far(true, -41.00000885, -43.0))
+  // `markshare1`'s shape: 274 against 0, one of the two rows the gate moves.
+  assert_true(run_point_is_far(true, 274.0, 0.0))
+  // `p0201` while its own bound was still far: 8305 against 7166.43 is 13.7% — inside the repair's
+  // tenth, outside this gate's fifth, and the case that cost the eight nodes above.
+  assert_false(run_point_is_far(true, 8305.0, 7166.43))
+  // The proofs the gate exists to protect: `p0201` 7975 against 7555, `flugpl` 1 201 500 against
   // 1 177 564, `khb05250` 106 940 226 against 103 698 571.
   assert_false(run_point_is_far(true, 7975.0, 7555.0))
   assert_false(run_point_is_far(true, 1201500.0, 1177564.5))

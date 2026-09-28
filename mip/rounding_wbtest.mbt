@@ -122,6 +122,51 @@ fn rounding_needs_a_repair_mip() -> @model.Model {
 }
 
 ///|
+/// Four binaries that have to sum to one: eight assignments, of which the three deterministic
+/// roundings reach three — and of the point `(0.5, 0.5, 0.5, 0.5)` all three reach the wrong ones.
+fn four_binary_sum_mip() -> @model.Model {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let a = model.add_var("a", lb=0.0, ub=1.0, is_int=true)
+  let b = model.add_var("b", lb=0.0, ub=1.0, is_int=true)
+  let c = model.add_var("c", lb=0.0, ub=1.0, is_int=true)
+  let d = model.add_var("d", lb=0.0, ub=1.0, is_int=true)
+  model.set_objective([(a, 1.0), (b, 1.0), (c, 1.0), (d, 1.0)])
+  model.add_constraint(
+    [(a, 1.0), (b, 1.0), (c, 1.0), (d, 1.0)],
+    @model.Rel::Equal,
+    1.0,
+  )
+  model
+}
+
+///|
+/// The three deterministic roundings are three points of the rounding space; the sampler draws from
+/// the space itself. Of `(0.5, 0.5, 0.5, 0.5)` the nearer whole point and the downward rounding are
+/// `(0, 0, 0, 0)` and the upward one is `(1, 1, 1, 1)` — none of them sums to one, so the model refuses
+/// all three — while the unit vectors, which the sampler reaches, are exactly the feasible points.
+/// That is the mechanism, separated from the search: the space is where the answers are, and three
+/// points of it are not a search of it.
+test "a sampled rounding reaches points the three deterministic ones do not" {
+  let model = four_binary_sum_mip()
+  let values : Array[Double] = [0.5, 0.5, 0.5, 0.5]
+  assert_eq(rounded_point(model, values, 1.0e-7, 1.0).length(), 0)
+  let mut state = 1
+  let mut feasible = 0
+  for i = 0; i < 32; i = i + 1 {
+    let (point, next) = sampled_candidate(model, values, state)
+    state = next
+    assert_eq(point.length(), 4)
+    if point_violation(model, point, 1.0e-7) == 0.0 {
+      feasible = feasible + 1
+      assert_eq(point[0] + point[1] + point[2] + point[3], 1.0)
+    }
+  }
+  // Not every draw is feasible — that is what makes it a sample — and some of them are.
+  assert_true(feasible > 0)
+  assert_true(feasible < 32)
+}
+
+///|
 /// Fixing the integers at a rounding is what turns a point the row refuses into one it accepts: the
 /// continuous variables are the ones left undecided, and the model re-solved with the integers
 /// pinned finds them. The point that comes out is whole where the model says whole, and the repair
