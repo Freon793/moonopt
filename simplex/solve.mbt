@@ -48,6 +48,27 @@ pub fn solve_model_with(
 }
 
 ///|
+/// Whether a warm start's own result can be handed to the caller, or whether the model has to be
+/// given to the cold path after all.
+///
+/// A refusal is not an answer about the model: `NumericalFailure` says the dual path reached a basis
+/// whose *certificate* cannot be written down — the multipliers are outside the sign convention a
+/// certificate is read in, or the gap the multipliers give does not close. Both are statements about
+/// that basis and its arithmetic, and the cold path starts from a different basis and can answer.
+/// (An iteration limit is a statement about the cap, and the cold path gets the same one; it is left
+/// to the caller, whose accounting calls a relaxation that reached no verdict exactly that.)
+///
+/// This is the rule the doc comment of `solve_model_with_basis` states, and until round 39 it was not
+/// implemented for the refusal case: `solve_from_basis` returns such a result as `Some`, so the
+/// fallback that exists for `None` was bypassed. Measured on `blend2`: forty of the 24 743 node
+/// relaxations of a run whose tree is otherwise *empty* came back `NumericalFailure` on the warm path
+/// while a cold solve of the very same model reached a verdict, which is what kept the run from
+/// proving the instance.
+fn warm_result_is_usable(status : SimplexStatus) -> Bool {
+  status != SimplexStatus::NumericalFailure
+}
+
+///|
 /// Solves a model starting from a basis a previous run left behind.
 ///
 /// This is the reoptimization path a branch and bound tree needs. A bound change
@@ -70,7 +91,12 @@ pub fn solve_model_with_basis(
     Err(reason) => Err(reason)
     Ok(problem) =>
       match solve_from_basis(problem, options, basis) {
-        Some(result) => Ok(result)
+        Some(result) =>
+          if warm_result_is_usable(result.status) {
+            Ok(result)
+          } else {
+            Ok(solve_problem(problem, options))
+          }
         None => Ok(solve_problem(problem, options))
       }
   }
@@ -87,7 +113,12 @@ pub fn solve_standard_with_basis(
 ) -> SimplexResult {
   let problem = KernelProblem::from_standard(num_vars, cost, rows)
   match solve_from_basis(problem, options, basis) {
-    Some(result) => result
+    Some(result) =>
+      if warm_result_is_usable(result.status) {
+        result
+      } else {
+        solve_problem(problem, options)
+      }
     None => solve_problem(problem, options)
   }
 }

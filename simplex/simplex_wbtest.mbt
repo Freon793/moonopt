@@ -718,3 +718,23 @@ test "an infeasibility claim needs artificials that can account for the violatio
   // An exact zero artificial sum is the trivial combination whatever the residual says.
   assert_false(infeasibility_is_certified(0.0, 1.0e-6))
 }
+
+///|
+/// A warm start is only ever a speedup, and a refusal from the dual path is not an answer about the
+/// model: the rule is that such a result goes to the cold path instead of to the caller. Round 39
+/// found it was not applied to `NumericalFailure` — the status the dual path reports when the basis
+/// it reached is optimal by its reduced costs but its *certificate* cannot be written down (the
+/// multipliers are outside the sign convention a certificate is read in, or the gap they give does
+/// not close) — because `solve_from_basis` returns that as a value rather than as `None`, so the
+/// fallback that exists for `None` never ran. Measured on `blend2`: forty node relaxations of an
+/// otherwise *empty* tree came back that way while a cold solve of the very same model reached a
+/// verdict, and their keys were what the run reported as its bound.
+test "a refusal from the warm path goes to the cold path" {
+  assert_false(warm_result_is_usable(SimplexStatus::NumericalFailure))
+  // Everything else is an answer about the model, or about the cap the caller set: a warm solve that
+  // ran out of iterations says what a cold solve with the same cap says.
+  assert_true(warm_result_is_usable(SimplexStatus::Optimal))
+  assert_true(warm_result_is_usable(SimplexStatus::Infeasible))
+  assert_true(warm_result_is_usable(SimplexStatus::Unbounded))
+  assert_true(warm_result_is_usable(SimplexStatus::IterationLimit))
+}
