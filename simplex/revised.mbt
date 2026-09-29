@@ -1683,14 +1683,58 @@ fn solve_with_state(
           " cannot absorb the violation they would be proving)",
         }
       }
+      // Round 42: the claim about to be made is a Farkas ray, so the three measurements a
+      // checker makes *about a ray* are made here first — its signs, read with the scale a ray is
+      // read in; whether the box absorbs it; and whether the margin it proves is strictly
+      // positive. Round 41 measured what skipping this costs: a recovery walk of `noswot` came
+      // back `Infeasible` with a ray whose signs the checker failed by `7.65e18`, and a refused
+      // certificate stops a branch and bound run that had nothing wrong with it.
+      let ray = state.model_duals()
+      let (ray_signs, ray_row) = state.ray_sign_violation(ray)
+      let absorbed = state.ray_box_absorption(ray)
+      let (margin, margin_scale) = state.farkas_margin(ray)
+      if ray_signs > options.feasibility_tolerance ||
+        absorbed > options.feasibility_tolerance ||
+        margin <= options.feasibility_tolerance * margin_scale {
+        return {
+          status: NumericalFailure,
+          values: [],
+          objective: 0.0,
+          iterations: state.iterations,
+          duals: [],
+          ray: [],
+          basis: None,
+          message: "the rows measure as violated but the dual solution of this phase one optimum is not a Farkas ray (scaled row residual " +
+          phase1_model_scaled.to_string() +
+          ", raw " +
+          phase1_raw.to_string() +
+          ", artificial sum " +
+          artificial_sum.to_string() +
+          "; ray signs " +
+          ray_signs.to_string() +
+          (if ray_row >= 0 {
+            " on model row " + ray_row.to_string()
+          } else {
+            ""
+          }) +
+          ", ray absorbed by the box " +
+          absorbed.to_string() +
+          ", margin " +
+          margin.to_string() +
+          " against " +
+          (options.feasibility_tolerance * margin_scale).to_string() +
+          "), so no infeasibility proof can be written down",
+        }
+      }
       return {
         status: Infeasible,
         values: [],
         objective: 0.0,
         iterations: state.iterations,
         // The duals of the Phase I optimum are a Farkas ray *when* the artificials account for
-        // the violation; the check above is what makes that conditional instead of assumed.
-        duals: state.model_duals(),
+        // the violation and the ray passes the checker's own measurements; the checks above are
+        // what make that conditional instead of assumed.
+        duals: ray,
         ray: [],
         basis: None,
         message: "no feasible point exists (scaled row residual " +
@@ -1699,6 +1743,8 @@ fn solve_with_state(
         phase1_raw.to_string() +
         ", artificial sum " +
         artificial_sum.to_string() +
+        ", farkas margin " +
+        margin.to_string() +
         ")",
       }
     }
@@ -1825,7 +1871,7 @@ fn State::finish_optimal(self : State) -> SimplexResult {
   // residual check here: a producer that has not checked what it is about to claim
   // cannot tell a run that has nothing to say from one that has something wrong to say.
   let mut duals = self.model_duals()
-  let mut signs = self.max_dual_sign_violation(duals)
+  let mut signs = self.max_dual_sign_violation(duals, self.model_cost_scale())
   let mut sign_violation = signs.0
   // And the third measurement an optimality proof is made of: the two above say the point is
   // feasible and the multipliers can be written down, and neither says the bound those
@@ -1865,7 +1911,7 @@ fn State::finish_optimal(self : State) -> SimplexResult {
       // drift in the basis inverse is exactly what this repairs, and one that is not
       // has to survive the repair to be reported.
       duals = self.model_duals()
-      signs = self.max_dual_sign_violation(duals)
+      signs = self.max_dual_sign_violation(duals, self.model_cost_scale())
       sign_violation = signs.0
       // The gap is measured from the duals and the point, so a fresh factorization has to be
       // followed by a fresh measurement of both halves of it.

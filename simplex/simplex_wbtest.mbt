@@ -604,7 +604,10 @@ test "the dual sign self-check measures what the checker measures" {
   let state = State::new(problem, SimplexOptions::default())
   let tolerance = 1.0e-7
   // The convention wants `y ≥ 0` on a `≥` row; this one goes the other way.
-  let (worst, row) = state.max_dual_sign_violation([-5.0e-8])
+  let (worst, row) = state.max_dual_sign_violation(
+    [-5.0e-8],
+    state.model_cost_scale(),
+  )
   assert_eq(row, 0)
   let expected = 5.0e-8 * 300.0 / 4.0
   assert_true(@core.approx_eq(worst, expected, rel=1.0e-12, abs=1.0e-18))
@@ -626,7 +629,10 @@ test "the dual sign self-check measures what the checker measures" {
   // "no row" without looking at the matrix at all — which is the state every ordinary solve
   // is in, so it is what this check costs there.
   let honest_duals = [4.0 / 300.0]
-  let (honest_worst, honest_row) = state.max_dual_sign_violation(honest_duals)
+  let (honest_worst, honest_row) = state.max_dual_sign_violation(
+    honest_duals,
+    state.model_cost_scale(),
+  )
   assert_eq(honest_worst, 0.0)
   assert_eq(honest_row, -1)
   let accepted = @verify.verify(model, {
@@ -648,9 +654,10 @@ test "the dual sign self-check measures what the checker measures" {
     Err(reason) => fail("kernel refused the model: " + reason)
   }
   let equality_state = State::new(equality_problem, SimplexOptions::default())
-  let (equality_worst, equality_row) = equality_state.max_dual_sign_violation([
-    -5.0e-8,
-  ])
+  let (equality_worst, equality_row) = equality_state.max_dual_sign_violation(
+    [-5.0e-8],
+    equality_state.model_cost_scale(),
+  )
   assert_eq(equality_worst, 0.0)
   assert_eq(equality_row, -1)
   // The same pair of operations on the other scale: a model whose prices are `4e9` makes
@@ -665,7 +672,10 @@ test "the dual sign self-check measures what the checker measures" {
     Err(reason) => fail("kernel refused the model: " + reason)
   }
   let dear_state = State::new(dear_problem, SimplexOptions::default())
-  let dear_worst = dear_state.max_dual_sign_violation([-5.0e-8]).0
+  let dear_worst = dear_state.max_dual_sign_violation(
+      [-5.0e-8],
+      dear_state.model_cost_scale(),
+    ).0
   assert_true(
     @core.approx_eq(
       dear_worst,
@@ -729,7 +739,10 @@ test "an optimal run emits the multipliers it measured" {
       Err(reason) => fail("kernel refused the model: " + reason)
     }
     let state = State::new(problem, SimplexOptions::default())
-    let (worst, row) = state.max_dual_sign_violation(result.duals)
+    let (worst, row) = state.max_dual_sign_violation(
+      result.duals,
+      state.model_cost_scale(),
+    )
     if worst > 1.0e-7 {
       fail(
         "an optimal run emitted multipliers its own gate refuses: " +

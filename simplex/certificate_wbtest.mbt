@@ -146,6 +146,101 @@ test "the kernel measures the duality gap the checker measures" {
 }
 
 ///|
+/// The three measurements a checker makes about a **Farkas ray**, on an infeasible model the
+/// kernel solved itself: they have to come back as the checker's own numbers.
+///
+/// An infeasibility claim was the one claim whose certificate the kernel handed over without
+/// measuring it at all. What it checked instead was `Σ a ≥ max v` — a statement about the
+/// *artificials*, and a good one, but not a statement about the *ray*: `verify` reads a ray for its
+/// signs (`cost_scale(zero_cost)` — the floor of one, because a ray carries no objective), for
+/// whether the box absorbs it, and for a margin that is strictly positive. Round 41 measured what
+/// leaving those three out costs: a recovery walk of `noswot` came back `Infeasible` with signs the
+/// checker failed by `7.65e18`, and a refused certificate stops a branch and bound run.
+test "the kernel measures a farkas ray the way the checker reads one" {
+  // `x ≤ 1` and `x ≥ 2`: no point satisfies both, and `y = (1, 1)` is the ray that says so —
+  // the oriented forms sum to `(x − 1) + (2 − x) = 1 > 0` over every `x ≥ 0`.
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let x = model.add_var("x", lb=0.0)
+  model.set_objective([(x, 1.0)])
+  model.add_constraint([(x, 1.0)], @model.Rel::LessEqual, 1.0)
+  model.add_constraint([(x, 1.0)], @model.Rel::GreaterEqual, 2.0)
+  let result = match solve_model_with(model, SimplexOptions::default()) {
+    Ok(value) => value
+    Err(reason) => fail("kernel refused the model: " + reason)
+  }
+  assert_eq(result.status, Infeasible)
+  let problem = match KernelProblem::from_model(model) {
+    Ok(value) => value
+    Err(reason) => fail("kernel refused the model: " + reason)
+  }
+  let state = State::new(problem, SimplexOptions::default())
+  let certificate : @verify.Certificate = {
+    claim: @verify.Claim::Infeasible,
+    values: [],
+    duals: result.duals,
+    ray: [],
+    objective: 0.0,
+  }
+  let verdict = @verify.verify(model, certificate)
+  // The certificate the kernel emits is one the checker accepts, so the numbers below are about a
+  // certificate the checker judged rather than about one it refused for something else first.
+  assert_true(verdict.accepted)
+  let (signs, _) = state.ray_sign_violation(result.duals)
+  let absorbed = state.ray_box_absorption(result.duals)
+  let (margin, scale) = state.farkas_margin(result.duals)
+  let mut seen = 0
+  for item in verdict.checks {
+    if item.name == "ray signs" {
+      seen = seen + 1
+      assert_true(
+        @core.approx_eq(signs, item.measured, rel=1.0e-12, abs=1.0e-18),
+      )
+    }
+    if item.name == "ray is absorbed by the box" {
+      seen = seen + 1
+      assert_true(
+        @core.approx_eq(absorbed, item.measured, rel=1.0e-12, abs=1.0e-18),
+      )
+    }
+    if item.name == "farkas margin" {
+      seen = seen + 1
+      assert_true(
+        @core.approx_eq(margin / scale, item.measured, rel=1.0e-12, abs=1.0e-18),
+      )
+    }
+  }
+  assert_eq(seen, 3)
+  assert_true(margin > 0.0)
+  // A ray whose sign is wrong is what the kernel used to hand over. It is measured against the
+  // scale a *ray* is read in: `max|aᵢⱼ| / 1`, not against the run's objective.
+  let flipped : Array[Double] = [0.0, 0.0]
+  flipped[0] = -1.0
+  let (bad_signs, bad_row) = state.ray_sign_violation(flipped)
+  assert_true(bad_signs > 1.0e-7)
+  assert_eq(bad_row, 0)
+  // The same ray on a model whose prices are `1e9`: the scale is still the floor of one, so the
+  // number does not move. Reading a ray with the run's own cost scale is how a producer passes
+  // exactly the rays the checker refuses.
+  let dear = @model.Model::new(@model.Sense::Minimize)
+  let d = dear.add_var("d", lb=0.0)
+  dear.set_objective([(d, 1.0e9)])
+  dear.add_constraint([(d, 1.0)], @model.Rel::LessEqual, 1.0)
+  dear.add_constraint([(d, 1.0)], @model.Rel::GreaterEqual, 2.0)
+  let dear_problem = match KernelProblem::from_model(dear) {
+    Ok(value) => value
+    Err(reason) => fail("kernel refused the model: " + reason)
+  }
+  let dear_state = State::new(dear_problem, SimplexOptions::default())
+  let (dear_signs, _) = dear_state.ray_sign_violation(flipped)
+  assert_true(@core.approx_eq(dear_signs, bad_signs, rel=1.0e-12, abs=0.0))
+  // A ray that proves nothing is caught too: `y = (1, 0)` leaves `x − 1`, whose minimum over
+  // `x ≥ 0` is `−1`, so the margin is negative and no checker would read it as a proof.
+  let weak : Array[Double] = [1.0, 0.0]
+  let weak_margin = dear_state.farkas_margin(weak)
+  assert_true(weak_margin.0 <= 0.0)
+}
+
+///|
 /// The term a reduced cost contributes from *inside* the tolerance band, which is the case the
 /// checker's own bound used to get wrong and the case the six models above turn out not to reach.
 ///

@@ -122,6 +122,7 @@ fn State::model_row_multipliers(
 fn State::max_dual_sign_violation(
   self : State,
   duals : Array[Double],
+  cost_scale : Double,
 ) -> (Double, Int) {
   let problem = self.problem
   let mut suspect = false
@@ -135,12 +136,17 @@ fn State::max_dual_sign_violation(
   }
   // `verify`'s `cost_scale`: the largest objective coefficient of the model, floored at
   // one. The kernel's cost carries the negation of a maximisation, which no magnitude sees.
-  let mut cost_scale = 1.0
-  for j = 0; j < problem.structural; j = j + 1 {
-    let magnitude = @core.fabs(problem.cost[j])
-    if magnitude > cost_scale {
-      cost_scale = magnitude
-    }
+  //
+  // The caller passes it rather than this function deriving it because the *infeasibility*
+  // claim is measured against a different one: a Farkas ray is a proof about the rows, with no
+  // objective in it at all, so `verify` reads it with `cost_scale(zero_cost)` — the floor, `1`,
+  // and nothing else. Deriving the scale from the run's cost there would measure the ray with
+  // the scale of a claim it is not making, which is the mistake this project has made of
+  // measuring a different quantity than the checker on the other side of the same certificate.
+  let mut worst = 0.0
+  let mut worst_row = -1
+  if cost_scale <= 0.0 {
+    return (worst, worst_row)
   }
   // `verify`'s `row_sign_scale`: the largest coefficient of the row, floored at one. The
   // matrix is column major, so the per-row maxima come out of one pass over its entries.
@@ -160,8 +166,6 @@ fn State::max_dual_sign_violation(
       k = k + 1
     }
   }
-  let mut worst = 0.0
-  let mut worst_row = -1
   for r = 0; r < problem.nrows; r = r + 1 {
     if !self.row_multiplier_is_negative(duals, r) {
       continue
@@ -174,6 +178,20 @@ fn State::max_dual_sign_violation(
     }
   }
   (worst, worst_row)
+}
+
+///|
+/// The scale the multipliers of an optimality claim are judged against: the largest objective
+/// coefficient of the model, floored at one — `verify`'s `cost_scale`.
+fn State::model_cost_scale(self : State) -> Double {
+  let mut cost_scale = 1.0
+  for j = 0; j < self.problem.structural; j = j + 1 {
+    let magnitude = @core.fabs(self.problem.cost[j])
+    if magnitude > cost_scale {
+      cost_scale = magnitude
+    }
+  }
+  cost_scale
 }
 
 ///|
@@ -244,12 +262,13 @@ fn State::model_reduced_cost(
   self : State,
   j : Int,
   duals : Array[Double],
+  cost : Double,
 ) -> (Double, Double) {
   let problem = self.problem
   // Any part of the variable names the same rows with the same magnitudes; the first is the
   // one whose sign the assembly recorded in `var_columns`.
   let (column, part_sign) = problem.var_columns[j][0]
-  let mut reduced = problem.model_cost[j]
+  let mut reduced = cost
   let scale_acc = @core.CompensatedSum::new()
   let pointers = problem.matrix.col_pointers()
   let rows = problem.matrix.row_indices()
@@ -275,7 +294,7 @@ fn State::model_reduced_cost(
     }
     k = k + 1
   }
-  (reduced, 1.0 + @core.fabs(problem.model_cost[j]) + scale_acc.value())
+  (reduced, 1.0 + @core.fabs(cost) + scale_acc.value())
 }
 
 ///|
@@ -341,7 +360,11 @@ fn State::duality_gap_violation(
   let box_acc = @core.CompensatedSum::new()
   let mut unbounded = false
   for j = 0; j < nvars; j = j + 1 {
-    let (reduced, scale) = self.model_reduced_cost(j, duals)
+    let (reduced, scale) = self.model_reduced_cost(
+      j,
+      duals,
+      problem.model_cost[j],
+    )
     if reduced > tolerance * scale {
       if !model_has_lower(problem.model_lower[j]) {
         unbounded = true
@@ -390,14 +413,146 @@ fn State::duality_gap_violation(
 /// is no certificate to write; a producer that writes one anyway hands the checker a claim it
 /// has to refuse, which stops a search that had nothing wrong with it.
 ///
-/// `infeasibility_margin` is the same factor the residual test uses, on purpose: the two
-/// measurements come out of the same arithmetic and have to be judged on that footing rather
-/// than against a constant of their own.
+/// **Round 42 added the certificate's own measurements next to this one** (`ray_sign_violation`,
+/// `ray_box_absorption`, `farkas_margin` below). They answer a different question, and keeping both
+/// is the point: this function asks whether the *arithmetic* is self-consistent — the artificials
+/// have to be able to account for the violation they would be explaining — and those three ask
+/// whether the *ray* is a proof. A run whose arithmetic is in order can still hand out a ray the
+/// checker refuses (measured in round 41: a recovery walk of `noswot` came back with signs off by
+/// `7.65e18`), and a ray can be in order while the measurement it came from is not (the `noswot`
+/// node above: a margin of exactly zero). Neither check implies the other; the proxy is cheap and
+/// the measurements are the ones the checker reads.
 fn infeasibility_is_certified(
   artificial_sum : Double,
   raw_residual : Double,
 ) -> Bool {
   artificial_sum * infeasibility_margin >= raw_residual
+}
+
+///|
+/// The largest scaled violation of the **sign convention** by a Farkas ray.
+///
+/// The same measurement as `max_dual_sign_violation`, with the scale `verify` uses for an
+/// infeasibility claim: `cost_scale(zero_cost)`, the floor of `1`, because a Farkas ray is a proof
+/// about the rows and carries no objective at all. Reading it with the run's *own* cost scale is
+/// how a producer ends up measuring a different quantity than the checker on the other side of the
+/// same certificate — and the failure mode is asymmetric and both sides are bad: a scale that is too
+/// large passes a ray the checker refuses (which stops a branch and bound run), and one that is too
+/// small refuses a ray it would have accepted (which throws away a pruned subtree).
+///
+/// Measured in round 41: a recovery walk of `noswot` came back `Infeasible` with a ray whose signs
+/// the checker failed by `7.65e18` — a ray that is not a ray at all — and nothing in the kernel had
+/// looked at it.
+fn State::ray_sign_violation(
+  self : State,
+  ray : Array[Double],
+) -> (Double, Int) {
+  self.max_dual_sign_violation(ray, 1.0)
+}
+
+///|
+/// Whether the box absorbs a Farkas ray: the largest scaled reduced cost (with `c = 0`) that points
+/// at a direction a variable can travel forever.
+///
+/// `verify`'s "ray is absorbed by the box" check, term for term: for every model variable, a
+/// reduced cost above the tolerance needs a lower bound to stop it and one below needs an upper
+/// bound, and the shortfall is measured against `1 + Σᵢ|aᵢⱼyᵢ|` — the checker's
+/// `reduced_cost_scale` with the cost term dropped, which is again the `c = 0` reading of an
+/// infeasibility claim.
+fn State::ray_box_absorption(self : State, ray : Array[Double]) -> Double {
+  let problem = self.problem
+  let tolerance = self.options.feasibility_tolerance
+  let mut worst = 0.0
+  for j = 0; j < problem.var_columns.length(); j = j + 1 {
+    let (reduced, scale) = self.model_reduced_cost(j, ray, 0.0)
+    let mut shortfall = 0.0
+    if reduced > tolerance * scale && !model_has_lower(problem.model_lower[j]) {
+      shortfall = reduced / scale
+    } else if reduced < -tolerance * scale &&
+      !model_has_upper(problem.model_upper[j]) {
+      shortfall = -reduced / scale
+    }
+    if shortfall > worst {
+      worst = shortfall
+    }
+  }
+  worst
+}
+
+///|
+/// The margin a Farkas ray proves, and the scale `verify` reads it against — the number that decides
+/// whether the ray proves anything at all.
+///
+/// A Farkas ray says: some non-negative combination of the rows is non-positive on every box the
+/// variables can reach, and each row's right hand side pushes it the wrong way, so no point can
+/// satisfy the rows. That is `Σⱼ min over [lⱼ,uⱼ](rⱼxⱼ) + D` with `c = 0`, and the claim is exactly
+/// that this is **strictly positive** — a zero margin is the trivial combination and proves nothing.
+/// `verify` measures it with `|margin| / (1 + |constant|)` and requires it to be above the tolerance,
+/// and this reproduces that, including the "no finite bound" sentinel: a reduced cost pointing at a
+/// direction with no bound gives no margin at all and has to fail rather than pass.
+///
+/// Measured in round 41 (`noswot`, an ungated recovery attempt): the checker refused that run's ray
+/// for its signs before it ever got here; the round's own diagnosis had already seen a margin of
+/// exactly zero on the same instance (node 1558) — the two faces of one thing, a Phase I dual that
+/// is not a proof.
+fn State::farkas_margin(self : State, ray : Array[Double]) -> (Double, Double) {
+  let problem = self.problem
+  let tolerance = self.options.feasibility_tolerance
+  let constant_acc = @core.CompensatedSum::new()
+  for row = 0; row < problem.nrows; row = row + 1 {
+    let source = problem.row_source[row]
+    if source >= 0 &&
+      source < ray.length() &&
+      source < problem.model_rhs.length() {
+      let sign = match problem.row_relation[row] {
+        @model.Rel::LessEqual => -1.0
+        @model.Rel::GreaterEqual => 1.0
+        @model.Rel::Equal => 1.0
+      }
+      constant_acc.add(sign * ray[source] * problem.model_rhs[source])
+    }
+  }
+  let mut unbounded = false
+  for j = 0; j < problem.var_columns.length(); j = j + 1 {
+    let (reduced, scale) = self.model_reduced_cost(j, ray, 0.0)
+    if reduced > tolerance * scale && !model_has_lower(problem.model_lower[j]) {
+      unbounded = true
+      break
+    }
+    if reduced < -tolerance * scale && !model_has_upper(problem.model_upper[j]) {
+      unbounded = true
+      break
+    }
+  }
+  if unbounded {
+    return (1.0e300, 1.0e300)
+  }
+  // `Σⱼ min over [lⱼ, uⱼ] of rⱼ·xⱼ`: the direction is decided at the tolerance, the value follows
+  // the bound that direction points at — the same rule `duality_gap_violation` uses, and the same
+  // one `verify/checks.mbt::box_minimum` uses.
+  let box_acc = @core.CompensatedSum::new()
+  for j = 0; j < problem.var_columns.length(); j = j + 1 {
+    let (reduced, scale) = self.model_reduced_cost(j, ray, 0.0)
+    if reduced > tolerance * scale {
+      if model_has_lower(problem.model_lower[j]) {
+        box_acc.add(problem.model_lower[j] * reduced)
+      }
+    } else if reduced < -tolerance * scale {
+      if model_has_upper(problem.model_upper[j]) {
+        box_acc.add(problem.model_upper[j] * reduced)
+      }
+    } else if reduced > 0.0 {
+      if model_has_lower(problem.model_lower[j]) {
+        box_acc.add(problem.model_lower[j] * reduced)
+      }
+    } else if reduced < 0.0 {
+      if model_has_upper(problem.model_upper[j]) {
+        box_acc.add(problem.model_upper[j] * reduced)
+      }
+    }
+  }
+  let constant = constant_acc.value()
+  (box_acc.value() + constant, 1.0 + @core.fabs(constant))
 }
 
 ///|
