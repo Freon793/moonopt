@@ -537,6 +537,51 @@ test "non-negativity is measured per variable, not against the solution" {
 }
 
 ///|
+/// The variable-bound self-check measures what the checker measures, per variable — and it is a
+/// different question from non-negativity.
+///
+/// The kernel's own bounds are zero (lower) and `uⱼ − lⱼ` (upper): a model variable with a lower
+/// bound of 3 is a kernel column that can never be negative and can still sit *below* its model
+/// bound, which is exactly the case `max_negativity` cannot see. Measured in round 41: a recovery
+/// walk stated `Optimal` for a point `0.0029` outside a variable's bound, four orders of magnitude
+/// above the tolerance, and the independent checker was the first thing to notice.
+test "the variable bound self-check is the checker's own measure" {
+  // min x  s.t.  3 ≤ x ≤ 9 — a bounded variable, not a non-negative one.
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let x = model.add_var("x", lb=3.0, ub=9.0)
+  model.set_objective([(x, 1.0)])
+  let problem = match KernelProblem::from_model(model) {
+    Ok(value) => value
+    Err(reason) => fail("kernel refused the model: " + reason)
+  }
+  assert_eq(max_bound_violation(problem, [7.0]), 0.0)
+  // Below the model's lower bound. Nothing about this value is negative, so the
+  // non-negativity check has nothing to say about it.
+  let below = max_bound_violation(problem, [3.0 - 0.0029])
+  let expected = 0.0029 / (1.0 + 3.0 - 0.0029)
+  assert_true(@core.approx_eq(below, expected, rel=1.0e-12, abs=1.0e-15))
+  assert_true(below > 1.0e-7)
+  assert_eq(max_negativity([3.0 - 0.0029]), 0.0)
+  // Above the upper bound, judged the same way.
+  let above = max_bound_violation(problem, [9.0 + 0.0029])
+  assert_true(
+    @core.approx_eq(above, 0.0029 / (1.0 + 9.0029), rel=1.0e-12, abs=1.0e-15),
+  )
+  assert_true(above > 1.0e-7)
+  // Round-off against a variable's own size is round-off, and the scale is the variable's.
+  assert_true(max_bound_violation(problem, [9.0 + 1.0e-12]) < 1.0e-7)
+  // A free variable has no bound to violate on that side.
+  let free = @model.Model::new(@model.Sense::Minimize)
+  let y = free.add_var("y", lb=0.0)
+  free.set_objective([(y, 1.0)])
+  let free_problem = match KernelProblem::from_model(free) {
+    Ok(value) => value
+    Err(reason) => fail("kernel refused the model: " + reason)
+  }
+  assert_eq(max_bound_violation(free_problem, [1.0e6]), 0.0)
+}
+
+///|
 /// The dual sign self-check is the checker's own expression, and the two have to reach
 /// the same verdict on the same multipliers.
 ///

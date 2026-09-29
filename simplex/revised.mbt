@@ -171,6 +171,10 @@ priv struct State {
   mut stalled : Int
   mut best_objective : Double
   mut saw_objective : Bool
+  /// Which self-check refused this run, recorded by `finish_optimal` for the recovery ladder in
+  /// `solve_problem`. See `Refusal`: it is private because it steers an attempt rather than
+  /// describing an outcome.
+  mut refusal : Refusal
 }
 
 ///|
@@ -230,6 +234,7 @@ fn State::new(problem : KernelProblem, options : SimplexOptions) -> State {
     stalled: 0,
     best_objective: 0.0,
     saw_objective: false,
+    refusal: Refusal::Other,
   }
   // The starting basis is the slacks and artificials, i.e. a permutation of the
   // identity, so this always succeeds; the flag still records the outcome because
@@ -1369,23 +1374,55 @@ fn State::values(self : State) -> Array[Double] {
 }
 
 ///|
+/// Which self-check refused a run, for the recovery ladder in `solve_problem`.
+///
+/// Private on purpose: what a *caller* gets is `NumericalFailure` with the reason in its message,
+/// and this distinction exists only to choose the next attempt. It is not a status, and a caller
+/// must not be able to key on it — the interesting question for a caller is whether a proof was
+/// stated, not which of the kernel's own measurements stopped it.
+priv enum Refusal {
+  /// The multipliers of an otherwise optimal basis do not satisfy the sign convention a
+  /// certificate is read in. This is a statement about *which vertex of the optimal face* the run
+  /// landed on, and the degeneracy perturbation is part of what decides that — so this is the one
+  /// refusal the perturbation-free attempt in `solve_problem` is for.
+  Sign
+  /// Every other way a run comes back without stating a proof: a point that does not satisfy the
+  /// rows or a variable's bounds, a basis that became singular, multipliers or a ray that do not
+  /// prove what they claim, and the runs that never started at all.
+  Other
+}
+
+///|
 /// Solves a standard-form problem and returns kernel column values.
 ///
-/// A run that ends in a numerical failure gets exactly one recovery attempt: the
-/// same problem, restarted from the initial basis with Bland's rule and a much
-/// shorter refactorization interval. A singular basis is a statement about the
-/// path a run took, not about the problem, and a different pivot rule walks a
-/// different path — Bland's rule is deterministic and cannot cycle, so it is the
-/// natural second opinion on a degenerate model.
+/// A run that ends in a numerical failure gets two recovery attempts, both of which are the
+/// same problem walked differently. A failure is a statement about the *basis* a run landed
+/// on — the multipliers of an optimal basis that cannot be written down, a direction that does
+/// not satisfy the basis equation — and not about the model, so the answer is to reach a
+/// different basis:
 ///
-/// The recovery is not trusted on its own. Whatever it returns goes through the
-/// same residual self-check as any other run, and if it also fails numerically the
-/// original failure is the result, message included.
+/// - the first attempt restarts from the initial basis with Bland's rule and a much shorter
+///   refactorization interval. Bland's rule is deterministic and cannot cycle, so it is the
+///   natural second opinion on a degenerate model;
+/// - the second drops the **degeneracy perturbation** (a nudge added to every row's right-hand
+///   side to make ties strict, which is also part of what decides which vertex of the optimal
+///   face a run lands on, and therefore which multipliers come with it). It is taken **only for a
+///   sign refusal**, which is the refusal that is a statement about the dual vertex: measured on
+///   `blend2`, all three node relaxations refused for a multiplier sign state a proof under the
+///   perturbation-free walk, while the perturbed walks cannot state one for any of them. Taken
+///   for *every* refusal it is not a safe attempt, and the corpus says so too: on `noswot` the
+///   perturbation-free walk of a different refusal came back with an `Infeasible` verdict whose
+///   ray the independent checker refused (`ray signs failed: 7.7e18`), which in a branch and
+///   bound run stops the search instead of costing it a node.
+///
+/// Neither recovery is trusted on its own. Whatever they return goes through the same residual
+/// self-check as any other run, and if both also fail numerically the original failure is the
+/// result, message included.
 fn solve_problem(
   problem : KernelProblem,
   options : SimplexOptions,
 ) -> SimplexResult {
-  let first = solve_once(problem, options)
+  let (first, first_refusal) = solve_once(problem, options)
   if first.status != NumericalFailure {
     return first
   }
@@ -1409,19 +1446,61 @@ fn solve_problem(
     relax_integrality: options.relax_integrality,
     max_kernel_rows: options.max_kernel_rows,
   }
-  let second = solve_once(problem, recovery)
-  if second.status == NumericalFailure {
+  let (second, second_refusal) = solve_once(problem, recovery)
+  if second.status != NumericalFailure {
+    return {
+      status: second.status,
+      values: second.values,
+      objective: second.objective,
+      iterations: second.iterations,
+      duals: second.duals,
+      ray: second.ray,
+      basis: second.basis,
+      message: "recovered from a numerical failure by restarting with Bland's rule (" +
+      first.message +
+      ")",
+    }
+  }
+  // The second attempt is for a *sign* refusal only: that one is a statement about which vertex
+  // of the optimal face the run landed on, which is what the perturbation decides. A refusal of
+  // any other kind is about the point or the arithmetic, and walking it perturbation-free is not
+  // a safe attempt — on `noswot` it came back with an `Infeasible` verdict whose ray the
+  // independent checker refused, and a refused certificate stops the run.
+  let sign_refused = match (first_refusal, second_refusal) {
+    (Refusal::Sign, _) | (_, Refusal::Sign) => true
+    (Refusal::Other, Refusal::Other) => false
+  }
+  if !sign_refused {
+    return first
+  }
+  let unperturbed : SimplexOptions = {
+    max_iterations: options.max_iterations,
+    refactorize_every: options.refactorize_every,
+    feasibility_tolerance: options.feasibility_tolerance,
+    pivot_tolerance: options.pivot_tolerance,
+    pivot_relative_tolerance: options.pivot_relative_tolerance,
+    start_with_bland: options.start_with_bland,
+    stall_window: options.stall_window,
+    gain_candidates: options.gain_candidates,
+    degeneracy_perturbation: 0.0,
+    max_factor_entries: options.max_factor_entries,
+    reduced_cost_tolerance: options.reduced_cost_tolerance,
+    relax_integrality: options.relax_integrality,
+    max_kernel_rows: options.max_kernel_rows,
+  }
+  let (third, _) = solve_once(problem, unperturbed)
+  if third.status == NumericalFailure {
     return first
   }
   {
-    status: second.status,
-    values: second.values,
-    objective: second.objective,
-    iterations: second.iterations,
-    duals: second.duals,
-    ray: second.ray,
-    basis: second.basis,
-    message: "recovered from a numerical failure by restarting with Bland's rule (" +
+    status: third.status,
+    values: third.values,
+    objective: third.objective,
+    iterations: third.iterations,
+    duals: third.duals,
+    ray: third.ray,
+    basis: third.basis,
+    message: "recovered from a numerical failure by walking the same problem without the degeneracy perturbation (" +
     first.message +
     ")",
   }
@@ -1438,24 +1517,41 @@ fn solve_problem(
 fn solve_once(
   problem : KernelProblem,
   options : SimplexOptions,
-) -> SimplexResult {
+) -> (SimplexResult, Refusal) {
   if problem.nrows > options.max_kernel_rows {
-    return {
-      status: TooLarge,
-      values: [],
-      objective: 0.0,
-      iterations: 0,
-      duals: [],
-      ray: [],
-      basis: None,
-      message: "kernel problem has " +
-      problem.nrows.to_string() +
-      " rows, above the " +
-      options.max_kernel_rows.to_string() +
-      " row limit. Kernel rows are the model's rows plus one explicit row per finite upper bound, so a model with few constraints can still land here. The basis is factored sparsely, so this limit guards against a hopeless run rather than against allocation; `max_factor_entries` is what bounds the factors",
-    }
+    return (
+      {
+        status: TooLarge,
+        values: [],
+        objective: 0.0,
+        iterations: 0,
+        duals: [],
+        ray: [],
+        basis: None,
+        message: "kernel problem has " +
+        problem.nrows.to_string() +
+        " rows, above the " +
+        options.max_kernel_rows.to_string() +
+        " row limit. Kernel rows are the model's rows plus one explicit row per finite upper bound, so a model with few constraints can still land here. The basis is factored sparsely, so this limit guards against a hopeless run rather than against allocation; `max_factor_entries` is what bounds the factors",
+      },
+      // Not a refusal: the run never started, and no attempt can change that.
+      Refusal::Other,
+    )
   }
   let state = State::new(problem, options)
+  // The kind is read off the state after the run: only `finish_optimal` can record `Sign`, and
+  // every other way out of the run is "not the sign convention", which is all the recovery
+  // ladder needs to know.
+  (solve_with_state(state, problem, options), state.refusal)
+}
+
+///|
+/// The run itself, from the starting basis to a verdict or a refusal.
+fn solve_with_state(
+  state : State,
+  problem : KernelProblem,
+  options : SimplexOptions,
+) -> SimplexResult {
   let mut has_artificial = false
   for j = 0; j < problem.ncols; j = j + 1 {
     if problem.is_artificial[j] {
@@ -1715,6 +1811,10 @@ fn State::finish_optimal(self : State) -> SimplexResult {
   let mut scaled_residual = measured.0
   let mut raw_residual = measured.1
   let mut negativity = max_negativity(kernel_values)
+  // A third measurement of the point, and the one that was missing: the model's *variable
+  // bounds*. Rows and non-negativity were both covered, and a point outside a variable's own
+  // range still came back as `Optimal` — see `max_bound_violation`.
+  let mut bounds_violation = max_bound_violation(problem, model_values)
   // The other half of an optimality proof is the multipliers, and until now nothing
   // measured the half of it that is not about the basis: the sign convention the
   // certificate is *read* in. Reduced costs decide optimality without any sign
@@ -1733,8 +1833,13 @@ fn State::finish_optimal(self : State) -> SimplexResult {
   // node of `noswot` that made this concrete.
   let mut gap_measure = self.duality_gap_violation(model_values, duals)
   let mut gap = gap_measure.0
+  // Every refusal below records which measurement drew it, because one of them — the sign
+  // convention — is answered by walking the same model without the degeneracy perturbation, and
+  // the others are not (see `solve_problem`). A run that states a proof records none.
+  self.refusal = Refusal::Other
   if scaled_residual > tolerance ||
     negativity > tolerance ||
+    bounds_violation > tolerance ||
     sign_violation > tolerance ||
     gap > tolerance {
     // The product-form updates are exact in exact arithmetic but accumulate
@@ -1752,6 +1857,9 @@ fn State::finish_optimal(self : State) -> SimplexResult {
       scaled_residual = retried.0
       raw_residual = retried.1
       negativity = max_negativity(kernel_values)
+      // The bound violation is read off the point, so a fresh factorization has to be
+      // followed by a fresh measurement of it too.
+      bounds_violation = max_bound_violation(problem, model_values)
       // Refactorizing discards the accumulated updates, so the multipliers are
       // recomputed from the fresh factors and re-measured: a sign violation that was
       // drift in the basis inverse is exactly what this repairs, and one that is not
@@ -1765,7 +1873,10 @@ fn State::finish_optimal(self : State) -> SimplexResult {
       gap = gap_measure.0
     }
   }
-  if scaled_residual > tolerance || negativity > tolerance {
+  if scaled_residual > tolerance ||
+    negativity > tolerance ||
+    bounds_violation > tolerance {
+    self.refusal = Refusal::Other
     return {
       status: NumericalFailure,
       values: [],
@@ -1780,6 +1891,8 @@ fn State::finish_optimal(self : State) -> SimplexResult {
       raw_residual.to_string() +
       ", scaled negative value " +
       negativity.to_string() +
+      ", scaled variable bound violation " +
+      bounds_violation.to_string() +
       ")",
     }
   }
@@ -1790,6 +1903,7 @@ fn State::finish_optimal(self : State) -> SimplexResult {
     // hands; `NumericalFailure` says what is true — this run has no proof to offer for
     // this model — and the caller's budget and verification accounting treat it as a
     // relaxation that reached no verdict.
+    self.refusal = Refusal::Sign
     return {
       status: NumericalFailure,
       values: [],
@@ -1814,6 +1928,7 @@ fn State::finish_optimal(self : State) -> SimplexResult {
     // problem — and the run has no certificate to offer for this model, which is what
     // `NumericalFailure` says. The caller's accounting treats it as a relaxation that reached
     // no verdict: the search is not stopped and the tree is not called exhausted.
+    self.refusal = Refusal::Other
     return {
       status: NumericalFailure,
       values: [],
@@ -1954,6 +2069,49 @@ fn max_negativity(values : Array[Double]) -> Double {
     let scaled = -values[j] / (1.0 + @core.fabs(values[j]))
     if scaled > worst {
       worst = scaled
+    }
+  }
+  worst
+}
+
+///|
+/// Largest *scaled* violation of the model's **variable bounds**.
+///
+/// Judged per variable against its own size, `raw / (1 + |xⱼ|)`, which is the formula and the scale
+/// `verify/checks.mbt::bound_violation` uses — the same rule every other self-check here follows,
+/// for the reason `max_negativity` above gives: one that measures something else cannot tell a
+/// claim the checker will accept from one it will refuse.
+///
+/// Non-negativity is not this check and never was: it says `xⱼ ≥ 0`, which is the *kernel's* lower
+/// bound on a kernel column, while a model variable's own range is `[lⱼ, uⱼ]` and only
+/// `problem.model_lower` / `problem.model_upper` carry it — the kernel's `upper` is `uⱼ − lⱼ` for
+/// an ordinary variable and absent for a variable the kernel split in two.
+///
+/// Measured in round 41: a recovery walk stated `Optimal` for a point `0.0029` outside a
+/// variable's bound — four orders of magnitude above the tolerance — and neither the row residual
+/// nor the non-negativity check could see it; the independent checker refused the certificate, and
+/// in a branch and bound run a refused certificate stops the search.
+fn max_bound_violation(
+  problem : KernelProblem,
+  model_values : Array[Double],
+) -> Double {
+  let mut worst = 0.0
+  for j = 0; j < model_values.length(); j = j + 1 {
+    let value = model_values[j]
+    let scale = 1.0 + @core.fabs(value)
+    if j < problem.model_lower.length() &&
+      !is_unbounded_below(problem.model_lower[j]) {
+      let raw = @core.fmax(0.0, problem.model_lower[j] - value)
+      if raw / scale > worst {
+        worst = raw / scale
+      }
+    }
+    if j < problem.model_upper.length() &&
+      !is_unbounded_above(problem.model_upper[j]) {
+      let raw = @core.fmax(0.0, value - problem.model_upper[j])
+      if raw / scale > worst {
+        worst = raw / scale
+      }
     }
   }
   worst
