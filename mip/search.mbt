@@ -96,6 +96,41 @@ fn cut_round_iteration_cap(max_iterations : Int) -> Int {
 let pump_iterations : Int = 5
 
 ///|
+/// The number of relaxations a walk spends per undecided integer it has to decide.
+///
+/// The count of fractional variables is a lower bound on the work: a step re-solves, and
+/// the re-solve can put a different variable — or the same one, at its other bound — back
+/// into the fractional set, so the walk decides fewer integers per step than one. Two per
+/// integer was the price the launch condition used to charge, and it is not enough. The
+/// measurement is `gt2`: launched with sixteen to eighteen undecided integers and sixty
+/// steps, **twenty-two launches out of twenty-two** spent all sixty and came back with one
+/// or two still fractional, and found no integer point in the whole twenty-thousand-node
+/// run; the walk that landed in the same run needed **eighty-two** steps from eighteen —
+/// 4.6 relaxations per integer. Five is that price rounded up, and thirty undecided
+/// integers — what the old pair (two per integer, sixty steps) admitted — is what it
+/// admits at the ceiling `MipOptions::dive_steps` now defaults to.
+///
+/// It is a *screening* price rather than a finishing guarantee, and the honest range is
+/// wider than one number: over the two manifests the walks that finish spend anywhere from
+/// 1.25 relaxations per integer (`p0201`, ten steps from eight) to 7.5 (`markshare1`,
+/// forty-five from six), while a walk that ends in a dead region spends as much as
+/// seventeen (`blend2`, a hundred and three from six). What the price buys is the pair:
+/// the ceiling has to be the price times a sensible admission, not a number chosen twice.
+let walk_step_price : Int = 5
+
+///|
+/// Whether a walk that has `fractional` undecided integers to decide fits a step ceiling.
+///
+/// This is the launch condition's shape in one place: a walk that cannot afford the work it
+/// implies is not started at all, because a launch cut off one step short is the least
+/// valuable thing to buy — it reports neither a point nor a proof, and the tree pays for it
+/// out of the budget it would have searched with. Zero is not a walk: a node with nothing
+/// fractional is a whole point, and the caller takes it as an incumbent instead.
+fn walk_fits_budget(fractional : Int, ceiling : Int) -> Bool {
+  fractional > 0 && walk_step_price * fractional <= ceiling
+}
+
+///|
 /// Whether a run may spend its last relaxations pumping.
 ///
 /// The pump is a slice of the *tail* of the budget: a slice is only a slice where the budget is
@@ -345,11 +380,12 @@ fn round_of(value : Double) -> Double {
 /// How many integer variables are further from a whole number than `tolerance`.
 ///
 /// This is the size of the dive that starts here: fixing one fractional variable per
-/// step, and at most two steps per variable because a side that comes back infeasible is
-/// undone and the other side tried. It is what lets a launch be *started* only when the
-/// walk it implies fits the step budget, so a dive is never cut off in the middle — it
-/// either lands on a whole point or runs out of sides, and both of those are answers the
-/// caller can act on.
+/// step. It used to be read as "at most two steps per variable, because a side that comes
+/// back infeasible is undone and the other side tried", and that number is a *lower*
+/// bound rather than the work: a step re-solves, and the re-solve can put a different
+/// variable — or the same one, at its other bound — back into the fractional set, so the
+/// count does not have to fall every step. `walk_step_price` is what the walk actually
+/// spends per undecided integer, measured.
 fn fractional_count(
   model : @model.Model,
   values : Array[Double],
@@ -1296,19 +1332,20 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
           //   launch that lands happens at depth 29 with 15 integers left, while the same
           //   rule at depth 0 or 1 (markshare1, pk1, flugpl, blend2, gt2, markshare2) ran
           //   out of steps every time;
-          // - `2·fractional <= dive_steps` — at most two relaxations per undecided integer,
-          //   because a side that comes back infeasible is undone and the other side tried;
+          // - `walk_step_price · fractional <= dive_steps` — the walk has to be able to
+          //   afford the work it implies at the price measured on `gt2`, not at the lower
+          //   bound of one step per integer (see `walk_step_price`);
           // - `dive_attempts` launches in total, since the budget the walk spends is the
           //   budget the tree does not get.
           //
-          // A launch gets `dive_steps` steps, not the `2·fractional` the condition above
-          // computes. That number is a lower bound on the work rather than the work: a step
-          // re-solves, and the re-solve can make a *different* variable fractional, so the
-          // count does not have to fall every step. Measured over the public instances, the
-          // walks that land need the larger number — `pk1` was one fractional variable short
-          // of whole after thirty steps and landed within sixty, and `markshare1` and
-          // `markshare2` only produced an incumbent at sixty. What the walk spends is what
-          // the tree does not get, so it stays bounded by `dive_attempts × dive_steps`.
+          // A launch gets `dive_steps` steps, not the `walk_step_price · fractional` the
+          // condition above computes: the price is what the walks *measured*, and a walk
+          // that is cut off one step short is the worst thing to buy (round 30), so the
+          // launch is allowed to overshoot its own estimate. The two constants keep the
+          // launch condition itself where it was — `5 · fractional <= 150` is the same set
+          // of launches as the old `2 · fractional <= 60` — and only change how long a
+          // launch may run. What the walk spends is what the tree does not get, so it stays
+          // bounded by `dive_attempts × dive_steps`.
           let far_from_its_bound = run_point_is_far(
             has_incumbent,
             incumbent_objective,
@@ -1347,15 +1384,13 @@ pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
               solution.values,
               options.tolerance,
             )
-            let needed = 2 * fractional
             let remaining = options.max_nodes - solved
             // Walks past `dive_attempts` are paid out of the reserve, and the reserve is only
             // ever opened when it can afford a whole walk — so every launch here gets the same
             // step budget the first ones get, and the last one cannot overdraw.
             let wanted = options.dive_steps
             let budget = if remaining < wanted { remaining } else { wanted }
-            if needed > 0 &&
-              needed <= options.dive_steps &&
+            if walk_fits_budget(fractional, options.dive_steps) &&
               budget > 0 &&
               node.depth >= fractional {
               dives_launched = dives_launched + 1

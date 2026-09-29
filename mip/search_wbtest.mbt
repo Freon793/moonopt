@@ -413,6 +413,29 @@ test "the incumbent's cutoff narrows a node's box" {
 }
 
 ///|
+/// The walk's admission and its step ceiling are one setting, not two: the launch condition
+/// charges the measured price per undecided integer to the ceiling the walk would be given.
+///
+/// That is what keeps a walk from being started where it cannot finish. The measurement is
+/// `gt2` at 20000 nodes: twenty-two launches of sixty steps, every one of them spending the
+/// whole budget and coming back with one or two integers still fractional, and no integer point
+/// in the run at all; at the ceiling of a hundred and fifty the same launches either land (one
+/// of four) or end in a dead region (three of four), and the run reports a feasible point for
+/// the first time.
+test "a walk is admitted only where its price fits the step ceiling" {
+  // Thirty undecided integers is the admission the earlier pair (two per integer, sixty steps)
+  // gave, and the measured price of five per integer keeps that admission at a hundred and fifty.
+  assert_true(walk_fits_budget(30, 150))
+  assert_false(walk_fits_budget(31, 150))
+  // The price is charged, not assumed: the boundary moves with the ceiling.
+  assert_true(walk_fits_budget(12, 60))
+  assert_false(walk_fits_budget(13, 60))
+  // A node with nothing fractional is a whole point, not a walk: the caller takes it as an
+  // incumbent instead, and a launch there would spend relaxations re-discovering it.
+  assert_false(walk_fits_budget(0, 150))
+}
+
+///|
 /// The reserve a run keeps for the walks it takes *after* it has spent half its budget without a
 /// single integer point, and the two conditions that keep it from being a way of not searching:
 /// it is only opened when it can afford a whole walk, and only after that halfway mark.

@@ -150,14 +150,20 @@ pub(all) struct MipOptions {
   /// fractional variable and re-solves, which is a solve per step, so the step count is
   /// the knob that says how much that is worth.
   ///
-  /// Sixty is measured, not chosen: the walk usually needs more than one step per
-  /// undecided integer, because re-solving can make a *different* variable fractional, so
+  /// A hundred and fifty is measured, not chosen: the walk usually needs more than one step
+  /// per undecided integer, because re-solving can make a *different* variable fractional, so
   /// the count of fractional variables does not have to fall every step. `pk1` reached one
   /// fractional variable after thirty steps and landed within sixty; `markshare1` (no
-  /// incumbent at thirty) and `markshare2` landed the same way. The cost is bounded by
-  /// `dive_attempts` launches of at most this many relaxations — two launches of sixty out
-  /// of a three hundred relaxation budget in the report's setting — and what the tree
-  /// loses to that is visible in the report's remaining-open column rather than hidden.
+  /// incumbent at thirty) and `markshare2` landed the same way; and on `gt2` twenty-two
+  /// launches of sixty left one or two integers fractional every time and found no point at
+  /// all in the whole twenty-thousand-node run, while a launch of three hundred landed one.
+  /// The launch condition charges `walk_step_price` per undecided integer (`mip/search.mbt`),
+  /// so this number and that price together decide which nodes a walk is started from: at
+  /// five per integer, a hundred and fifty admits the same launches that sixty at two did.
+  /// The cost is bounded by `dive_attempts` launches of at most this many relaxations — two
+  /// launches of a hundred and fifty out of a twenty-thousand relaxation budget in the
+  /// report's setting — and what the tree loses to that is visible in the report's
+  /// remaining-open column rather than hidden.
   dive_steps : Int
   /// How many times the heuristic may be launched. A dive that ends infeasible or runs
   /// out of steps found nothing, and another launch from a deeper node starts closer to a
@@ -206,16 +212,16 @@ pub(all) struct MipOptions {
 /// package stays free of one), a relaxation cap in the kernel's usual range, and
 /// verification on.
 ///
-/// The primal heuristic gets thirty relaxations per launch and two launches, so it can
-/// never be more than sixty of the node budget — the budget bounds the run, and a
-/// heuristic that ate it would be a way of not searching.
+/// The primal heuristic gets a hundred and fifty relaxations per launch and two launches,
+/// so it can never be more than three hundred of a twenty-thousand node budget — the budget
+/// bounds the run, and a heuristic that ate it would be a way of not searching.
 pub fn MipOptions::default() -> MipOptions {
   {
     max_nodes: 20000,
     max_iterations: 20000,
     tolerance: 1.0e-7,
     verify_nodes: true,
-    dive_steps: 60,
+    dive_steps: 150,
     dive_attempts: 2,
     cut_rounds: 4,
     primal_rounding: true,
