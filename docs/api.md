@@ -31,6 +31,10 @@ pub(all) enum SolveStatus { Optimal, Infeasible, Unbounded, NodeLimit, NotSolved
 其余 MOI 状态要么同义、要么对应本项目的功能不存在（不做时间预算、不做并行、没有中断通道），
 要么是刻意的合并。
 
+`SolveStatus` 只 derive `Eq` 与 `Debug`，**公开面上没有 `to_string`**：打印状态文本是调用方的事
+（README 与 `examples/` 里的 `match` 就是这件事的写法）。同理 `Solution` 是 `pub struct`——字段可读
+但包外不可构造，`SolveOptions` 是 `pub(all) struct`。
+
 ## `model`：模型层
 
 `Model`（变量、约束、目标、sense）+ `Var` / `Constraint` 视图 + `validate`（返回人类可读的问题列表）。
