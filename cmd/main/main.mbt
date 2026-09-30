@@ -12,7 +12,7 @@
 ///|
 /// Reported version string. Kept in sync with `moon.mod` by hand until the CLI
 /// grows a real release command.
-let version : String = "0.1.2"
+let version : String = "0.2.0"
 
 ///|
 /// Prints a solve result in a stable, greppable format.

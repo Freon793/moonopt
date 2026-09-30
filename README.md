@@ -13,7 +13,7 @@ MoonBit 的线性与整数规划求解器：读标准模型文件，用稀疏修
 - **证书**：最优性、Farkas 不可行性、无界射线，可序列化为 JSON；`verify` 包独立复核，不依赖 `simplex`
 - **目标平台**：native / wasm / wasm-gc / js
 
-当前版本 `0.1.2`，已发布到 [mooncakes.io](https://mooncakes.io/docs/Freon793/moonopt)。
+当前版本 `0.2.0`，已发布到 [mooncakes.io](https://mooncakes.io/docs/Freon793/moonopt)。
 198 个测试在 native / wasm-gc / js 三个目标上全绿；CI 在 Linux / macOS / Windows 上跑检查、构建与测试。
 
 ## 安装

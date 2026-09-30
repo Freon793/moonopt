@@ -7,8 +7,12 @@
 
 ## [Unreleased]
 
+（下一轮的改动在此累积。）
+
+## [0.2.0] — 2026-09-30
+
 自 `0.1.2` 起的变化。公开 API 有新增（`MipOptions::primal_rounding` 字段与
-`MipOptions::without_primal_rounding()`），因此下一版是 minor 版本。
+`MipOptions::without_primal_rounding()`），按语义化版本是 minor 版本。
 
 ### Added
 
