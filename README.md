@@ -22,7 +22,8 @@ MoonBit 的线性与整数规划求解器：读标准模型文件，用稀疏修
 moon add Freon793/moonopt
 ```
 
-需要 MoonBit 0.10.7 或更新版本（`moon version --all`）。
+需要 MoonBit 0.10.7 或更新版本（`moon version --all`）。本仓库在 **moonc v0.10.14** 上开发与验证，
+CI 的每一条日志里都记着它实际用的那一套。
 
 ## 快速开始
 
