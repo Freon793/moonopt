@@ -1489,18 +1489,61 @@ fn solve_problem(
     max_kernel_rows: options.max_kernel_rows,
   }
   let (third, _) = solve_once(problem, unperturbed)
-  if third.status == NumericalFailure {
+  if third.status != NumericalFailure {
+    return {
+      status: third.status,
+      values: third.values,
+      objective: third.objective,
+      iterations: third.iterations,
+      duals: third.duals,
+      ray: third.ray,
+      basis: third.basis,
+      message: "recovered from a numerical failure by walking the same problem without the degeneracy perturbation (" +
+      first.message +
+      ")",
+    }
+  }
+  // The third draw changes the other knob that decides which basis a run ends on: the **pricing
+  // rule**. A refusal is a statement about the basis the run landed on, and the rule that chooses
+  // the entering column is what walks it there — so the same problem, priced by Dantzig's rule
+  // (the rule this kernel used before the measured-gain rule existed, and a documented rule rather
+  // than a random one), is a walk that reaches a different vertex of the same optimal face.
+  //
+  // Measured twice (round 43). First the shape of the problem: `blend2`'s tree empties after
+  // 25 230 relaxations and **one** relaxation cannot state a proof — the walks at the caller's
+  // perturbation, at zero and at ten times larger all refuse it, so the perturbation is not what
+  // is deciding this one. Then a shadow probe on that same model, with the run's own trajectory
+  // untouched: `gain_candidates` 0, 4 and 128 all state a proof (`refused=false`, 331/331/312
+  // pivots) while the caller's 32 refuses. The draw kept is the one whose rule is the oldest and
+  // whose cost is the lowest of the three; the other two are in `CHANGELOG.md`.
+  let dantzig : SimplexOptions = {
+    max_iterations: options.max_iterations,
+    refactorize_every: options.refactorize_every,
+    feasibility_tolerance: options.feasibility_tolerance,
+    pivot_tolerance: options.pivot_tolerance,
+    pivot_relative_tolerance: options.pivot_relative_tolerance,
+    start_with_bland: options.start_with_bland,
+    stall_window: options.stall_window,
+    gain_candidates: 0,
+    degeneracy_perturbation: options.degeneracy_perturbation,
+    max_factor_entries: options.max_factor_entries,
+    reduced_cost_tolerance: options.reduced_cost_tolerance,
+    relax_integrality: options.relax_integrality,
+    max_kernel_rows: options.max_kernel_rows,
+  }
+  let (fourth, _) = solve_once(problem, dantzig)
+  if fourth.status == NumericalFailure {
     return first
   }
   {
-    status: third.status,
-    values: third.values,
-    objective: third.objective,
-    iterations: third.iterations,
-    duals: third.duals,
-    ray: third.ray,
-    basis: third.basis,
-    message: "recovered from a numerical failure by walking the same problem without the degeneracy perturbation (" +
+    status: fourth.status,
+    values: fourth.values,
+    objective: fourth.objective,
+    iterations: fourth.iterations,
+    duals: fourth.duals,
+    ray: fourth.ray,
+    basis: fourth.basis,
+    message: "recovered from a numerical failure by walking the same problem with Dantzig's pricing rule (" +
     first.message +
     ")",
   }
