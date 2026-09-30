@@ -95,7 +95,7 @@ moon run cmd/parse -- solve <file.mps> --relax --json           # 机器可读�
 | 支持 | 暂不支持（返回 `NotSolved` + 原因，或明确标注限度） |
 | --- | --- |
 | 连续变量、任意有限上下界、自由变量、`≤`/`≥`/`=` 混合、min/max | — |
-| **整数 / 0-1 变量**（`mip` 分支定界，每个松弛过 `verify`；公开入口 `Model::solve` 与 `cmd/parse --mip` 都走它；**incumbent 的 cutoff 用来收紧节点盒子**，第二十四轮；实测**四个** MIPLIB 实例证到官方最优值） | **节点上的割**、整数无界性的证明（需要整数射线，松弛无界当前只报 `NotSolved` / `UnboundedRelaxation`）；割只在根节点做（`--cut-rounds`，默认 2 轮）；内核不为一组写不出符号约定的乘子另找一份证明，而是把该松弛记成"无结论"（因此丢掉它的界，见 `CHANGELOG.md` 第十五轮） |
+| **整数 / 0-1 变量**（`mip` 分支定界，每个松弛过 `verify`；公开入口 `Model::solve` 与 `cmd/parse --mip` 都走它；**incumbent 的 cutoff 用来收紧节点盒子**，第二十四轮；实测**五个** MIPLIB 实例证到官方最优值） | **节点上的割**、整数无界性的证明（需要整数射线，松弛无界当前只报 `NotSolved` / `UnboundedRelaxation`）；割只在根节点做（`--cut-rounds`，默认 2 轮）；内核不为一组写不出符号约定的乘子另找一份证明，而是把该松弛记成"无结论"（因此丢掉它的界，见 `CHANGELOG.md` 第十五轮）—— 但**先按第四十一/四十三轮那条恢复梯子换几次走法**（Bland 重启 → 去掉退化微扰 → Dantzig 定价），只在"符号类失败"时触发 |
 | **带证明的割**（根松弛的表行按混合整数舍入成割，每条割附"由哪一行舍入而来"的证明，`verify_cut` 独立**重新推导**后才允许进入模型；拒绝即停成 `Unverified`；`MipResult::cuts` 与报告的 `cuts` 列可追溯） | 割族目前只有对**单行**的舍入，且**只在根节点**做：多行 MIR 聚合（第十六、二十一轮）与**节点上的割**（第二十二轮）都实测**净收益为负、已回退**（节点割：4 个可证最优实例里 3 个证明成本变差、墙钟 3–24 倍，只有 `khb05250` 305 → 92 节点）；割轮次不改善根松弛时整轮丢弃；一轮里各候选割的违背量**完全并列**，上限在候选多于它时实际是按行序截断 —— 第十六~十八轮量了五种选择/规模规则，**没有一种在"界"与"证明成本"两个轴上同时赢过行序取满上限**（`CHANGELOG.md`、`docs/roadmap.md`） |
 | **对偶单纯形热启动**：`SimplexBasis` + `solve_model_with_basis`，改界后重解不再重建 Phase I（实测真实实例枢轴数 1–49 vs 冷启 21–1008） | 化简模型上的热启动（基必须与化简后模型同构） |
 | **证书与独立校验器**（`verify`）：最优性（原始/对偶可行性、互补松弛、对偶间隙）、Farkas 不可行射线、无界射线 + 可行起点、证书 JSON、`cmd/parse --verify` / `--certificate` | 化简模型的乘子回映（证书只对**内核收到的模型**成立，故 `--verify` 走不化简的路径）；**Farkas 射线仍是 Phase I 的最优对偶解**，但内核发证书前把校验器关于射线的三条测量自己做一遍：符号约定（**按射线自己的尺度** `cost_scale(zero_cost) = 1`）、盒吸收、以及边际**严格为正**（第四十二轮；第三十九轮实测过缺这一层的代价：一次恢复回来的射线被校验器量成 `ray signs 7.65e18`，而被拒的证书会停掉整轮搜索） |
@@ -118,9 +118,9 @@ moon run cmd/parse -- solve <file.mps> --relax --json           # 机器可读�
 | 承诺 | 证据 | 限度 / 备注 |
 | --- | --- | --- |
 | 能读真实模型文件（MPS / LP） | `bench/parse-report.md`：manifest 全部实例 `parsed`、`failed 0`；重跑 `bench/report-parse.ps1` | 不支持 MPS 的 `SC`/`SI` 与完整 `SOS`/`MARKER`（解析器明确报错） |
-| 能求解真实规模 LP（presolve + 稀疏 LU + 增益定价） | `bench/solve-report.md` 的各项计数；`bench/README.md` 的单实例量级（`30n20b8` 化简后 11591 行 16 秒最优） | 当前报告口径（`bench/report.md` 标 `current`）：32 实例中 **18 个求到最优、11 个超行数上限跳过、3 个到 1200 枢轴上限**。**枢轴上限是基准口径的一部分**（报告头部写明）：同一条命令把上限放到 20000，同一清单是 **20 个最优 / 11 跳过 / 1 到上限**、总枢轴 12 336、373 秒 —— 两个上限是**两场实验**，不可互相比较 |
+| 能求解真实规模 LP（presolve + 稀疏 LU + 增益定价） | `bench/solve-report.md` 的各项计数；`bench/README.md` 的单实例量级（`30n20b8` 化简后 11591 行 16 秒最优） | 当前报告口径（`bench/report.md` 标 `current`）：32 实例中 **20 个求到最优、11 个超行数上限跳过、1 个到 20000 枢轴上限**（`fast0507`，它需要的不止这些枢轴）。**枢轴上限是基准口径的一部分**（报告头部写明）：这个上限由实测定 —— 它与同一清单里 MIP 报告给每个松弛的上限一致（20000）；早先那个 1200 的口径下同一清单是 18 个最优、3 个到上限，两个上限是**两场实验**，旧数字留在 `CHANGELOG.md` |
 | **每个松弛都经过独立校验器** | `bench/mip-report.md` 与 `bench/mip-report-small.md` 的 `verified` 列；`mip/mip_test.mbt` 断言 `verified == nodes` | `verified < nodes` 的差额是"到达不了结论的松弛"（迭代上限或写不出符号约定的证书），按**开着的活**计 |
-| 小规模整数实例证到**公开已知最优值** | `bench/mip-report-small.md`（4/10）+ `bench/check-mip-objectives.ps1` 对 4 项**取等**通过 | 另外 6 个到节点预算（`markshare1`/`markshare2`/`pk1` 界贴下界） |
+| 小规模整数实例证到**公开已知最优值** | `bench/mip-report-small.md`（**5/10**）+ `bench/check-mip-objectives.ps1` 对 5 项**取等**通过 | 另外 5 个到节点预算（`markshare1`/`markshare2`/`pk1` 界贴下界）。**节点预算也是实测定的**：清单里最深的证明（`blend2`，25 230 个松弛）决定 30 000 这个值；同一实例在早先 20 000 的口径下仍报 `node-limit`（两场实验，旧数字留在 `CHANGELOG.md`） |
 | 证书可被第三方独立复核（含 JSON） | `verify/verify_test.mbt`（含"故意做坏的解必须被拒"）；`cmd/parse -- verify <file> --certificate <json>` | 证书只对**内核收到的模型**成立，故校验路径不化简；生产者侧的自检已按主张补齐：最优性是残差 + 变量界 + 乘子符号 + 对偶间隙四项（第三/十五/二十八/四十一轮），不可行是射线符号 + 盒吸收 + 边际为正三项再加人工和那条算术判据（第二十三/四十二轮），校验端对每一份证书仍独立复核 |
 | 每条割都能被独立**再推导** | `verify/cuts_test.mbt`（穷举小模型所有整数点、确认无效割确实砍掉一个可行整点）；`mip/cuts_test.mbt`（做坏的割被拒且运行停 `Unverified`） | 割族只有单行舍入；选择规则五条、多行 MIR 聚合一族与**节点上的割**均已实测无净收益（`CHANGELOG.md`） |
 | 公开入口的取舍口径（`NodeLimit` / `NotSolved`） | `docs/api.md` 的契约表；`moonopt_test.mbt` | 整数模型**不做化简** |
