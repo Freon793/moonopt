@@ -45,7 +45,7 @@ $reports = @(
     Scope = "continuous kernel (LP relaxation, presolve, certificates)"
     Metrics = @("instances in manifest", "solved to optimality", "skipped (row count over the limit)", "other outcomes")
     Paths = @("simplex", "presolve", "verify", "core", "model", "cmd/parse")
-    Command = "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 1000 -MaxIterations 1200 -Presolve"
+    Command = "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 1000 -MaxIterations 20000 -Presolve"
     Backs = "the kernel's answer quality on real models: optima found, size refusals, numerical failures"
   },
   @{
@@ -58,10 +58,10 @@ $reports = @(
   },
   @{
     File = "bench/mip-report-small.md"
-    Scope = "branch and bound, 20000-node budget over the small-instance list"
+    Scope = "branch and bound, 30000-node budget over the small-instance list"
     Metrics = @("instances in manifest", "proven optimal (tree exhausted or every open bound closed)", "stopped at the node budget", 'relaxations verified by `verify`', 'cuts added and verified by `verify_cut`')
     Paths = @("mip", "simplex", "verify", "presolve", "core", "model", "cmd/parse")
-    Command = "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -Manifest bench/data/instances/small.txt -MaxRows 300 -MaxNodes 20000 -MaxIterations 20000 -Output bench/mip-report-small.md"
+    Command = "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -Manifest bench/data/instances/small.txt -MaxRows 300 -MaxNodes 30000 -MaxIterations 20000 -Output bench/mip-report-small.md"
     Backs = "the M5 criterion that small integer instances reach their published optimum; cross-checked by bench/check-mip-objectives.ps1, which compares each proven objective with MIPLIB's own table and requires equality"
   }
 )
@@ -203,10 +203,10 @@ $build += ""
 $build += "``````powershell"
 $build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/fetch-instances.ps1"
 $build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-parse.ps1"
-$build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 1000 -MaxIterations 1200 -Presolve"
+$build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 1000 -MaxIterations 20000 -Presolve"
 $build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-relaxation-bounds.ps1"
 $build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -MaxRows 300 -MaxNodes 300 -MaxIterations 5000"
-$build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -Manifest bench/data/instances/small.txt -MaxRows 300 -MaxNodes 20000 -MaxIterations 20000 -Output bench/mip-report-small.md"
+$build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -Manifest bench/data/instances/small.txt -MaxRows 300 -MaxNodes 30000 -MaxIterations 20000 -Output bench/mip-report-small.md"
 $build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-mip-objectives.ps1"
 $build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-mip-objectives.ps1 -Report bench/mip-report-small.md"
 $build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report.ps1"

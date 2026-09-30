@@ -13,7 +13,7 @@
 
 | # | 验收要求 | 证据 | 复核方式 |
 | --- | --- | --- | --- |
-| 1 | 以 MoonBit 为主要实现语言 | 非测试 MoonBit 实现 **45 个文件 / 15 555 行**（测试另 28 文件 / 6 910 行）；零 FFI、零第三方运行期依赖（库包不引任何第三方包，仅 `cmd/parse` 引官方 `moonbitlang/x` 的 `fs`/`sys`） | `moon check --deny-warn`；`git ls-files '*.mbt'` 后按 `_(wb)?test\.mbt$` 分流、用 `[IO.File]::ReadAllLines` 计行（**不能用 `Measure-Object -Line`：它不数空行**，会少算约 800 行）；`simplex/moon.pkg` 等包配置 |
+| 1 | 以 MoonBit 为主要实现语言 | 非测试 MoonBit 实现 **45 个文件 / 15 957 行**（测试另 28 文件 / 7 063 行，合计 73 文件 / 23 020 行）；零 FFI、零第三方运行期依赖（库包不引任何第三方包，仅 `cmd/parse` 引官方 `moonbitlang/x` 的 `fs`/`sys`） | `moon check --deny-warn`；`git ls-files '*.mbt'` 后按 `_(wb)?test\.mbt$` 分流、用 `[IO.File]::ReadAllLines` 计行（**不能用 `Measure-Object -Line`：它不数空行**，会少算约 800 行；本行数字随每次代码改动重算）；`simplex/moon.pkg` 等包配置 |
 | 2 | GitHub 仓库公开可访问、提交记录清晰 | 公开仓库 `Freon793/moonopt`，**提交记录按轮次推进**（每轮一个主题，提交信息写明"做了什么 / 为什么 / 证据"）；唯一的作者与仓库所有者一致 | `git log --oneline`；GitHub 仓库页 |
 | 3 | 源代码结构清晰，能完成声明的核心功能 | 10 个包各司其职（`core`/`model`/`format`/`simplex`/`presolve`/`verify`/`mip`/`oracle`/`cmd/*`），包边界与依赖规则写在 [`design.md`](design.md)；核心功能有基准报告 | [`design.md`](design.md)；`bench/parse-report.md`、`bench/solve-report.md`、`bench/mip-report.md`、`bench/mip-report-small.md` |
 | 4 | 提供 README，说明目标 / 安装 / 使用 / 示例，且可复现 | [`../README.md`](../README.md) 的四要素齐备（定位与"为什么需要它"、`moon add` 安装、CLI 与 API 用法、可运行示例）；本文件第 2 节给出评审可执行的最短复现路径 | 见下方"五分钟复现" |
@@ -83,9 +83,14 @@ moon add Freon793/moonopt
 ## 5. 已知限度（写出来，而不是藏起来）
 
 - 割只有**单行**舍入，且只在**根**节点做：选择规则五条（第十六~十八轮）、多行 MIR 聚合族（第二十一轮）
-  与**节点上的割**（第二十二轮）都已实测、均无净收益并回退；cutoff 传播未做；
-- **Farkas 射线**仍是 Phase I 的最优对偶解，但内核先用必需条件 `Σ a ≥ max v`（人工和必须能吸收它要解释的
-  违反量）自检，不成立就**不发证书**、报 `NumericalFailure`，搜索按"没有结论的松弛"继续（第二十三轮；
-  该条件在 `noswot` 节点 1558 上曾相差 5 个数量级，触发过一次整轮 `unverified` 停下）；校验端对每一份证书仍独立复核；
-- 整数无界性（整数射线）未证明；`fast0507` 在默认枢轴上限内跑不完；DeVex / steepest-edge 定价与部分 presolve 归约未做；
-- `bench/mip-report-small.md` 口径下 10 个实例中 6 个到节点预算（4 个证到公开已知最优值）。
+  与**节点上的割**（第二十二轮）都已实测、均无净收益并回退；cutoff 传播**已落地**（第二十四轮，形态是收紧节点盒子，
+  而不是加一行），它之外的更强节点归约（如域传播）未做；
+- **Farkas 射线**仍是 Phase I 的最优对偶解，但内核在发证书前把校验器关于射线的三条测量自己做一遍 ——
+  符号约定（**按射线自己的尺度** `cost_scale(zero_cost) = 1`）、盒吸收、以及边际**严格为正**（第四十二轮），
+  另加一条关于算术自洽的代理判据 `Σ a ≥ max v`（人工和必须能吸收它要解释的违反量，第二十三轮）；任一不成立就
+  **不发证书**、报 `NumericalFailure`，搜索按"没有结论的松弛"继续。校验端对每一份证书仍独立复核。
+  限度：射线的**构造**仍是 Phase I 的最优对偶解，不是显式导出的射线；**无界主张的射线**只自检了"点可行"；
+- 整数无界性（整数射线）未证明；`fast0507` 在报告的枢轴上限（20 000）内跑不完；DeVex / steepest-edge 定价与部分 presolve 归约未做；
+- `bench/mip-report-small.md` 口径下 10 个实例中 **5 个证到公开已知最优值、5 个到节点预算**（`check-mip-objectives.ps1` 对 5 项取等）；
+  该口径的**节点预算 30 000 与求解报告的枢轴上限 20 000 都是实测定的**（见 `CHANGELOG.md` 第四十三轮），
+  换一个上限就是另一场实验，不能互相比较。

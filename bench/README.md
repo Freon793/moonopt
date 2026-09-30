@@ -32,12 +32,12 @@ MIPLIB 2017 —— 它提供同样性质的工业实例，但以纯 MPS（gzip �
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/fetch-instances.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-parse.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 1000 -Presolve
+powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 1000 -MaxIterations 20000 -Presolve
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-relaxation-bounds.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -MaxRows 300 -MaxNodes 300 -MaxIterations 5000
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-mip-objectives.ps1
 # 小规模实例的满预算口径（完成标准"M5 ①：小规模实例求到公开已知最优值"的证据）
-powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -Manifest bench/data/instances/small.txt -MaxRows 300 -MaxNodes 20000 -MaxIterations 20000 -Output bench/mip-report-small.md
+powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -Manifest bench/data/instances/small.txt -MaxRows 300 -MaxNodes 30000 -MaxIterations 20000 -Output bench/mip-report-small.md
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-mip-objectives.ps1 -Report bench/mip-report-small.md
 ```
 

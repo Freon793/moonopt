@@ -3,25 +3,25 @@
 # proof to be possible.
 #
 # The list is the manifest's instances with at most 300 rows, minus the ones whose
-# measured cost per node makes a 20 000-node run unaffordable. The costs below were
+# measured cost per node makes a 30 000-node run unaffordable. The costs below were
 # measured on this machine with the native release build, root cuts on, 300 to 1 000
 # nodes per instance:
 #
-#   flugpl      18 vars   18 rows   0.4 ms/node
+#   flugpl      18 vars   18 rows   0.4 ms/node  (proves optimality in 13 806 relaxations)
 #   gt2        188 vars   29 rows   1.6 ms/node
 #   noswot     128 vars  182 rows   3.1 ms/node
-#   blend2     353 vars  274 rows   7.2 ms/node
-#   p0201      201 vars  133 rows  32.4 ms/node
-#   khb05250  1350 vars  101 rows  18.3 ms/node  (proves optimality in 305 nodes)
+#   blend2     353 vars  274 rows   7.2 ms/node  (proves optimality in 24 934 relaxations)
+#   p0201      201 vars  133 rows  32.4 ms/node  (proves optimality in 609 nodes)
+#   khb05250  1350 vars  101 rows  18.3 ms/node  (proves optimality in 107 nodes)
 #   22433      429 vars  198 rows   (proves optimality in 33 nodes)
 #   markshare1  62 vars    6 rows
 #   markshare2  74 vars    7 rows
 #   pk1         86 vars   45 rows
 #
-# Excluded, and why:
-#   dcmulti    548 vars  290 rows  87 ms/node  -> a 20 000-node arm is 29 minutes
-#   rout       556 vars  291 rows 391 ms/node  -> a 20 000-node arm is 2.2 hours
-#   misc07     260 vars  212 rows over 8 minutes for 1 000 nodes -> over 2.5 hours
+# Excluded, and why (the arm's cost is the measured per-node cost times the budget):
+#   dcmulti    548 vars  290 rows  87 ms/node  -> a 30 000-node arm is ~44 minutes
+#   rout       556 vars  291 rows 391 ms/node  -> a 30 000-node arm is ~3.3 hours
+#   misc07     260 vars  212 rows over 8 minutes for 1 000 nodes -> over 4 hours
 #   50v-10    2013 vars  233 rows  (over the variable ceiling of this view)
 #   mod010    2655 vars  146 rows  (over the variable ceiling of this view)
 #
