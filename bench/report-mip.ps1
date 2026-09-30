@@ -37,12 +37,21 @@ $root = Split-Path -Parent $PSScriptRoot
 # The report names the list it read. Record it relative to the repository when it is
 # under it: an absolute path would put the machine it was generated on into a file
 # that is committed, and the report is about the code and the instances, not about
-# whose disk they sat on.
-$manifestLabel = $Manifest
-$manifestFull = [IO.Path]::GetFullPath((Join-Path (Get-Location) $Manifest))
-$rootFull = [IO.Path]::GetFullPath($root) + [IO.Path]::DirectorySeparatorChar
-if ($manifestFull.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase)) {
-  $manifestLabel = $manifestFull.Substring($rootFull.Length).Replace('\', '/')
+# whose disk they sat on. A manifest outside the repository is recorded by file name
+# for the same reason.
+$manifestLabel = Split-Path -Leaf $Manifest
+$manifestFull = $Manifest
+if (-not [IO.Path]::IsPathRooted($manifestFull)) {
+  $manifestFull = Join-Path (Get-Location) $manifestFull
+}
+try {
+  $manifestFull = [IO.Path]::GetFullPath($manifestFull)
+  $rootFull = [IO.Path]::GetFullPath($root) + [IO.Path]::DirectorySeparatorChar
+  if ($manifestFull.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase)) {
+    $manifestLabel = $manifestFull.Substring($rootFull.Length).Replace('\', '/')
+  }
+} catch {
+  $manifestLabel = Split-Path -Leaf $Manifest
 }
 
 if (-not (Test-Path $Manifest)) {
