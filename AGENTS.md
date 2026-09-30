@@ -114,15 +114,18 @@ You can browse and install extra skills here:
     picking another variable.
   - `cmd/main/`: demo CLI. `cmd/parse/`: model file inspection CLI. `examples/`:
     runnable examples. `bench/`: data policy, fetch and report scripts, reports.
-    `docs/`: design notes, technical roadmap and the ecosystem survey that
+    `docs/`: design notes, technical roadmap and the prior-art survey that
     defines the design boundary. The documents have one job each and should not
     overlap: `docs/design.md` (architecture, package boundaries), `docs/algorithms.md`
     (what actually runs, each section ending in a checkable number), `docs/api.md`
-    (public contracts and statuses), `docs/acceptance.md` (submission requirements
-    mapped to evidence), `docs/ecosystem-survey.md` + `docs/related-work.md`
-    (external survey and its raw evidence). The root `README.md` is an entry point
-    only — capability table, promise-to-evidence table and pointers; the
-    round-by-round detail belongs to `CHANGELOG.md` and `docs/roadmap.md`.
+    (public contracts and statuses), `docs/roadmap.md` (milestones, completion
+    criteria, what is not planned), `docs/prior-art.md` (ecosystem survey and the
+    standards worth aligning with), `docs/acceptance.md` (submission requirements
+    mapped to evidence), `docs/history.md` (archived round-by-round measurement
+    record, including the reverted experiments and why). The root `README.md` is
+    an entry point only — what the library does, install, usage, capability
+    table, pointers; the round-by-round detail belongs to `docs/history.md` and
+    the user-visible changes to `CHANGELOG.md`.
 
 ## Coding convention
 

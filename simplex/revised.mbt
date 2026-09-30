@@ -1515,7 +1515,7 @@ fn solve_problem(
   // is deciding this one. Then a shadow probe on that same model, with the run's own trajectory
   // untouched: `gain_candidates` 0, 4 and 128 all state a proof (`refused=false`, 331/331/312
   // pivots) while the caller's 32 refuses. The draw kept is the one whose rule is the oldest and
-  // whose cost is the lowest of the three; the other two are in `CHANGELOG.md`.
+  // whose cost is the lowest of the three; the other two are in `docs/history.md`.
   let dantzig : SimplexOptions = {
     max_iterations: options.max_iterations,
     refactorize_every: options.refactorize_every,

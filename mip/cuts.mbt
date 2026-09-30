@@ -232,7 +232,7 @@ fn cut_round(
   // it had within a 1000-node budget (586 nodes before, 1325 after), so it was reverted.
   // What the selection needs is a *measurement* of each candidate's own effect — a re-solve
   // per candidate, bounded by this cap — rather than another geometric proxy; the numbers
-  // are in `CHANGELOG.md` (M5 round 16) and the plan in `docs/roadmap.md`.
+  // are in `docs/history.md` (M5 round 16) and the plan in `docs/roadmap.md`.
   let selected : Array[@verify.CutRow] = []
   while selected.length() < cut_round_cap && selected.length() < cuts.length() {
     let mut best = -1

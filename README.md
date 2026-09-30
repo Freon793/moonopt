@@ -1,29 +1,32 @@
-# Freon793/moonopt
+# moonopt
 
 [![check](https://github.com/Freon793/moonopt/actions/workflows/check.yml/badge.svg)](https://github.com/Freon793/moonopt/actions/workflows/check.yml)
 
-**把 MoonBit 的线性 / 整数优化从教学级稠密实现，推进到能与工业数据与公开基准对拍的工程内核。**
+MoonBit 的线性与整数规划求解器：读标准模型文件，用稀疏修正单纯形求解，对整数模型做分支定界，
+并对每个结论给出一份可被第三方独立校验的证书。纯 MoonBit 实现，无 FFI 依赖。
 
-`moonopt` 提供标准模型互操作（MPS / LP）、稀疏修正单纯形与对偶单纯形、presolve / postsolve、
-分支定界与**带证明的割**，以及**可被第三方独立校验**的最优性、Farkas 不可行性与无界性证书。
-纯 MoonBit 实现，**无 FFI 依赖**。
+- **模型输入**：MPS（free / fixed）、CPLEX LP
+- **线性求解**：稀疏 CSC + 稀疏 LU 基分解的修正单纯形，增益定价，Harris 两遍比值检验，有界变量枢轴，
+  对偶单纯形热启动，presolve / postsolve
+- **整数求解**：best-bound 分支定界，节点热启动，根割（混合整数舍入，附推导证明），
+  取整 / 下潜 / 可行性泵三种原始启发式
+- **证书**：最优性、Farkas 不可行性、无界射线，可序列化为 JSON；`verify` 包独立复核，不依赖 `simplex`
+- **目标平台**：native / wasm / wasm-gc / js
 
-> **状态**：`0.1.2`，已发布到 mooncakes.io（`moon add Freon793/moonopt`）。M1–M6 的完成标准全部达成：
-> 解析、求解、证书校验、分支定界四条路径都有可复现的基准报告与测试覆盖（198 个测试，native / wasm-gc / js
-> 三目标全绿）。CI 在 Linux / macOS / Windows 上执行**检查 / 构建 / 测试**三步，另有两个目标平台的测试任务。
-> **本文件只做入口**：逐版变化见 [`CHANGELOG.md`](CHANGELOG.md)，逐轮技术决策与实测数字见
-> [`docs/roadmap.md`](docs/roadmap.md)，各文档的职责见下面的[文档导航](#文档导航)。
+当前版本 `0.1.2`，已发布到 [mooncakes.io](https://mooncakes.io/docs/Freon793/moonopt)。
+198 个测试在 native / wasm-gc / js 三个目标上全绿；CI 在 Linux / macOS / Windows 上跑检查、构建与测试。
 
-## 快速开始
+## 安装
 
 ```bash
 moon add Freon793/moonopt
 ```
 
-最小可用例子（用到两个包：`Freon793/moonopt` 是求解入口，`Freon793/moonopt/model` 是模型构造）：
+需要 MoonBit 0.10.7 或更新版本（`moon version --all`）。
+
+## 快速开始
 
 ```moonbit
-///|
 /// max 5x + 4y  s.t.  6x + 4y <= 24,  x + 2y <= 6,  x, y >= 0   ->  21 at (3, 1.5)
 fn demo() -> Unit {
   let m = @model.Model::new(@model.Sense::Maximize)
@@ -40,164 +43,121 @@ fn demo() -> Unit {
 }
 ```
 
-### 五分钟从零复现
+用到两个包：`Freon793/moonopt`（求解入口）与 `Freon793/moonopt/model`（模型构造）。
+整数变量用 `m.add_var("n", lb=0.0, ub=10.0, is_int=true)` 声明，`solve` 会自动走分支定界。
+
+两个完整可运行的例子：
 
 ```bash
-moon version --all                   # 需要 MoonBit 0.10.7 以上
-git clone https://github.com/Freon793/moonopt && cd moonopt
-moon run examples/production_plan    # 两产品生产计划：最优 21 at (3, 1.5)
-moon run cmd/main                    # 打印三个模型的状态报告（含一个"当前不支持"的诚实案例）
-moon check --deny-warn && moon test  # 198 个测试
-```
-
-真实实例（MIPLIB 2017，仓库**不再分发**数据，用脚本下载）：
-
-```bash
-powershell -NoProfile -ExecutionPolicy Bypass -File bench/fetch-instances.ps1
-moon run cmd/parse -- bench/data/instances/22433 --mip --max-nodes 2000
-powershell -NoProfile -ExecutionPolicy Bypass -File bench/report.ps1   # 四份报告是否仍被当前代码支持
-```
-
-> 输出里的末位偏差（`21.00000000002238`）是**退化扰动**留下的脚印（`degeneracy_perturbation`，默认 1e-12）：
-> 求解用的右端项加了一个远小于可行性容差的确定性微扰来打破退化平局，而残差自检始终对**未扰动**右端项测量，
-> 因此解对调用方写下的模型仍然可行。面向人读的定点格式化属于报表层，示例直接打印原始值。
-
-## 可运行示例与 CLI
-
-```bash
-moon run examples/production_plan    # 生产计划（最优 21）
+moon run examples/production_plan    # 两产品生产计划（最优 21 at (3, 1.5)）
 moon run examples/transportation     # 产销平衡运输问题（全等式约束，走 Phase I；最优 11）
-moon run cmd/main                    # 两个示例 + 一个"当前不支持"的诚实案例
-moon run cmd/parse -- <file.mps>     # 模型文件巡检：格式、规模、校验结论
+moon run cmd/main                    # 打印示例模型与一个"当前不支持"的诚实案例
 ```
 
-`cmd/parse` 的五个子命令（首参数是这五个名字之一时按子命令解释，否则就是旗标形式，两者都支持）：
+示例里 `21.00000000002238` 这样的末位偏差来自退化扰动（默认 `1e-12`）：求解时给右端项加了一个远小于
+可行性容差的确定性微扰来打破退化平局，而所有自检都按**未扰动**的右端项测量，所以解对调用方写下的模型
+仍然可行。要打印成定点格式请自行格式化，示例直接输出原始值。
+
+## 命令行
+
+`cmd/parse` 是一个模型巡检 / 求解 / 校验 / 格式转换 / 批量基准工具。
 
 ```bash
-moon run cmd/parse -- solve <file.mps> --relax --presolve       # 求解（LP；--mip 走分支定界）
-moon run cmd/parse -- solve <file.mps> --mip --max-nodes 2000   # 分支定界，每个松弛过 verify
-moon run cmd/parse -- verify <file.mps> --relax                 # 求解并用独立校验器复核证书
-moon run cmd/parse -- verify <file.mps> --certificate cert.json # 只校验证书，不重解
-moon run cmd/parse -- fmt <file.mps> --format lp -o out.lp      # 读→写（用库自己的 writer）
-moon run cmd/parse -- bench --manifest bench/data/instances/small.txt --mip --max-nodes 300
-moon run cmd/parse -- solve <file.mps> --relax --json           # 机器可读输出
+moon run cmd/parse -- <file.mps>                                # 巡检：格式、规模、校验结论
+moon run cmd/parse -- solve <file.mps> --relax --presolve        # 线性求解（默认走 presolve）
+moon run cmd/parse -- solve <file.mps> --mip --max-nodes 2000    # 分支定界，每个松弛过 verify
+moon run cmd/parse -- verify <file.mps> --relax                  # 求解并用独立校验器复核证书
+moon run cmd/parse -- verify <file.mps> --certificate cert.json  # 只校验证书，不重解
+moon run cmd/parse -- fmt <file.mps> --format lp -o out.lp       # 读→写
+moon run cmd/parse -- bench --manifest instances.txt --mip --max-nodes 300
 ```
 
-`--json` 输出一份 `{"tool","command","files":[...],"summary":{...}}` 文档：**没跑出来的字段不出现**
-（而不是填 0）；数字是**最短往返表示、不取整**，下游副本与报告逐位一致；文本输出保持原样，`bench/` 的脚本与
-四份报告都依赖它。`fmt` 不给 `-o` 时只打印不落盘；`--json` 与 `--reoptimize` 的组合被**显式拒绝**并说明原因。
+首参数是 `parse` / `solve` / `verify` / `fmt` / `bench` 之一时按子命令解释，否则按旗标形式解释，
+两者都支持。加 `--json` 得到机器可读输出：`{"tool","command","files":[...],"summary":{...}}`，
+**没跑出来的字段不出现**（而不是填 0），数字用最短往返表示、不取整。
 
-## 能力与边界
+退出码：解析失败、证书被拒、报告的点没通过复核都是非零；"模型超出内核受理范围"不算失败
+（在 JSON 里是 `refused`），因为它是一个明确的结论而不是错误。
 
-**支持的模型类别**：`min` / `max`、`≤` / `≥` / `=` 任意混合（含负右端项）、任意有限上下界、自由变量、
-整数与 0-1 变量。**越界一律返回 `NotSolved` 并带原因，绝不返回可疑解。**
+## 支持的模型
 
-| 支持 | 暂不支持（返回 `NotSolved` + 原因，或明确标注限度） |
+| 支持 | 暂不支持 |
 | --- | --- |
-| 连续变量、任意有限上下界、自由变量、`≤`/`≥`/`=` 混合、min/max | — |
-| **整数 / 0-1 变量**（`mip` 分支定界，每个松弛过 `verify`；公开入口 `Model::solve` 与 `cmd/parse --mip` 都走它；**incumbent 的 cutoff 用来收紧节点盒子**，第二十四轮；实测**五个** MIPLIB 实例证到官方最优值） | **节点上的割**、整数无界性的证明（需要整数射线，松弛无界当前只报 `NotSolved` / `UnboundedRelaxation`）；割只在根节点做（`--cut-rounds`，默认 2 轮）；内核不为一组写不出符号约定的乘子另找一份证明，而是把该松弛记成"无结论"（因此丢掉它的界，见 `CHANGELOG.md` 第十五轮）—— 但**先按第四十一/四十三轮那条恢复梯子换几次走法**（Bland 重启 → 去掉退化微扰 → Dantzig 定价），只在"符号类失败"时触发 |
-| **带证明的割**（根松弛的表行按混合整数舍入成割，每条割附"由哪一行舍入而来"的证明，`verify_cut` 独立**重新推导**后才允许进入模型；拒绝即停成 `Unverified`；`MipResult::cuts` 与报告的 `cuts` 列可追溯） | 割族目前只有对**单行**的舍入，且**只在根节点**做：多行 MIR 聚合（第十六、二十一轮）与**节点上的割**（第二十二轮）都实测**净收益为负、已回退**（节点割：4 个可证最优实例里 3 个证明成本变差、墙钟 3–24 倍，只有 `khb05250` 305 → 92 节点）；割轮次不改善根松弛时整轮丢弃；一轮里各候选割的违背量**完全并列**，上限在候选多于它时实际是按行序截断 —— 第十六~十八轮量了五种选择/规模规则，**没有一种在"界"与"证明成本"两个轴上同时赢过行序取满上限**（`CHANGELOG.md`、`docs/roadmap.md`） |
-| **对偶单纯形热启动**：`SimplexBasis` + `solve_model_with_basis`，改界后重解不再重建 Phase I（实测真实实例枢轴数 1–49 vs 冷启 21–1008） | 化简模型上的热启动（基必须与化简后模型同构） |
-| **证书与独立校验器**（`verify`）：最优性（原始/对偶可行性、互补松弛、对偶间隙）、Farkas 不可行射线、无界射线 + 可行起点、证书 JSON、`cmd/parse --verify` / `--certificate` | 化简模型的乘子回映（证书只对**内核收到的模型**成立，故 `--verify` 走不化简的路径）；**Farkas 射线仍是 Phase I 的最优对偶解**，但内核发证书前把校验器关于射线的三条测量自己做一遍：符号约定（**按射线自己的尺度** `cost_scale(zero_cost) = 1`）、盒吸收、以及边际**严格为正**（第四十二轮；第三十九轮实测过缺这一层的代价：一次恢复回来的射线被校验器量成 `ray signs 7.65e18`，而被拒的证书会停掉整轮搜索） |
-| MPS / LP 文件读入与写出 | MPS 的 `SC` / `SI` 半连续界、完整 `SOS` / `MARKER` 语义 |
-| presolve：空行/列消元、冗余行、singleton 转界、隐式界收紧、固定变量消元 + 解还原（`solve` 默认开启） | 系数强化、对偶固定、变量/行的重复与支配检测；整数模型**不经化简**（答案不能取决于化简碰巧定住了什么） |
-| 内核行数 ≤ 200000（`SimplexOptions::max_kernel_rows`；基用**稀疏 LU**，内存 `O(nnz + fill)`） | 填充量由 `max_factor_entries` 预算约束；再往上真正的限制是枢轴数与每次枢轴的实际增益（见 `bench/README.md`） |
+| `min` / `max`；`≤` / `≥` / `=` 任意混合（含负右端项） | MPS 的 `SC` / `SI` 半连续界、完整的 `SOS` / `MARKER` 语义 |
+| 任意有限上下界、自由变量 | 系数强化、对偶固定、行/列的支配检测等 presolve 归约 |
+| 整数与 0-1 变量（分支定界） | **节点上的割**；整数无界性的证明（松弛无界只报 `NotSolved` / `UnboundedRelaxation`） |
+| 证书复核（最优性 / Farkas / 无界射线） | 化简模型的乘子回映（证书只对内核收到的模型成立，故校验路径不化简） |
+| 内核行数上限 200 000（稀疏 LU，内存 `O(nnz + fill)`） | 非线性 / 半定规划、并行、网络单纯形专用路径、Python / JS 绑定 |
 
-**两个"行数上限"不要混淆**：`cmd/parse --max-rows N` 限制的是**模型约束数**（超过即 `solve=skipped`）；
-内核自己的门禁 `max_kernel_rows` 限制的是**内核行数**。有限上界**不再**占行（有界变量枢轴把上下界当界用），
-所以两者通常相等；唯一还会放大内核行数的是"下界无界的自由变量 + 有限上界"（`p − n ≤ ub` 是两个列之差，
-没有单列界可用）。实测极端例子 `fast0507`：507 条约束、上界还是行的年代内核规模 **63516 行**（稠密基逆时代
-约 30.8 GB），现在 **489 行**。
+超出能力边界的调用一律返回 `NotSolved` 并带原因，不会返回一个可疑解。详细的状态口径见
+[`docs/api.md`](docs/api.md)。
 
-## 承诺 ↔ 证据
+## 真实数据与基准
 
-本项目的规矩是"每条承诺都要有可复核证据"（M6 完成标准之一）：下表把可检验的说法逐条指到证据上——报告的
-具体列、一条能重跑的命令，或一个测试文件。**没有证据的说法不写进来**，有限度的地方在最后一列写清楚限度。
-对赛事验收要求的逐条对照（另一条轴）见 [`docs/acceptance.md`](docs/acceptance.md)。
+[`bench/`](bench/README.md) 用公开实例（MIPLIB 2017，仓库不分发数据，只提供下载脚本与清单）对拍，
+产出四份报告：
 
-| 承诺 | 证据 | 限度 / 备注 |
+| 报告 | 口径 | 结果 |
 | --- | --- | --- |
-| 能读真实模型文件（MPS / LP） | `bench/parse-report.md`：manifest 全部实例 `parsed`、`failed 0`；重跑 `bench/report-parse.ps1` | 不支持 MPS 的 `SC`/`SI` 与完整 `SOS`/`MARKER`（解析器明确报错） |
-| 能求解真实规模 LP（presolve + 稀疏 LU + 增益定价） | `bench/solve-report.md` 的各项计数；`bench/README.md` 的单实例量级（`30n20b8` 化简后 11591 行 16 秒最优） | 当前报告口径（`bench/report.md` 标 `current`）：32 实例中 **20 个求到最优、11 个超行数上限跳过、1 个到 20000 枢轴上限**（`fast0507`，它需要的不止这些枢轴）。**枢轴上限是基准口径的一部分**（报告头部写明）：这个上限由实测定 —— 它与同一清单里 MIP 报告给每个松弛的上限一致（20000）；早先那个 1200 的口径下同一清单是 18 个最优、3 个到上限，两个上限是**两场实验**，旧数字留在 `CHANGELOG.md` |
-| **每个松弛都经过独立校验器** | `bench/mip-report.md` 与 `bench/mip-report-small.md` 的 `verified` 列；`mip/mip_test.mbt` 断言 `verified == nodes` | `verified < nodes` 的差额是"到达不了结论的松弛"（迭代上限或写不出符号约定的证书），按**开着的活**计 |
-| 小规模整数实例证到**公开已知最优值** | `bench/mip-report-small.md`（**5/10**）+ `bench/check-mip-objectives.ps1` 对 5 项**取等**通过 | 另外 5 个到节点预算（`markshare1`/`markshare2`/`pk1` 界贴下界）。**节点预算也是实测定的**：清单里最深的证明（`blend2`）在 60 000 预算的探针里落在 25 230 个松弛上、在报告的 30 000 预算下落在 24 934 个（下潜储备与启动份额都是预算的比例，所以两条轨迹不完全相同），30 000 取的是最小整千覆盖值；同一实例在早先 20 000 的口径下仍报 `node-limit`（两场实验，旧数字留在 `CHANGELOG.md`） |
-| 证书可被第三方独立复核（含 JSON） | `verify/verify_test.mbt`（含"故意做坏的解必须被拒"）；`cmd/parse -- verify <file> --certificate <json>` | 证书只对**内核收到的模型**成立，故校验路径不化简；生产者侧的自检已按主张补齐：最优性是残差 + 变量界 + 乘子符号 + 对偶间隙四项（第三/十五/二十八/四十一轮），不可行是射线符号 + 盒吸收 + 边际为正三项再加人工和那条算术判据（第二十三/四十二轮），校验端对每一份证书仍独立复核 |
-| 每条割都能被独立**再推导** | `verify/cuts_test.mbt`（穷举小模型所有整数点、确认无效割确实砍掉一个可行整点）；`mip/cuts_test.mbt`（做坏的割被拒且运行停 `Unverified`） | 割族只有单行舍入；选择规则五条、多行 MIR 聚合一族与**节点上的割**均已实测无净收益（`CHANGELOG.md`） |
-| 公开入口的取舍口径（`NodeLimit` / `NotSolved`） | `docs/api.md` 的契约表；`moonopt_test.mbt` | 整数模型**不做化简** |
-| 不可行 / 无界 / 预算到顶各有明确状态 | `mip/mip_test.mbt`（松弛无界报 `UnboundedRelaxation`、非法模型报 `Invalid`） | 整数无界性证明（整数射线）未做 |
-| 规模门禁：行数上限与填充预算 | `bench/README.md` 的两张表；`simplex` 的 `TooLarge` / `max_factor_entries` | 行数上限是粗闸门，真正的界是枢轴数与每次枢轴增益 |
-| CLI 文本输出稳定（`bench/` 脚本解析它） | `bench/report.md` 的一键复现命令；改动后实测同一调用逐位不变 | `--json` 是同一批运行的另一份渲染，不替代文本 |
-| 报告是证据：脚本拒绝写不可靠报告 | 四个脚本各自的拒绝条件（退出码非零 / 条目数不符 / 出现被拒证书 / 点未通过复核），`bench/README.md` 逐条写出 | 拒绝即非零退出且**不落盘** |
-| 报告是否仍被当前代码支持，有机械化判定 | `bench/report.md` 的 `generated at` 与 `code behind it` 两列（`STALE (N changed since)`） | 判据保守：改注释也算改 |
-| 依赖边界（可被审阅的架构事实） | `verify/moon.pkg` 不 import `simplex`；库包不引 `moonbitlang/x`（只有 `cmd/parse` 引） | 这是"校验器与求解器不共享状态"的可检查形式 |
-| 三目标全绿 | `moon test --deny-warn`、`--target wasm-gc`、`--target js`（当前 198 个测试） | CI 每次运行重跑 |
-| 已发布（mooncakes.io 的 `Freon793/moonopt`，当前 `0.1.2`） | `moon.mod` 的 `version`；注册表页面；发布物的自包含与公开面四项契约的验收见 `docs/roadmap.md` 的 M6 轮次 | 语义版本从 `0.1.0` 起，之后按 SemVer 递增（`0.1.1` 是元数据与文档修正、`0.1.2` 修的是校验器算错的一个量） |
+| [`bench/parse-report.md`](bench/parse-report.md) | 全清单解析 | 32 个实例全部解析成功 |
+| [`bench/solve-report.md`](bench/solve-report.md) | 32 个实例、1000 行上限、20000 枢轴上限、presolve | 20 个求到最优、11 个超行数上限跳过、1 个到枢轴上限 |
+| [`bench/mip-report.md`](bench/mip-report.md) | 32 个实例、300 节点 | 3 个证到最优、12 个到节点预算、17 个跳过 |
+| [`bench/mip-report-small.md`](bench/mip-report-small.md) | 10 个实例、30000 节点 | 5 个证到公开已知最优值、5 个到节点预算 |
 
-## 生态位
+上限是结果的一部分：报告头部逐字记录行数上限、枢轴上限与节点预算，不同上限下的计数不能互相比较。
+[`bench/report.md`](bench/report.md) 是索引，同时判定每份报告描述的还是不是当前代码里的那份。
 
-选型阶段对 MoonBit 生态做过一次横评（mooncakes.io 已发布模块与 GitHub `topic:moonbit` 仓库，方法与原始证据见
-[`docs/related-work.md`](docs/related-work.md) 与 [`docs/ecosystem-survey.md`](docs/ecosystem-survey.md)）。
-结论：**通用 LP/MILP 求解器与标准模型格式支持在该生态中此前不存在**；两个最相关的既有实现是
-`Juwan-Hwang/moon-certified` 的 `math/simplex` / `math/ilp`（合集仓库里的稠密数组接口）与
-`Luna-Flow/linear-program`（未发布到注册表）。逐项能力对照表见
-[`docs/ecosystem-survey.md`](docs/ecosystem-survey.md#与生态内既有实现的差异)。
-
-我们不追求广度，只做**窄而深 + 可验证**：与上述实现是互补与可对接关系，而非替换。
+```bash
+powershell -NoProfile -ExecutionPolicy Bypass -File bench/fetch-instances.ps1   # 下载实例
+powershell -NoProfile -ExecutionPolicy Bypass -File bench/report.ps1            # 四份报告是否仍被当前代码支持
+```
 
 ## 项目结构
 
 ```
-moonopt.mbt       公开入口：solve / solve_with、SolveStatus、Solution、SolveOptions（默认开启 presolve）
+moonopt.mbt       公开入口：solve / solve_with、SolveStatus、Solution、SolveOptions
 core/             数值与稀疏基础设施（容差比较、补偿求和、CSC 稀疏矩阵）
 model/            模型层（变量、线性表达式、约束、目标、模型校验）
-format/           MPS 与 LP 格式读写、解析错误定位
-oracle/           参考实现：稠密两阶段单纯形（差分测试对照基准，非交付求解器）
-simplex/          稀疏修正单纯形内核（含对偶单纯形热启动）
-presolve/         模型化简与解还原（公开接口可单独使用）
-verify/           独立校验器：最优性、Farkas、无界射线 + 证书 JSON（不依赖 simplex）
-mip/              分支定界与根割（每个松弛过 verify）
-cmd/main/         示例 CLI 与演示输出
-cmd/parse/        模型巡检 / 求解 / 校验证书 / 格式化 / 批量基准 CLI（子命令 + --json）
-examples/         可运行示例
-bench/            数据政策、下载与报告脚本、报告（入口 bench/report.md）
+format/           MPS 与 LP 读写、解析错误定位
+oracle/           参考实现：稠密两阶段单纯形（差分测试的对照基准，不是交付求解器）
+simplex/          稀疏修正单纯形内核、稀疏 LU、对偶单纯形热启动、证书生产端自检
+presolve/         模型化简与解还原
+verify/           独立校验器：最优性、Farkas、无界射线、割的再推导（不依赖 simplex）
+mip/              分支定界、根割、原始启发式
+cmd/main/         演示 CLI        cmd/parse/  模型巡检与求解 CLI
+examples/         可运行示例      bench/      数据政策、下载与报告脚本、报告
 docs/             设计、算法、API 契约、路线图、生态调研、验收对照
 ```
 
-## 文档导航
+## 文档
 
-每个文档只负责一件事：
-
-| 文档 | 负责什么 |
+| 文件 | 内容 |
 | --- | --- |
-| [`README.md`](README.md)（本文件） | 入口：定位、安装与最小例子、能力与边界、承诺 ↔ 证据、生态位 |
-| [`CHANGELOG.md`](CHANGELOG.md) | 逐版变化；每一轮实测数字与**被否掉**的方案（含否决理由） |
-| [`docs/roadmap.md`](docs/roadmap.md) | 里程碑与完成标准、每轮技术决策、明确不做（非目标） |
 | [`docs/design.md`](docs/design.md) | 架构：目标与非目标、包边界与依赖规则、数据表示、证书约定 |
-| [`docs/algorithms.md`](docs/algorithms.md) | 实现里**真正在跑**的算法，每段以一条可复核数字结尾 |
+| [`docs/algorithms.md`](docs/algorithms.md) | 实现里真正在跑的算法，每节附一条可复核的实测数字 |
 | [`docs/api.md`](docs/api.md) | 公开 API 契约：每个包承诺什么、什么情况下返回哪个状态 |
-| [`docs/acceptance.md`](docs/acceptance.md) | 赛事验收要求 ↔ 证据的逐条对照，以及评审可执行的验证步骤 |
-| [`docs/ecosystem-survey.md`](docs/ecosystem-survey.md) | 生态横评、可借鉴项、与既有实现的差异、证书标准的对照 |
-| [`docs/related-work.md`](docs/related-work.md) | 选型期的生态检索证据（命中数、仓库清单、方法限度） |
-| [`bench/README.md`](bench/README.md) | 基准数据政策、实例量级、四份报告的复现步骤与上限口径 |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | 本地环境、提交前必须全绿的检查、代码规范与数据许可约定 |
-| [`AGENTS.md`](AGENTS.md) | 给 AI/协作者的仓库地图与不变量清单 |
+| [`docs/roadmap.md`](docs/roadmap.md) | 里程碑与完成标准、下一步方向、明确不做的事 |
+| [`docs/prior-art.md`](docs/prior-art.md) | 生态调研：生态内有无同类实现、可借鉴的公开标准、许可证红线 |
+| [`bench/README.md`](bench/README.md) | 基准数据政策、实例量级、四份报告的复现步骤与口径 |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | 本地环境、提交前必须全绿的检查、代码规范 |
+| [`CHANGELOG.md`](CHANGELOG.md) | 逐版变化 |
+| [`docs/history.md`](docs/history.md) | 开发过程中的实测记录（归档，含被否决的方案与理由） |
 
-## 依赖
+## 开发
 
-库包（`core` / `model` / `oracle` / `format` / 根包 `moonopt`）**不依赖任何第三方包**；
-只有 `cmd/parse` 依赖官方 `moonbitlang/x` 的 `fs` 与 `sys`（读文件与取命令行参数）。
+```bash
+moon check --deny-warn
+moon test --deny-warn
+moon fmt && git diff --exit-code
+moon info && git diff --exit-code   # .mbti 是接口合同，必须随代码提交
+```
 
-## 开发与贡献
+库包（`core` / `model` / `format` / `oracle` / `simplex` / `presolve` / `verify` / `mip` / 根包）
+不依赖任何第三方包；只有 `cmd/parse` 依赖官方 `moonbitlang/x` 的 `fs` 与 `sys`。
 
-常用命令见 [`CONTRIBUTING.md`](CONTRIBUTING.md)；提交前必须全绿的四条是 `moon check --deny-warn`、
-`moon test --deny-warn`、`moon fmt && git diff --exit-code`、`moon info && git diff --exit-code`。
-`.mbti` 是接口合同，必须随代码提交。CI（[`.github/workflows/check.yml`](.github/workflows/check.yml)）
-在 Linux / macOS / Windows 上跑**检查 / 构建 / 测试**三步，另有 wasm-gc / js 两个测试任务。
+## 许可与数据
 
-## 数据与许可
-
-- 本项目以 **Apache-2.0** 发布（见 [`LICENSE`](LICENSE)）。
-- 基准数据（MIPLIB 2017）**不由本仓库再分发**：只提供下载脚本、清单与报告，来源与获取方式见
-  [`bench/README.md`](bench/README.md)（其中也说明了为什么没有直接用 Netlib LP 测试集）。
-- 算法实现基于公开文献，代码为本项目**原创**，未移植任何第三方实现；算法来源见
-  [`docs/algorithms.md`](docs/algorithms.md) 与 [`docs/design.md`](docs/design.md)。
+- 本项目以 **Apache-2.0** 发布，见 [`LICENSE`](LICENSE)。
+- 算法实现基于公开文献，代码为本项目原创，未移植任何第三方实现。
+- 基准实例（MIPLIB 2017）是第三方数据，**不由本仓库再分发**：仓库里只有下载脚本与本项目自己写的清单，
+  `.moonignore` 保证它们不进发布归档。细节见 [`bench/README.md`](bench/README.md)。
