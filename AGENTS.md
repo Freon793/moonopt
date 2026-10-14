@@ -69,13 +69,18 @@ You can browse and install extra skills here:
     is how a step of the wrong sign (or the size of an unbounded column's sentinel)
     gets into the state.
   - `presolve/`: model reduction and postsolve. Empty rows and columns, rows the
-    bounds already settle, singleton rows turned into bounds, implied bounds, and
+    bounds already settle, singleton rows turned into bounds, implied bounds,
+    **dual fixing** (a variable is pinned at a bound when the direction the objective
+    wants can only relax every row it appears in; never when its bounds already
+    conflict — that verdict belongs to `eliminate_fixed`), and
     fixed-variable elimination with an objective offset; `reconstruct` maps a
     reduced solution back to the original variables and `max_row_violation` /
     `max_bound_violation` check it against the original model instead of trusting
     the reduction's bookkeeping. Every reduction must be proved before it fires,
     and a model presolve proves infeasible or unbounded is reported as such rather
-    than handed to the kernel.
+    than handed to the kernel. `strengthen_integer_rows` is the one reduction that
+    needs integrality, so it is exported for the integer path instead of living in
+    the reduction loop: a linear presolve never sees an integer model.
   - `verify/`: the **independent** checker for a claimed answer. Primal feasibility,
     dual feasibility, complementary slackness and the duality gap for an optimality
     claim; a Farkas ray for an infeasibility claim; a feasible point plus a recession
@@ -86,7 +91,13 @@ You can browse and install extra skills here:
     derivation are documented in `verify/verify.mbt`; a producer has to use that
     convention, and the kernel's mapping onto it lives in `simplex/certificate.mbt`.
   - `mip/`: branch and bound over the linear kernel, added milestone by milestone,
-    see `docs/roadmap.md`. A node is its parent plus one tightened bound, rebuilt
+    see `docs/roadmap.md`. `solve_mip` first runs `@presolve.strengthen_integer_rows`
+    over the model: an integer row's coefficient is raised as far as integrality licenses
+    (which needs *both* extremes of the other terms — see the function's note), the
+    integer feasible set is preserved exactly, and the search gets a stronger relaxation
+    of the same problem; the rewrite touches neither variables nor their indices, so
+    results stay in the caller's variable space, and a model with nothing to strengthen
+    is searched unchanged. A node is its parent plus one tightened bound, rebuilt
     from the root along the chain rather than copied per node; the child is solved
     warm from the basis its parent ended on (`solve_model_with_basis`), because a
     bound change leaves the reduced costs alone. The search is best-bound, prunes

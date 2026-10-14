@@ -315,10 +315,11 @@ fn State::new_with_basis(
 /// Count of pivots after which the Devex weights are re-derived from scratch.
 ///
 /// The update only ever grows a weight (`w ← max(w, (u/γ)²)` with `γ` the largest
-/// scaled entry of the pivot row), so an endless run would slowly stop scaling the
-/// reduced costs at all and become Dantzig with extra arithmetic. A reset is the
-/// standard answer, and the number is a measurement rather than a guess: see
-/// `docs/algorithms.md` for what the corpus shows at 0 (never) and at 100/1000/10000.
+/// scaled entry of the pivot row), so a long run would live on one stale reference row for
+/// ever. A periodic reset is the standard answer and this is the classical order of
+/// magnitude for it. **It is not a measured value**: the variants (never, 100, 10 000) have
+/// not been run — the number is a constant with a rationale, and `docs/algorithms.md` lists
+/// it under the limits rather than among the measurements.
 const DEVEX_RESET_PIVOTS : Int = 1000
 
 ///|
