@@ -44,7 +44,7 @@ fn strip_lp_comment(line : String) -> String {
 /// Length of the numeric prefix of a token: the leading sign, digits, an
 /// optional decimal point and an optional exponent (`1`, `-2.5`, `1e-3`).
 /// Returns 0 when the token does not start with a number.
-fn numeric_prefix_length(token : String) -> Int {
+fn numeric_prefix_length(token : String) -> Int32 {
   let chars = token.to_array()
   let mut i = 0
   if i < chars.length() && (chars[i] == '+' || chars[i] == '-') {
@@ -138,13 +138,13 @@ fn split_signed_terms(token : String) -> Array[String] {
 fn parse_lp_expression(
   text : String,
   model : @model.Model,
-  var_index : Map[String, Int],
-  line : Int,
-  column_offset : Int,
-) -> Result[Array[(Int, Double)], ParseIssue] {
+  var_index : Map[String, Int32],
+  line : Int32,
+  column_offset : Int32,
+) -> Result[Array[(Int32, Double)], ParseIssue] {
   // Glued terms (`x+y`, `2x-3y`) are split before interpretation, so the rest of
   // the loop only ever sees one term per token.
-  let expanded : Array[(String, Int)] = []
+  let expanded : Array[(String, Int32)] = []
   for entry in split_tokens(text) {
     let (token, column) = entry
     let parts = split_signed_terms(token)
@@ -159,7 +159,7 @@ fn parse_lp_expression(
     }
   }
   let tokens = expanded
-  let terms : Array[(Int, Double)] = []
+  let terms : Array[(Int32, Double)] = []
   let mut sign = 1.0
   let mut pending : Double? = None
   let mut idx = 0
@@ -244,7 +244,7 @@ fn parse_bound_value(text : String) -> Double? {
 
 ///|
 /// Splits `[name:] rest` and returns the offset of `rest` inside the line.
-fn split_lp_name(line : String) -> (String, String, Int) {
+fn split_lp_name(line : String) -> (String, String, Int32) {
   match line.find(":") {
     Some(index) => {
       let name = line[:index].trim().to_owned()
@@ -259,7 +259,7 @@ fn split_lp_name(line : String) -> (String, String, Int) {
 /// Reads a model from LP text.
 pub fn read_lp(text : String) -> Result[@model.Model, ParseIssue] {
   let model = @model.Model::new(@model.Sense::Minimize)
-  let var_index : Map[String, Int] = Map([])
+  let var_index : Map[String, Int32] = Map([])
   let mut section = "HEADER"
   let mut line_number = 0
   for raw in text.split("\n") {
@@ -391,7 +391,7 @@ pub fn read_lp(text : String) -> Result[@model.Model, ParseIssue] {
 ///|
 /// Finds the relation in a constraint's right hand side and splits the text
 /// around it. Returns `(left, relation, right, column of the relation)`.
-fn find_relation(text : String) -> (String, @model.Rel, String, Int)? {
+fn find_relation(text : String) -> (String, @model.Rel, String, Int32)? {
   let candidates : Array[(String, @model.Rel)] = [
     ("<=", @model.Rel::LessEqual),
     (">=", @model.Rel::GreaterEqual),
@@ -422,9 +422,9 @@ fn find_relation(text : String) -> (String, @model.Rel, String, Int)? {
 /// `0 <= x <= 1`, `x = 2`, `x free`, `-infinity <= x <= +infinity`.
 fn apply_lp_bound(
   line : String,
-  line_number : Int,
+  line_number : Int32,
   model : @model.Model,
-  var_index : Map[String, Int],
+  var_index : Map[String, Int32],
 ) -> Result[Unit, ParseIssue] {
   let tokens = split_tokens(line)
   let normalized = line.trim().to_owned()
@@ -537,7 +537,7 @@ fn apply_lp_bound(
 /// `name_on_left` distinguishes `x <= 1` from `0 <= x`: the same relation means
 /// opposite things depending on which side the variable sits.
 fn apply_bound_side(
-  index : Int,
+  index : Int32,
   model : @model.Model,
   name_on_left : Bool,
   relation : @model.Rel,
@@ -563,13 +563,13 @@ fn apply_bound_side(
 ///|
 /// Current lower bound of a variable, used when a `Bounds` line only updates one
 /// side.
-fn current_lower(model : @model.Model, index : Int) -> Double {
+fn current_lower(model : @model.Model, index : Int32) -> Double {
   model.get_var(index).lb
 }
 
 ///|
 /// Current upper bound of a variable.
-fn current_upper(model : @model.Model, index : Int) -> Double {
+fn current_upper(model : @model.Model, index : Int32) -> Double {
   model.get_var(index).ub
 }
 
@@ -578,8 +578,8 @@ fn current_upper(model : @model.Model, index : Int) -> Double {
 fn ensure_lp_var(
   name : String,
   model : @model.Model,
-  var_index : Map[String, Int],
-) -> Int {
+  var_index : Map[String, Int32],
+) -> Int32 {
   match var_index.get(name) {
     Some(existing) => existing
     None => {
@@ -594,7 +594,7 @@ fn ensure_lp_var(
 /// Formats `terms` the way LP files write them: `2 x - y + 0.5 z`.
 fn format_lp_terms(
   model : @model.Model,
-  terms : Array[(Int, Double)],
+  terms : Array[(Int32, Double)],
 ) -> String {
   let parts : Array[String] = []
   for k = 0; k < terms.length(); k = k + 1 {

@@ -24,13 +24,13 @@
 ///|
 /// A factorized basis.
 priv struct BasisLu {
-  m : Int
+  m : Int32
   /// `row_at[position]` is the original row now sitting at that position.
-  row_at : Array[Int]
-  l_rows : Array[Array[(Int, Double)]]
-  u_rows : Array[Array[(Int, Double)]]
-  l_columns : Array[Array[(Int, Double)]]
-  u_columns : Array[Array[(Int, Double)]]
+  row_at : Array[Int32]
+  l_rows : Array[Array[(Int32, Double)]]
+  u_rows : Array[Array[(Int32, Double)]]
+  l_columns : Array[Array[(Int32, Double)]]
+  u_columns : Array[Array[(Int32, Double)]]
 }
 
 ///|
@@ -44,13 +44,13 @@ priv struct BasisLu {
 /// allocate without limit — the same failure mode the dense inverse had, only
 /// harder to see coming.
 fn factorize_basis(
-  columns : Array[Array[(Int, Double)]],
-  m : Int,
+  columns : Array[Array[(Int32, Double)]],
+  m : Int32,
   tolerance : Double,
-  entry_budget : Int,
+  entry_budget : Int32,
 ) -> BasisLu? {
-  let row_at : Array[Int] = []
-  let position_of : Array[Int] = []
+  let row_at : Array[Int32] = []
+  let position_of : Array[Int32] = []
   for i = 0; i < m; i = i + 1 {
     row_at.push(i)
     position_of.push(i)
@@ -62,8 +62,8 @@ fn factorize_basis(
   // that is exactly the bug this shape avoids. The position is looked up when the
   // entry is used (`position_of`, always current) and the solve views are built
   // once at the end, when every swap has happened.
-  let l_entries : Array[Array[(Int, Double)]] = []
-  let u_columns : Array[Array[(Int, Double)]] = []
+  let l_entries : Array[Array[(Int32, Double)]] = []
+  let u_columns : Array[Array[(Int32, Double)]] = []
   let mut entries = 0
   for k = 0; k < m; k = k + 1 {
     for entry in columns[k] {
@@ -74,7 +74,7 @@ fn factorize_basis(
     // Left-looking update: subtract the effect of the steps already taken, in the
     // order they were taken. After this, entries below `k` are exactly the column
     // of `U` and entries from `k` on are the column of `L` waiting to be divided.
-    let upper : Array[(Int, Double)] = []
+    let upper : Array[(Int32, Double)] = []
     for j = 0; j < k; j = j + 1 {
       let multiplier = work[j]
       if multiplier != 0.0 {
@@ -121,7 +121,7 @@ fn factorize_basis(
       work[pivot_position] = value
     }
     let pivot = work[k]
-    let lower : Array[(Int, Double)] = []
+    let lower : Array[(Int32, Double)] = []
     for position = k; position < m; position = position + 1 {
       let value = work[position]
       work[position] = 0.0
@@ -140,9 +140,9 @@ fn factorize_basis(
       return None
     }
   }
-  let l_rows : Array[Array[(Int, Double)]] = []
-  let l_columns : Array[Array[(Int, Double)]] = []
-  let u_rows : Array[Array[(Int, Double)]] = []
+  let l_rows : Array[Array[(Int32, Double)]] = []
+  let l_columns : Array[Array[(Int32, Double)]] = []
+  let u_rows : Array[Array[(Int32, Double)]] = []
   for position = 0; position < m; position = position + 1 {
     l_rows.push([])
     l_columns.push([])

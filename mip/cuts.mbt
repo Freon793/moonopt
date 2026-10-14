@@ -29,7 +29,7 @@
 /// How many cuts one round may add. Every cut costs a re-solve of the node it lands on,
 /// so a round is worth its cost only while the cuts it produces still cut the
 /// relaxation's own point away.
-let cut_round_cap : Int = 10
+let cut_round_cap : Int32 = 10
 
 ///|
 /// The row a combination of model rows gives: `rⱼ = Σᵢ yᵢ·aᵢⱼ`.
@@ -88,7 +88,7 @@ fn has_upper_bound(ub : Double) -> Bool {
 /// a variable with no finite bound is left as-is for the checker to refuse.
 fn shift_choice(
   model : @model.Model,
-  basic : Int,
+  basic : Int32,
   values : Array[Double],
   multipliers : Array[Double],
   tolerance : Double,

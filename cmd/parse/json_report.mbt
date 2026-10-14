@@ -28,12 +28,12 @@ priv struct FileOutcome {
   mut format_name : String
   mut parse_ok : Bool
   mut parse_error : String
-  mut vars : Int
-  mut cons : Int
-  mut nonzeros : Int
-  mut integers : Int
+  mut vars : Int32
+  mut cons : Int32
+  mut nonzeros : Int32
+  mut integers : Int32
   mut sense : String
-  issues : Int
+  issues : Int32
   first_issue : String
   /// Which run this outcome describes: `parse`, `solve`, `mip` or `verify`.
   mut mode : String
@@ -41,10 +41,10 @@ priv struct FileOutcome {
   mut status : String
   mut has_objective : Bool
   mut objective : Double
-  mut iterations : Int
-  mut nodes : Int
-  mut verified : Int
-  mut cuts : Int
+  mut iterations : Int32
+  mut nodes : Int32
+  mut verified : Int32
+  mut cuts : Int32
   mut has_bound : Bool
   mut bound : Double
   mut gap : Double
@@ -53,8 +53,8 @@ priv struct FileOutcome {
   mut skipped : Bool
   mut presolved : Bool
   mut presolve_verdict : String
-  mut rows_after : Int
-  mut vars_after : Int
+  mut rows_after : Int32
+  mut vars_after : Int32
   /// The point behind the answer was measured against the original model.
   mut point_checked : Bool
   mut row_violation : Double
@@ -624,7 +624,7 @@ fn load_model(path : String) -> Result[(@model.Model, String), String] {
 fn document_json(
   command : String,
   outcomes : Array[FileOutcome],
-  failures : Int,
+  failures : Int32,
 ) -> String {
   let files : Array[String] = []
   for outcome in outcomes {
@@ -662,7 +662,7 @@ fn run_fmt(
   files : Array[String],
   format_wanted : String,
   output_path : String,
-) -> Int {
+) -> Int32 {
   if output_path != "" && files.length() > 1 {
     println(
       "fmt: -o takes one input file, " + files.length().to_string() + " given",

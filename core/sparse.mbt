@@ -13,10 +13,10 @@
 ///|
 /// A sparse matrix in compressed sparse column form.
 pub struct SparseMatrix {
-  nrows : Int
-  ncols : Int
-  col_ptr : Array[Int]
-  row_idx : Array[Int]
+  nrows : Int32
+  ncols : Int32
+  col_ptr : Array[Int32]
+  row_idx : Array[Int32]
   values : Array[Double]
 } derive(Debug)
 
@@ -27,15 +27,15 @@ pub struct SparseMatrix {
 /// and exact zeros are dropped. Passing a row index outside `[0, nrows)` is a
 /// programming error and aborts.
 pub fn SparseMatrix::from_columns(
-  nrows : Int,
-  columns : Array[Array[(Int, Double)]],
+  nrows : Int32,
+  columns : Array[Array[(Int32, Double)]],
 ) -> SparseMatrix {
   if nrows < 0 {
     abort("SparseMatrix::from_columns: nrows must be non-negative")
   }
   let ncols = columns.length()
-  let col_ptr : Array[Int] = [0]
-  let row_idx : Array[Int] = []
+  let col_ptr : Array[Int32] = [0]
+  let row_idx : Array[Int32] = []
   let values : Array[Double] = []
   for j = 0; j < ncols; j = j + 1 {
     let sorted = sort_entries(columns[j])
@@ -64,8 +64,8 @@ pub fn SparseMatrix::from_columns(
 
 ///|
 /// Builds an all-zero matrix with the given shape.
-pub fn SparseMatrix::zeros(nrows : Int, ncols : Int) -> SparseMatrix {
-  let col_ptr : Array[Int] = []
+pub fn SparseMatrix::zeros(nrows : Int32, ncols : Int32) -> SparseMatrix {
+  let col_ptr : Array[Int32] = []
   for j = 0; j <= ncols; j = j + 1 {
     col_ptr.push(0)
   }
@@ -74,25 +74,25 @@ pub fn SparseMatrix::zeros(nrows : Int, ncols : Int) -> SparseMatrix {
 
 ///|
 /// Number of rows.
-pub fn SparseMatrix::nrows(self : SparseMatrix) -> Int {
+pub fn SparseMatrix::nrows(self : SparseMatrix) -> Int32 {
   self.nrows
 }
 
 ///|
 /// Number of columns.
-pub fn SparseMatrix::ncols(self : SparseMatrix) -> Int {
+pub fn SparseMatrix::ncols(self : SparseMatrix) -> Int32 {
   self.ncols
 }
 
 ///|
 /// Number of stored (non-zero) entries.
-pub fn SparseMatrix::nnz(self : SparseMatrix) -> Int {
+pub fn SparseMatrix::nnz(self : SparseMatrix) -> Int32 {
   self.values.length()
 }
 
 ///|
 /// Number of stored entries in column `j`.
-pub fn SparseMatrix::col_nnz(self : SparseMatrix, j : Int) -> Int {
+pub fn SparseMatrix::col_nnz(self : SparseMatrix, j : Int32) -> Int32 {
   self.col_ptr[j + 1] - self.col_ptr[j]
 }
 
@@ -100,9 +100,9 @@ pub fn SparseMatrix::col_nnz(self : SparseMatrix, j : Int) -> Int {
 /// `(row, value)` pairs of column `j`, row index ascending.
 pub fn SparseMatrix::column(
   self : SparseMatrix,
-  j : Int,
-) -> Array[(Int, Double)] {
-  let out : Array[(Int, Double)] = []
+  j : Int32,
+) -> Array[(Int32, Double)] {
+  let out : Array[(Int32, Double)] = []
   for k = self.col_ptr[j]; k < self.col_ptr[j + 1]; k = k + 1 {
     out.push((self.row_idx[k], self.values[k]))
   }
@@ -111,7 +111,7 @@ pub fn SparseMatrix::column(
 
 ///|
 /// Entry at `(i, j)`; missing entries read as `0.0`.
-pub fn SparseMatrix::get(self : SparseMatrix, i : Int, j : Int) -> Double {
+pub fn SparseMatrix::get(self : SparseMatrix, i : Int32, j : Int32) -> Double {
   for k = self.col_ptr[j]; k < self.col_ptr[j + 1]; k = k + 1 {
     if self.row_idx[k] == i {
       return self.values[k]
@@ -129,13 +129,13 @@ pub fn SparseMatrix::get(self : SparseMatrix, i : Int, j : Int) -> Double {
 /// entry per pivot in a hot loop. The invariants documented at the top of this
 /// file still hold for everything reached this way; the views must not outlive a
 /// call that rebuilds the matrix.
-pub fn SparseMatrix::col_pointers(self : SparseMatrix) -> ArrayView[Int] {
+pub fn SparseMatrix::col_pointers(self : SparseMatrix) -> ArrayView[Int32] {
   self.col_ptr[:]
 }
 
 ///|
 /// Raw row indices of the stored entries.
-pub fn SparseMatrix::row_indices(self : SparseMatrix) -> ArrayView[Int] {
+pub fn SparseMatrix::row_indices(self : SparseMatrix) -> ArrayView[Int32] {
   self.row_idx[:]
 }
 
@@ -149,7 +149,7 @@ pub fn SparseMatrix::values_view(self : SparseMatrix) -> ArrayView[Double] {
 /// Transposes the matrix. Row `i` of `self` becomes column `i` of the result, so
 /// the result has `ncols` rows and `nrows` columns.
 pub fn SparseMatrix::transpose(self : SparseMatrix) -> SparseMatrix {
-  let cols : Array[Array[(Int, Double)]] = []
+  let cols : Array[Array[(Int32, Double)]] = []
   for i = 0; i < self.nrows; i = i + 1 {
     cols.push([])
   }
@@ -208,7 +208,7 @@ pub fn SparseMatrix::mul_vec(
 ///
 /// Insertion sort is intentional: columns of an LP are short, and this keeps the
 /// reference path allocation free and obviously correct.
-fn sort_entries(entries : Array[(Int, Double)]) -> Array[(Int, Double)] {
+fn sort_entries(entries : Array[(Int32, Double)]) -> Array[(Int32, Double)] {
   let out = entries.copy()
   let n = out.length()
   for i = 1; i < n; i = i + 1 {

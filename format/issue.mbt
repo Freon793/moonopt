@@ -5,8 +5,8 @@
 /// counts characters from the start of that line, and `token` is the exact text
 /// the parser rejected (empty when the problem is not tied to a single token).
 pub(all) struct ParseIssue {
-  line : Int
-  column : Int
+  line : Int32
+  column : Int32
   token : String
   message : String
 } derive(Debug, Eq)
@@ -14,8 +14,8 @@ pub(all) struct ParseIssue {
 ///|
 /// Builds an issue record.
 pub fn ParseIssue::new(
-  line : Int,
-  column : Int,
+  line : Int32,
+  column : Int32,
   token : String,
   message : String,
 ) -> ParseIssue {
@@ -42,8 +42,8 @@ pub fn ParseIssue::to_text(self : ParseIssue) -> String {
 /// Each token is returned together with its 1-based starting column: a reader
 /// that only reports "line 4021 is bad" is useless on a real instance, so the
 /// position has to survive tokenisation.
-pub fn split_tokens(line : String) -> Array[(String, Int)] {
-  let out : Array[(String, Int)] = []
+pub fn split_tokens(line : String) -> Array[(String, Int32)] {
+  let out : Array[(String, Int32)] = []
   let normalized = line.replace_all(old="\t", new=" ")
   let mut column = 1
   for part in normalized.split(" ") {
@@ -78,7 +78,7 @@ pub fn parse_number(token : String) -> Double? {
 
 ///|
 /// Parses an integer field, used for counts and indices inside model files.
-pub fn parse_index(token : String) -> Int? {
+pub fn parse_index(token : String) -> Int32? {
   let mut digits = 0
   let mut negative = false
   for c in token {

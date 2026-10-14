@@ -366,7 +366,7 @@ test "the stall window changes the run, not the answer" {
 /// constraint, and a ceiling of exactly one row is enough to solve it.
 test "model path: a finite upper bound costs no kernel row" {
   let model = @model.Model::new(@model.Sense::Minimize)
-  let vars : Array[Int] = []
+  let vars : Array[Int32] = []
   for j = 0; j < 20; j = j + 1 {
     vars.push(model.add_var("x" + j.to_string(), lb=0.0, ub=1.0))
   }
@@ -389,7 +389,7 @@ test "model path: a finite upper bound costs no kernel row" {
 /// one constraint is nine kernel rows.
 test "model path: kernel rows can still exceed the model's rows" {
   let model = @model.Model::new(@model.Sense::Minimize)
-  let vars : Array[Int] = []
+  let vars : Array[Int32] = []
   for j = 0; j < 8; j = j + 1 {
     vars.push(
       model.add_var("f" + j.to_string(), lb=-@model.infinite_bound, ub=10.0),
@@ -411,7 +411,7 @@ test "model path: kernel rows can still exceed the model's rows" {
 /// ceiling only exists to stop runs that cannot be honoured.
 test "model path: the default row limit does not interfere with small models" {
   let model = @model.Model::new(@model.Sense::Minimize)
-  let vars : Array[Int] = []
+  let vars : Array[Int32] = []
   for j = 0; j < 20; j = j + 1 {
     vars.push(model.add_var("x" + j.to_string(), lb=0.0, ub=1.0))
   }

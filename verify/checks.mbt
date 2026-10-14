@@ -46,7 +46,7 @@ fn dense_cost(model : @model.Model) -> Array[Double] {
 
 ///|
 /// `aᵢ·x` with compensated summation.
-fn row_dot(model : @model.Model, row : Int, x : Array[Double]) -> Double {
+fn row_dot(model : @model.Model, row : Int32, x : Array[Double]) -> Double {
   let terms = model.constraint(row).terms
   let acc = @core.CompensatedSum::new()
   for term in terms {
@@ -61,7 +61,7 @@ fn row_dot(model : @model.Model, row : Int, x : Array[Double]) -> Double {
 ///|
 /// The scale of a row: the right hand side plus what the terms contribute, so a
 /// residual can be judged against the numbers it came from.
-fn row_scale(model : @model.Model, row : Int, x : Array[Double]) -> Double {
+fn row_scale(model : @model.Model, row : Int32, x : Array[Double]) -> Double {
   let terms = model.constraint(row).terms
   let acc = @core.CompensatedSum::new()
   for term in terms {

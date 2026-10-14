@@ -8,25 +8,25 @@
 /// Deterministic generator, same shape as the other suites so a failing case can be
 /// reproduced from its seed.
 priv struct LuLcg {
-  mut state : Int
+  mut state : Int32
 }
 
 ///|
 /// Creates a generator from a seed.
-fn LuLcg::new(seed : Int) -> LuLcg {
+fn LuLcg::new(seed : Int32) -> LuLcg {
   { state: seed % 100003, }
 }
 
 ///|
 /// Next raw value in `[0, 100003)`.
-fn LuLcg::next(self : LuLcg) -> Int {
+fn LuLcg::next(self : LuLcg) -> Int32 {
   self.state = (self.state * 31 + 17) % 100003
   self.state
 }
 
 ///|
 /// Next value in `[0, bound)`.
-fn LuLcg::below(self : LuLcg, bound : Int) -> Int {
+fn LuLcg::below(self : LuLcg, bound : Int32) -> Int32 {
   if bound <= 1 {
     0
   } else {
@@ -36,7 +36,7 @@ fn LuLcg::below(self : LuLcg, bound : Int) -> Int {
 
 ///|
 /// Sparsity pattern of the test matrices, in percent.
-fn LuLcg::percent(self : LuLcg) -> Int {
+fn LuLcg::percent(self : LuLcg) -> Int32 {
   self.below(100)
 }
 
@@ -44,11 +44,11 @@ fn LuLcg::percent(self : LuLcg) -> Int {
 /// Builds a random sparse matrix as both a dense copy and sparse columns.
 fn random_matrix(
   lcg : LuLcg,
-  m : Int,
-  density_percent : Int,
-) -> (Array[Array[Double]], Array[Array[(Int, Double)]]) {
+  m : Int32,
+  density_percent : Int32,
+) -> (Array[Array[Double]], Array[Array[(Int32, Double)]]) {
   let dense : Array[Array[Double]] = []
-  let columns : Array[Array[(Int, Double)]] = []
+  let columns : Array[Array[(Int32, Double)]] = []
   for column = 0; column < m; column = column + 1 {
     columns.push([])
   }
@@ -76,7 +76,7 @@ fn random_matrix(
 
 ///|
 /// One entry of `L·U`, computed straight from the stored views.
-fn factor_entry(lu : BasisLu, row : Int, column : Int) -> Double {
+fn factor_entry(lu : BasisLu, row : Int32, column : Int32) -> Double {
   let mut total = 0.0
   // L[row][k]: the unit diagonal at k == row, otherwise whatever `l_rows[row]` has.
   for entry in lu.l_rows[row] {
@@ -89,7 +89,7 @@ fn factor_entry(lu : BasisLu, row : Int, column : Int) -> Double {
 
 ///|
 /// `U[row][column]`, zero outside the triangle the factors cover.
-fn upper_entry(lu : BasisLu, row : Int, column : Int) -> Double {
+fn upper_entry(lu : BasisLu, row : Int32, column : Int32) -> Double {
   if column < row {
     return 0.0
   }
@@ -105,8 +105,8 @@ fn upper_entry(lu : BasisLu, row : Int, column : Int) -> Double {
 ///|
 /// Matrix-vector product against sparse columns.
 fn multiply_columns(
-  columns : Array[Array[(Int, Double)]],
-  m : Int,
+  columns : Array[Array[(Int32, Double)]],
+  m : Int32,
   x : Array[Double],
 ) -> Array[Double] {
   let out : Array[Double] = Array::make(m, 0.0)
@@ -122,8 +122,8 @@ fn multiply_columns(
 ///|
 /// Transposed matrix-vector product against sparse columns.
 fn multiply_columns_transpose(
-  columns : Array[Array[(Int, Double)]],
-  m : Int,
+  columns : Array[Array[(Int32, Double)]],
+  m : Int32,
   y : Array[Double],
 ) -> Array[Double] {
   let out : Array[Double] = Array::make(m, 0.0)
@@ -145,7 +145,7 @@ fn multiply_columns_transpose(
 /// not much of a reference.
 fn dense_inverse(
   matrix : Array[Array[Double]],
-  m : Int,
+  m : Int32,
 ) -> Array[Array[Double]]? {
   let width = 2 * m
   let augmented : Array[Array[Double]] = []
@@ -301,7 +301,7 @@ test "both solves agree with the dense inverse" {
 /// pivoting on them.
 test "a singular basis is refused" {
   let m = 4
-  let columns : Array[Array[(Int, Double)]] = [
+  let columns : Array[Array[(Int32, Double)]] = [
     [(0, 1.0)],
     [],
     [(1, 1.0)],
@@ -315,9 +315,9 @@ test "a singular basis is refused" {
 /// costs linear space instead of `m²`, which is what lets the row ceiling move.
 test "the factors stay sparse on a banded basis" {
   let m = 400
-  let columns : Array[Array[(Int, Double)]] = []
+  let columns : Array[Array[(Int32, Double)]] = []
   for column = 0; column < m; column = column + 1 {
-    let entries : Array[(Int, Double)] = []
+    let entries : Array[(Int32, Double)] = []
     entries.push((column, 2.0))
     if column + 1 < m {
       entries.push((column + 1, 1.0))

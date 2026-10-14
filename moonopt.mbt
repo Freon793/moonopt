@@ -79,10 +79,10 @@ pub struct Solution {
   objective : Double
   /// Pivots the kernel ran. A branch and bound run counts relaxations instead, in
   /// `nodes`, because that is what its budget is spent on.
-  iterations : Int
+  iterations : Int32
   /// Relaxations a branch and bound run solved, including the ones its primal heuristic
   /// spent walking a fractional node down to a whole point. Zero for a linear solve.
-  nodes : Int
+  nodes : Int32
   /// The best objective still reachable among the work left open, in the model's sense.
   /// Equal to `objective` when nothing is left to prove — a linear solve is its own
   /// bound, so it is equal there too — and the number `gap` is measured against
@@ -102,7 +102,7 @@ pub struct Solution {
 /// `pub(all)` so callers can write `{ max_iterations: 1000, presolve: false }`
 /// directly; `SolveOptions::new` is the readable alternative.
 pub(all) struct SolveOptions {
-  max_iterations : Int
+  max_iterations : Int32
   /// Reduce the model before the kernel sees it and reconstruct the solution
   /// afterwards. On by default: every reduction is proved before it fires and every
   /// reconstruction is checked against the original model. Turn it off to observe
@@ -114,13 +114,13 @@ pub(all) struct SolveOptions {
   /// Relaxations a model with integer variables may solve, including the ones the primal
   /// heuristic spends. Reaching it ends the run as `NodeLimit` with the incumbent and the
   /// bound still open. Ignored by a linear solve, which spends `max_iterations` instead.
-  max_nodes : Int
+  max_nodes : Int32
   /// Rounds of cuts the root relaxation may be tightened with before the tree is built, or
   /// `0` to search the model as written. Each round re-solves the root, and every cut that
   /// lands has been re-derived and checked by the independent verifier first — an
   /// unchecked cut would remove integer points from every node below it without anything
   /// downstream noticing. Ignored by a linear solve, which has nothing to round.
-  cut_rounds : Int
+  cut_rounds : Int32
 } derive(Debug)
 
 ///|
@@ -132,13 +132,13 @@ pub fn SolveOptions::default() -> SolveOptions {
 
 ///|
 /// Solve options with an explicit iteration cap, keeping presolve on.
-pub fn SolveOptions::new(max_iterations : Int) -> SolveOptions {
+pub fn SolveOptions::new(max_iterations : Int32) -> SolveOptions {
   { max_iterations, presolve: true, max_nodes: 20000, cut_rounds: 2, }
 }
 
 ///|
 /// Solve options with an explicit node budget, for a model with integer variables.
-pub fn SolveOptions::with_max_nodes(max_nodes : Int) -> SolveOptions {
+pub fn SolveOptions::with_max_nodes(max_nodes : Int32) -> SolveOptions {
   { max_iterations: 10000, presolve: true, max_nodes, cut_rounds: 2, }
 }
 

@@ -58,16 +58,16 @@ pub fn parse_mps(text : String) -> Result[@model.Model, ParseIssue] {
   // end, because section order and defaults interact (see the package comment).
   let row_names : Array[String] = []
   let row_rels : Array[@model.Rel] = []
-  let row_terms : Array[Array[(Int, Double)]] = []
+  let row_terms : Array[Array[(Int32, Double)]] = []
   let row_range : Array[Double?] = []
   let row_rhs : Array[Double] = []
-  let row_index : Map[String, Int] = Map([])
+  let row_index : Map[String, Int32] = Map([])
   let col_names : Array[String] = []
-  let col_index : Map[String, Int] = Map([])
+  let col_index : Map[String, Int32] = Map([])
   let col_is_int : Array[Bool] = []
   let col_lb : Array[Double] = []
   let col_ub : Array[Double] = []
-  let objective : Array[(Int, Double)] = []
+  let objective : Array[(Int32, Double)] = []
   let mut objective_row = ""
   // Extra `N` rows beyond the first are *free rows*: MPS declares them, but they
   // are neither constraints nor the objective, so their coefficients are

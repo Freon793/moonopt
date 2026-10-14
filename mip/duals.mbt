@@ -47,7 +47,7 @@ fn cost_scale(model : @model.Model) -> Double {
 /// repair then declined to fire on the very multiplier the checker was refusing: the two
 /// scales differ by whatever the point contributes, and reading one for the other is how a
 /// producer and a checker end up measuring different things while both look right.
-fn row_sign_scale(model : @model.Model, row : Int) -> Double {
+fn row_sign_scale(model : @model.Model, row : Int32) -> Double {
   let constraint = model.constraint(row)
   let mut scale = 1.0
   for term in constraint.terms {

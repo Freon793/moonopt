@@ -180,7 +180,7 @@ fn multiplier_sign_violation(
 /// about how big it could legitimately be.
 fn reduced_cost_scale(
   model : @model.Model,
-  j : Int,
+  j : Int32,
   cost : Array[Double],
   duals : Array[Double],
 ) -> Double {
@@ -631,7 +631,7 @@ fn verify_unbounded(
 pub fn verify(
   model : @model.Model,
   certificate : Certificate,
-  tolerance? : Double = default_tolerance,
+  tolerance~ : Double = default_tolerance,
 ) -> Verdict {
   match certificate.claim {
     Claim::Optimal => verify_optimal(model, certificate, tolerance)

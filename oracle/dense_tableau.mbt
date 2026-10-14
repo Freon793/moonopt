@@ -33,7 +33,7 @@ pub struct OracleResult {
   status : OracleStatus
   values : Array[Double]
   objective : Double
-  iterations : Int
+  iterations : Int32
 } derive(Debug)
 
 ///|
@@ -55,10 +55,10 @@ let phase1_tolerance : Double = 1.0e-7
 /// `(row coefficients, relation, right hand side)` with row coefficients of
 /// length `num_vars`.
 pub fn solve_standard(
-  num_vars : Int,
+  num_vars : Int32,
   objective : Array[Double],
   rows : Array[(Array[Double], @model.Rel, Double)],
-  max_iterations? : Int = 10000,
+  max_iterations~ : Int32 = 10000,
 ) -> OracleResult {
   let m = rows.length()
   // Phase 0: normalise every row so its right hand side is non-negative. A `<=`
@@ -88,9 +88,9 @@ pub fn solve_standard(
     rhs.push(b)
   }
   // Phase 0b: allocate the extra columns (slack / surplus / artificial).
-  let slack_col : Array[Int] = []
-  let surplus_col : Array[Int] = []
-  let artificial_col : Array[Int] = []
+  let slack_col : Array[Int32] = []
+  let surplus_col : Array[Int32] = []
+  let artificial_col : Array[Int32] = []
   let mut ncol = num_vars
   for i = 0; i < m; i = i + 1 {
     match rel[i] {
@@ -146,7 +146,7 @@ pub fn solve_standard(
     row[ncol] = rhs[i]
     tableau.push(row)
   }
-  let basis : Array[Int] = []
+  let basis : Array[Int32] = []
   for i = 0; i < m; i = i + 1 {
     if artificial_col[i] >= 0 {
       basis.push(artificial_col[i])
@@ -254,9 +254,9 @@ pub fn solve_standard(
 /// Objective value of the current basis: `危 cost[basis岬 路 x_B(i)`.
 fn objective_of(
   tableau : Array[Array[Double]],
-  basis : Array[Int],
+  basis : Array[Int32],
   cost : Array[Double],
-  ncol : Int,
+  ncol : Int32,
 ) -> Double {
   let acc = @core.CompensatedSum::new()
   for i = 0; i < basis.length(); i = i + 1 {
@@ -273,8 +273,8 @@ fn objective_of(
 fn better_ratio(
   ratio : Double,
   best : Double,
-  candidate_basis : Int,
-  best_basis : Int,
+  candidate_basis : Int32,
+  best_basis : Int32,
 ) -> Bool {
   let tol = 1.0e-9 * @core.fmax(@core.fabs(ratio), @core.fabs(best)) + 1.0e-12
   if ratio < best - tol {
@@ -290,10 +290,10 @@ fn better_ratio(
 /// Pivots the tableau on `(row, col)` and updates the basis.
 fn pivot_at(
   tableau : Array[Array[Double]],
-  basis : Array[Int],
-  row : Int,
-  col : Int,
-  width : Int,
+  basis : Array[Int32],
+  row : Int32,
+  col : Int32,
+  width : Int32,
 ) -> Unit {
   let pivot = tableau[row][col]
   for j = 0; j < width; j = j + 1 {
@@ -324,12 +324,12 @@ fn pivot_at(
 /// `2` = iteration limit reached.
 fn iterate(
   tableau : Array[Array[Double]],
-  basis : Array[Int],
+  basis : Array[Int32],
   cost : Array[Double],
-  ncol : Int,
+  ncol : Int32,
   forbid : Array[Bool],
-  max_iterations : Int,
-) -> (Int, Int) {
+  max_iterations : Int32,
+) -> (Int32, Int32) {
   let m = tableau.length()
   let width = ncol + 1
   let mut iterations = 0

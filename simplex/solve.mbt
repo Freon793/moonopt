@@ -7,7 +7,7 @@
 /// This is the same problem shape the reference solver in `oracle` accepts, so
 /// the two can be compared directly.
 pub fn solve_standard(
-  num_vars : Int,
+  num_vars : Int32,
   cost : Array[Double],
   rows : Array[(Array[Double], @model.Rel, Double)],
 ) -> SimplexResult {
@@ -17,7 +17,7 @@ pub fn solve_standard(
 ///|
 /// Same as `solve_standard` with explicit options.
 pub fn solve_standard_with(
-  num_vars : Int,
+  num_vars : Int32,
   cost : Array[Double],
   rows : Array[(Array[Double], @model.Rel, Double)],
   options : SimplexOptions,
@@ -105,7 +105,7 @@ pub fn solve_model_with_basis(
 ///|
 /// Same as `solve_standard_with`, starting from a basis a previous run left behind.
 pub fn solve_standard_with_basis(
-  num_vars : Int,
+  num_vars : Int32,
   cost : Array[Double],
   rows : Array[(Array[Double], @model.Rel, Double)],
   options : SimplexOptions,

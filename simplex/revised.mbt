@@ -43,16 +43,16 @@
 /// number of rows, so a pivot no longer performs an O(m²) row operation on an
 /// explicit inverse.
 priv struct Eta {
-  row : Int
-  indices : Array[Int]
+  row : Int32
+  indices : Array[Int32]
   weights : Array[Double]
 }
 
 ///|
 /// Builds the product-form update from a tableau direction.
-fn Eta::from_direction(row : Int, direction : Array[Double]) -> Eta {
+fn Eta::from_direction(row : Int32, direction : Array[Double]) -> Eta {
   let pivot = direction[row]
-  let indices : Array[Int] = []
+  let indices : Array[Int32] = []
   let weights : Array[Double] = []
   for i = 0; i < direction.length(); i = i + 1 {
     let weight = if i == row {
@@ -96,8 +96,8 @@ fn Eta::apply_transpose(self : Eta, z : Array[Double]) -> Unit {
 priv struct State {
   problem : KernelProblem
   options : SimplexOptions
-  m : Int
-  n : Int
+  m : Int32
+  n : Int32
   /// Sparse factors of the basis as of the last refactorization (`P·B₀ = L·U`).
   ///
   /// `None` before the first factorization and after one that failed, and the run
@@ -141,11 +141,11 @@ priv struct State {
   mut enter_sigma : Double
   /// Columns whose measured gain was the best in recent iterations, re-measured
   /// every iteration when `gain_candidates` pricing is on. `-1` is an empty slot.
-  gain_pool : Array[Int]
+  gain_pool : Array[Int32]
   /// The gain each pool slot showed when it was last measured.
   gain_pool_gains : Array[Double]
   /// Where the rotating window over the column space stands.
-  mut gain_cursor : Int
+  mut gain_cursor : Int32
   /// Devex weights, one per column: an estimate of how long the direction a column
   /// moves in is, relative to the reference row the weights were last derived from.
   /// `1` means "no better estimate than the column itself", which is what makes the
@@ -163,7 +163,7 @@ priv struct State {
   /// direction it moved in (`+1` increasing, `-1` decreasing). `-1` means no such
   /// verdict was reached. Together with the direction buffer still holding `B⁻¹aⱼ`,
   /// this is the recession direction a certificate reports.
-  mut ray_column : Int
+  mut ray_column : Int32
   mut ray_sigma : Double
   /// The right hand side the run is solved against.
   ///
@@ -174,14 +174,14 @@ priv struct State {
   /// perturbed one the algorithm preferred.
   solve_rhs : Array[Double]
   /// `basis[row]` is the column that is basic in that row.
-  basis : Array[Int]
+  basis : Array[Int32]
   is_basic : Array[Bool]
   cost : Array[Double]
   /// Columns that may not enter (artificials during Phase II).
   forbid : Array[Bool]
-  mut iterations : Int
+  mut iterations : Int32
   mut bland : Bool
-  mut stalled : Int
+  mut stalled : Int32
   mut best_objective : Double
   mut saw_objective : Bool
   /// Which self-check refused this run, recorded by `finish_optimal` for the recovery ladder in
@@ -195,7 +195,7 @@ priv struct State {
 fn State::new(problem : KernelProblem, options : SimplexOptions) -> State {
   let m = problem.nrows
   let n = problem.ncols
-  let basis : Array[Int] = []
+  let basis : Array[Int32] = []
   let is_basic : Array[Bool] = Array::make(n, false)
   for i = 0; i < m; i = i + 1 {
     let column = problem.initial_basis[i]
@@ -320,7 +320,7 @@ fn State::new_with_basis(
 /// magnitude for it. **It is not a measured value**: the variants (never, 100, 10 000) have
 /// not been run — the number is a constant with a rationale, and `docs/algorithms.md` lists
 /// it under the limits rather than among the measurements.
-const DEVEX_RESET_PIVOTS : Int = 1000
+const DEVEX_RESET_PIVOTS : Int32 = 1000
 
 ///|
 /// Smallest Devex weight. The weights come out of the update as squared, normalized
@@ -494,7 +494,7 @@ fn State::refine_duals(self : State, y : Array[Double]) -> Unit {
 /// question; this is the question.
 fn State::direction_residual(
   self : State,
-  column : Int,
+  column : Int32,
   d : Array[Double],
 ) -> Double {
   let error = self.direction_error_buffer
@@ -547,10 +547,10 @@ fn State::direction_residual(
 /// on the long accumulations (residuals, objective values).
 fn State::reduced_cost(
   self : State,
-  column : Int,
+  column : Int32,
   duals : Array[Double],
-  pointers : ArrayView[Int],
-  rows : ArrayView[Int],
+  pointers : ArrayView[Int32],
+  rows : ArrayView[Int32],
   values : ArrayView[Double],
 ) -> Double {
   let mut acc = 0.0
@@ -579,7 +579,7 @@ fn State::reduced_cost(
 /// Pricing walks the raw CSC arrays: an earlier version asked for a freshly
 /// allocated `(row, value)` list per column, which dominated the runtime on the
 /// larger instances (a few million short-lived arrays for one solve).
-fn State::choose_entering(self : State, duals : Array[Double]) -> Int {
+fn State::choose_entering(self : State, duals : Array[Double]) -> Int32 {
   let tolerance = self.options.reduced_cost_tolerance
   let devex = self.options.pricing == Pricing::Devex
   let upper = self.problem.upper
@@ -636,7 +636,7 @@ fn State::choose_entering(self : State, duals : Array[Double]) -> Int {
 ///
 /// Returns the shared direction buffer: the caller must use it before the next
 /// solve, which is exactly what the iteration does (ratio test, then pivot).
-fn State::direction(self : State, column : Int) -> Array[Double] {
+fn State::direction(self : State, column : Int32) -> Array[Double] {
   let d = self.direction_buffer
   for i = 0; i < self.m; i = i + 1 {
     d[i] = 0.0
@@ -667,7 +667,7 @@ fn State::direction(self : State, column : Int) -> Array[Double] {
 ///|
 /// Row `r` of `B⁻¹`, i.e. `eᵣᵀB⁻¹`, used as the weight vector that turns a
 /// tableau entry into a sparse dot product.
-fn State::inverse_row(self : State, row : Int) -> Array[Double] {
+fn State::inverse_row(self : State, row : Int32) -> Array[Double] {
   let z : Array[Double] = Array::make(self.m, 0.0)
   z[row] = 1.0
   let mut e = self.etas.length() - 1
@@ -694,7 +694,7 @@ fn State::inverse_row(self : State, row : Int) -> Array[Double] {
 /// direction for every candidate column it looks at.
 fn State::tableau_entry(
   self : State,
-  column : Int,
+  column : Int32,
   weights : Array[Double],
 ) -> Double {
   let pointers = self.problem.matrix.col_pointers()
@@ -758,7 +758,7 @@ fn State::drive_artificials_out(self : State) -> Unit {
 /// Where one iteration's step is limited.
 priv struct StepLimit {
   /// Row that limits the step, or `-1` when no basic variable does.
-  row : Int
+  row : Int32
   /// Movement of the entering variable, in its own units and always `>= 0`. It is
   /// the flip distance when `flip` is set; a pivot recomputes its own step from the
   /// leaving row, which the band may have moved off the strict minimum.
@@ -800,7 +800,7 @@ priv struct StepLimit {
 /// an absolute violation of tens on MIPLIB's noswot.
 fn State::ratio_test(
   self : State,
-  column : Int,
+  column : Int32,
   d : Array[Double],
 ) -> StepLimit {
   let tolerance = self.options.pivot_tolerance
@@ -883,8 +883,8 @@ fn State::choose_leaving_row(
   d : Array[Double],
   row_ratio : Double,
   band : Double,
-  strict_row : Int,
-) -> (Int, Double) {
+  strict_row : Int32,
+) -> (Int32, Double) {
   let tolerance = self.options.pivot_tolerance
   let feasibility = self.options.feasibility_tolerance
   let upper = self.problem.upper
@@ -965,7 +965,7 @@ fn State::choose_leaving_row(
 /// it rises and hits its own upper bound. Reading `xb / rate` in both cases is how a
 /// step of the wrong sign gets into the state, and with a bound that is the
 /// infinite sentinel the "rise" reading is not a step at all.
-fn State::row_step(self : State, row : Int, rate : Double) -> Double {
+fn State::row_step(self : State, row : Int32, rate : Double) -> Double {
   let step = if rate > 0.0 {
     self.xb[row] / rate
   } else {
@@ -993,8 +993,8 @@ fn State::row_step(self : State, row : Int, rate : Double) -> Double {
 /// already was, and that is a bound too.
 fn State::pivot(
   self : State,
-  row : Int,
-  column : Int,
+  row : Int32,
+  column : Int32,
   d : Array[Double],
   step : Double,
 ) -> Unit {
@@ -1040,7 +1040,7 @@ fn State::pivot(
 /// an instance where every column is bounded those pivots are the run.
 fn State::apply_flip(
   self : State,
-  column : Int,
+  column : Int32,
   d : Array[Double],
   step : Double,
 ) -> Unit {
@@ -1065,7 +1065,7 @@ fn State::apply_flip(
 /// whose columns are simply small.
 fn State::refactorize(self : State) -> Bool {
   let m = self.m
-  let columns : Array[Array[(Int, Double)]] = []
+  let columns : Array[Array[(Int32, Double)]] = []
   for i = 0; i < m; i = i + 1 {
     columns.push(self.problem.matrix.column(self.basis[i]))
   }
@@ -1136,7 +1136,7 @@ fn State::refactorize(self : State) -> Bool {
 /// well-scaled small problems and stays silent on badly scaled large ones, which
 /// is exactly backwards: the pivot has to be judged against the scale of the
 /// direction it came from.
-fn State::weak_pivot(self : State, d : Array[Double], leaving : Int) -> Bool {
+fn State::weak_pivot(self : State, d : Array[Double], leaving : Int32) -> Bool {
   let tolerance = self.options.pivot_relative_tolerance
   if tolerance <= 0.0 {
     return false
@@ -1156,7 +1156,7 @@ fn State::weak_pivot(self : State, d : Array[Double], leaving : Int) -> Bool {
 
 ///|
 /// How many columns the gain-priced rule remembers between iterations.
-let gain_pool_size : Int = 4
+let gain_pool_size : Int32 = 4
 
 ///|
 /// The actual gain of pivoting on `column`: `|r| · step`, where `step` is what the
@@ -1172,10 +1172,10 @@ let gain_pool_size : Int = 4
 /// had before the call: the iteration recomputes its pivot's direction afterwards.
 fn State::candidate_gain(
   self : State,
-  column : Int,
+  column : Int32,
   duals : Array[Double],
-  pointers : ArrayView[Int],
-  rows : ArrayView[Int],
+  pointers : ArrayView[Int32],
+  rows : ArrayView[Int32],
   values : ArrayView[Double],
 ) -> Double {
   let cap = self.problem.upper[column]
@@ -1214,8 +1214,8 @@ fn State::candidate_gain(
 fn State::choose_by_gain(
   self : State,
   duals : Array[Double],
-  dantzig : Int,
-) -> Int {
+  dantzig : Int32,
+) -> Int32 {
   let pointers = self.problem.matrix.col_pointers()
   let rows = self.problem.matrix.row_indices()
   let values = self.problem.matrix.values_view()
@@ -1314,8 +1314,8 @@ fn State::choose_by_gain(
 /// Dantzig land on the same optimum rather than that they take the same path.
 fn State::update_devex_weights(
   self : State,
-  leave : Int,
-  entering : Int,
+  leave : Int32,
+  entering : Int32,
 ) -> Unit {
   let y = self.devex_row
   for i = 0; i < self.m; i = i + 1 {
@@ -1380,7 +1380,7 @@ fn State::update_devex_weights(
 ///
 /// Codes: `0` optimal, `1` unbounded, `2` iteration limit, `3` numerical
 /// failure (singular refactorization).
-fn State::iterate(self : State) -> Int {
+fn State::iterate(self : State) -> Int32 {
   if !self.factorized {
     // Without factors every solve would return whatever the buffers happened to
     // hold, and the run would "converge" on nonsense. Refuse instead.

@@ -13,12 +13,12 @@
 /// Small linear congruential generator: reproducible, and good enough to spread
 /// coefficient patterns over the test corpus.
 priv struct Lcg {
-  mut state : Int
+  mut state : Int32
 }
 
 ///|
 /// Creates a generator from a seed.
-fn Lcg::new(seed : Int) -> Lcg {
+fn Lcg::new(seed : Int32) -> Lcg {
   { state: seed % 100003, }
 }
 
@@ -28,14 +28,14 @@ fn Lcg::new(seed : Int) -> Lcg {
 /// The constants are small on purpose: `state` stays below the modulus and the
 /// product stays far below any integer overflow, so the sequence is identical on
 /// every backend instead of depending on wrap-around behaviour.
-fn Lcg::next(self : Lcg) -> Int {
+fn Lcg::next(self : Lcg) -> Int32 {
   self.state = (self.state * 31 + 17) % 100003
   self.state
 }
 
 ///|
 /// Next value in `[0, bound)`.
-fn Lcg::below(self : Lcg, bound : Int) -> Int {
+fn Lcg::below(self : Lcg, bound : Int32) -> Int32 {
   if bound <= 1 {
     0
   } else {
@@ -45,7 +45,7 @@ fn Lcg::below(self : Lcg, bound : Int) -> Int {
 
 ///|
 /// Next value in `[low, high]` as a double.
-fn Lcg::between(self : Lcg, low : Int, high : Int) -> Double {
+fn Lcg::between(self : Lcg, low : Int32, high : Int32) -> Double {
   Double::from_int(low + self.below(high - low + 1))
 }
 
@@ -105,8 +105,8 @@ fn rows_to_string(rows : Array[(Array[Double], @model.Rel, Double)]) -> String {
 /// One random LP in the class both solvers accept: `x ≥ 0`, rows of any
 /// relation, right hand sides that are sometimes negative.
 fn random_case(
-  seed : Int,
-) -> (Int, Array[Double], Array[(Array[Double], @model.Rel, Double)]) {
+  seed : Int32,
+) -> (Int32, Array[Double], Array[(Array[Double], @model.Rel, Double)]) {
   let rng = Lcg::new(seed)
   let variables = 2 + rng.below(4)
   let rows_count = 2 + rng.below(4)
@@ -145,7 +145,7 @@ fn random_case(
 /// That is what makes this a test of the *infeasibility* verdict rather than of the
 /// optimum: the kernel has no excuse to call this model infeasible, and the tolerance
 /// arithmetic is what it has to get right.
-fn feasible_model_by_construction(seed : Int) -> @model.Model {
+fn feasible_model_by_construction(seed : Int32) -> @model.Model {
   let rng = Lcg::new(seed)
   let variables = 2 + rng.below(4)
   let lower : Array[Double] = []
@@ -162,7 +162,7 @@ fn feasible_model_by_construction(seed : Int) -> @model.Model {
   for j = 0; j < variables; j = j + 1 {
     model.add_var("x" + j.to_string(), lb=lower[j], ub=upper[j]) |> ignore
   }
-  let cost : Array[(Int, Double)] = []
+  let cost : Array[(Int32, Double)] = []
   for j = 0; j < variables; j = j + 1 {
     cost.push((j, rng.between(-4000, 4000)))
   }
@@ -186,7 +186,7 @@ fn feasible_model_by_construction(seed : Int) -> @model.Model {
       @model.Rel::GreaterEqual => total - slack
       @model.Rel::Equal => total
     }
-    let terms : Array[(Int, Double)] = []
+    let terms : Array[(Int32, Double)] = []
     for j = 0; j < variables; j = j + 1 {
       if coefficients[j] != 0.0 {
         terms.push((j, coefficients[j]))
@@ -379,18 +379,18 @@ test "kernel agrees with the reference solver on random bounded LPs" {
       )
     }
     let model = @model.Model::new(@model.Sense::Minimize)
-    let vars : Array[Int] = []
+    let vars : Array[Int32] = []
     for j = 0; j < variables; j = j + 1 {
       vars.push(model.add_var("x" + j.to_string(), lb=0.0, ub=uppers[j]))
     }
-    let objective : Array[(Int, Double)] = []
+    let objective : Array[(Int32, Double)] = []
     for j = 0; j < variables; j = j + 1 {
       objective.push((vars[j], cost[j]))
     }
     model.set_objective(objective)
     for i = 0; i < rows.length(); i = i + 1 {
       let (coefficients, rel, rhs) = rows[i]
-      let terms : Array[(Int, Double)] = []
+      let terms : Array[(Int32, Double)] = []
       for j = 0; j < variables; j = j + 1 {
         if coefficients[j] != 0.0 {
           terms.push((vars[j], coefficients[j]))

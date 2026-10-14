@@ -81,7 +81,7 @@
 ///|
 /// A cut: one inequality, in the model's variables.
 pub(all) struct CutRow {
-  terms : Array[(Int, Double)]
+  terms : Array[(Int32, Double)]
   rel : @model.Rel
   rhs : Double
 } derive(Debug)
@@ -95,7 +95,7 @@ pub(all) struct CutRow {
 pub(all) struct CutCertificate {
   /// The variable that is basic in the row: the one the row solves for. It has to be an
   /// integer variable, and its coefficient in the combination has to come out as one.
-  basic : Int
+  basic : Int32
   /// Coefficients of the model's rows in the combination that gives the row.
   multipliers : Array[Double]
   /// The right hand side the combination gives. Carried so that a producer and this
@@ -208,7 +208,7 @@ fn combination_noise(
 /// integer slack that is really fractional) would be a validity bug.
 fn row_is_integer_scaled(
   model : @model.Model,
-  row : Int,
+  row : Int32,
   tolerance : Double,
 ) -> Bool {
   let constraint = model.constraint(row)
@@ -243,9 +243,9 @@ priv struct CutEntry {
   /// Integer on every integer point of the model — the class the rounding uses.
   is_int : Bool
   /// Model variable index, or `-1` for a slack.
-  variable : Int
+  variable : Int32
   /// Model row the slack belongs to, or `-1` for a variable.
-  row : Int
+  row : Int32
   from_lower : Bool
   bound : Double
 }
@@ -486,7 +486,7 @@ fn cut_checks(
   if !all_ok(checks) {
     return (None, checks)
   }
-  let terms : Array[(Int, Double)] = []
+  let terms : Array[(Int32, Double)] = []
   for j = 0; j < n; j = j + 1 {
     if coefficients[j] != 0.0 {
       terms.push((j, coefficients[j]))
@@ -511,7 +511,7 @@ fn cut_checks(
 pub fn derive_cut(
   model : @model.Model,
   certificate : CutCertificate,
-  tolerance? : Double = default_tolerance,
+  tolerance~ : Double = default_tolerance,
 ) -> Result[CutRow, String] {
   let (cut, checks) = cut_checks(model, certificate, tolerance)
   match cut {
@@ -625,7 +625,7 @@ pub fn verify_cut(
   model : @model.Model,
   cut : CutRow,
   certificate : CutCertificate,
-  tolerance? : Double = default_tolerance,
+  tolerance~ : Double = default_tolerance,
 ) -> CutVerdict {
   let (derived, checks) = cut_checks(model, certificate, tolerance)
   match derived {

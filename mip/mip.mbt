@@ -78,18 +78,18 @@ pub struct MipResult {
   /// numbers whose sense the caller has to know is how that decision goes wrong.
   gap : Double
   /// Nodes whose relaxation was solved (and verified).
-  nodes : Int
+  nodes : Int32
   /// Nodes whose relaxation was verified. Equal to `nodes` unless verification is off or
   /// a relaxation reached no verdict: with `verify_nodes` on, `nodes - verified` is
   /// exactly the number of relaxations that did not finish, because every relaxation that
   /// did reach a verdict went through the verifier. The tests assert the equality — it is
   /// the evidence for "every re-solve is checked".
-  verified : Int
+  verified : Int32
   /// Cuts added to the model the tree is built on. Every one of them was checked by
   /// `@verify.verify_cut` against the model it was added to before it was added, because
   /// an invalid cut removes integer points from every node below it and nothing
   /// downstream would notice — see `verify/cuts.mbt`.
-  cuts : Int
+  cuts : Int32
   /// The verifier's account of the first refusal, when the run ended `Unverified`; the
   /// reason a run ended otherwise (an invalid model, a limit, an unbounded relaxation).
   message : String
@@ -127,13 +127,13 @@ pub(all) enum NodeStatus {
 /// Knobs for a branch and bound run.
 pub(all) struct MipOptions {
   /// Largest number of nodes to process. Reaching it ends the run with `NodeLimit`.
-  max_nodes : Int
+  max_nodes : Int32
   /// Iteration cap handed to each relaxation, with one exception: the re-solve that decides a cut
   /// round gets `cut_round_iteration_factor` times it (`mip/search.mbt` carries the measurement).
   /// A verdict of "did not finish" there costs the whole round its cuts, and the re-solve is one
   /// relaxation per round rather than one per node, so the longer cap is affordable where the
   /// ordinary one is only a wrong answer about the round.
-  max_iterations : Int
+  max_iterations : Int32
   /// Two objectives closer than this are the same objective, which is how "integral
   /// enough" and "the bound is closed" are decided.
   tolerance : Double
@@ -164,12 +164,12 @@ pub(all) struct MipOptions {
   /// launches of a hundred and fifty out of a twenty-thousand relaxation budget in the
   /// report's setting — and what the tree loses to that is visible in the report's
   /// remaining-open column rather than hidden.
-  dive_steps : Int
+  dive_steps : Int32
   /// How many times the heuristic may be launched. A dive that ends infeasible or runs
   /// out of steps found nothing, and another launch from a deeper node starts closer to a
   /// whole point — but each launch costs up to `dive_steps` relaxations, so the number of
   /// launches is bounded separately from their length.
-  dive_attempts : Int
+  dive_attempts : Int32
   /// How many rounds of cuts the root relaxation may be tightened with, or `0` to switch
   /// cut generation off.
   ///
@@ -189,7 +189,7 @@ pub(all) struct MipOptions {
   /// `cut_round_gain` of the root bound (`mip/search.mbt` carries the per-round measurements that
   /// rest on). A cap of two is therefore "two rounds, as it always was"; a larger cap gives the
   /// rounds to the instances whose cuts keep paying.
-  cut_rounds : Int
+  cut_rounds : Int32
   /// Whether a relaxation may be rounded into a whole point and offered as the incumbent.
   ///
   /// On by default. It costs one pass over the model per solved relaxation and no solve at all,
@@ -232,7 +232,7 @@ pub fn MipOptions::default() -> MipOptions {
 
 ///|
 /// Options with an explicit node budget.
-pub fn MipOptions::with_max_nodes(max_nodes : Int) -> MipOptions {
+pub fn MipOptions::with_max_nodes(max_nodes : Int32) -> MipOptions {
   let base = MipOptions::default()
   {
     max_nodes,

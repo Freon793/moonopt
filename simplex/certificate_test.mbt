@@ -339,22 +339,22 @@ test "every certificate on a random corpus is accepted" {
 ///|
 /// Deterministic generator for the certificate corpus.
 struct CertLcg {
-  mut state : Int
+  mut state : Int32
 }
 
 ///|
-fn CertLcg::new(seed : Int) -> CertLcg {
+fn CertLcg::new(seed : Int32) -> CertLcg {
   { state: seed % 100003, }
 }
 
 ///|
-fn CertLcg::next(self : CertLcg) -> Int {
+fn CertLcg::next(self : CertLcg) -> Int32 {
   self.state = (self.state * 31 + 17) % 100003
   self.state
 }
 
 ///|
-fn CertLcg::below(self : CertLcg, bound : Int) -> Int {
+fn CertLcg::below(self : CertLcg, bound : Int32) -> Int32 {
   if bound <= 1 {
     0
   } else {
@@ -363,7 +363,7 @@ fn CertLcg::below(self : CertLcg, bound : Int) -> Int {
 }
 
 ///|
-fn CertLcg::between(self : CertLcg, low : Int, high : Int) -> Double {
+fn CertLcg::between(self : CertLcg, low : Int32, high : Int32) -> Double {
   Double::from_int(low + self.below(high - low + 1))
 }
 
@@ -378,20 +378,20 @@ fn random_certificate_model(lcg : CertLcg) -> @model.Model {
   }
   let model = @model.Model::new(sense)
   let n = 1 + lcg.below(3)
-  let vars : Array[Int] = []
+  let vars : Array[Int32] = []
   for j = 0; j < n; j = j + 1 {
     let bounded = lcg.below(4) != 0
     let ub = if bounded { lcg.between(1, 6) } else { @model.infinite_bound }
     vars.push(model.add_var("x" + j.to_string(), lb=0.0, ub~))
   }
-  let objective : Array[(Int, Double)] = []
+  let objective : Array[(Int32, Double)] = []
   for j = 0; j < n; j = j + 1 {
     objective.push((vars[j], lcg.between(-4, 4)))
   }
   model.set_objective(objective)
   let rows = 1 + lcg.below(3)
   for i = 0; i < rows; i = i + 1 {
-    let terms : Array[(Int, Double)] = []
+    let terms : Array[(Int32, Double)] = []
     for j = 0; j < n; j = j + 1 {
       let coefficient = lcg.between(-3, 3)
       if coefficient != 0.0 {

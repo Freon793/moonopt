@@ -32,7 +32,7 @@
 pub(all) struct TableauRow {
   /// The model variable the row is basic in: the variable the row solves for. Its
   /// coefficient in the combination comes out as one.
-  basic : Int
+  basic : Int32
   /// Its value in the basis these rows were computed from. Reported for the caller's
   /// benefit — the rounded row's own right hand side is recomputed from the model, not
   /// read off this number, which carries the degeneracy perturbation the run used.
@@ -75,7 +75,7 @@ pub fn tableau_rows(
       // lower bound is two columns (`x = p − n`) and both of them belong to it; the
       // combination's coefficients on the two are opposite, so it is still one
       // coefficient on one model variable, which is what the checker recomputes.
-      let variable_of_column : Array[Int] = Array::make(problem.ncols, -1)
+      let variable_of_column : Array[Int32] = Array::make(problem.ncols, -1)
       for j = 0; j < problem.var_columns.length(); j = j + 1 {
         for part in problem.var_columns[j] {
           let (column, _) = part

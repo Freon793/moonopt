@@ -25,7 +25,7 @@
 ///|
 /// The column the dual ratio test picked, with what the pivot needs.
 priv struct DualCandidate {
-  column : Int
+  column : Int32
   /// Movement the entering variable has to make, signed: positive at a lower bound,
   /// negative at an upper one.
   movement : Double
@@ -38,7 +38,7 @@ priv struct DualCandidate {
 /// The most violated row is the classical choice and it needs no extra state: the
 /// alternative, a steepest-edge rule, is an optimization this kernel has no
 /// measurement for yet.
-fn State::dual_leaving_row(self : State) -> Int {
+fn State::dual_leaving_row(self : State) -> Int32 {
   let upper = self.problem.upper
   let mut worst = self.options.feasibility_tolerance
   let mut row = -1
@@ -105,9 +105,9 @@ fn State::dual_feasible(self : State, tolerance : Double) -> Bool {
 /// came from.
 fn State::reduced_cost_scale(
   self : State,
-  column : Int,
-  pointers : ArrayView[Int],
-  rows : ArrayView[Int],
+  column : Int32,
+  pointers : ArrayView[Int32],
+  rows : ArrayView[Int32],
   values : ArrayView[Double],
 ) -> Double {
   let duals = self.duals_buffer
@@ -280,7 +280,7 @@ fn solve_from_basis(
 
 ///|
 /// Runs the dual simplex to primal feasibility.
-fn State::dual_iterate(self : State) -> Int {
+fn State::dual_iterate(self : State) -> Int32 {
   if !self.factorized {
     return 3
   }

@@ -28,7 +28,7 @@
 /// `aᵢ·x`, compensated, over the row's stored terms.
 fn point_row_dot(
   model : @model.Model,
-  row : Int,
+  row : Int32,
   point : Array[Double],
 ) -> Double {
   let acc = @core.CompensatedSum::new()
@@ -121,7 +121,7 @@ fn point_objective(model : @model.Model, point : Array[Double]) -> Double {
 fn rounded_candidate(
   model : @model.Model,
   values : Array[Double],
-  direction : Int,
+  direction : Int32,
 ) -> Array[Double] {
   let point = values.copy()
   for j = 0; j < model.num_vars() && j < point.length(); j = j + 1 {
@@ -166,8 +166,8 @@ fn rounded_candidate(
 fn sampled_candidate(
   model : @model.Model,
   values : Array[Double],
-  state : Int,
-) -> (Array[Double], Int) {
+  state : Int32,
+) -> (Array[Double], Int32) {
   let point = values.copy()
   let mut seed : Int64 = state.to_int64()
   for j = 0; j < model.num_vars() && j < point.length(); j = j + 1 {
@@ -230,7 +230,7 @@ fn rounded_objective_model(
   sign : Double,
 ) -> @model.Model {
   let model = problem.clone()
-  let terms : Array[(Int, Double)] = []
+  let terms : Array[(Int32, Double)] = []
   for j = 0; j < model.num_vars() && j < point.length(); j = j + 1 {
     if model.get_var(j).is_int {
       // `sign` is the model's sense (`-1` for a maximisation): to pull a variable up in a

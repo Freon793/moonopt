@@ -16,7 +16,7 @@
 
 ///|
 /// A run of spaces.
-fn spaces(count : Int) -> String {
+fn spaces(count : Int32) -> String {
   let chars : Array[Char] = []
   for index = 0; index < count; index = index + 1 {
     chars.push(' ')
@@ -27,7 +27,7 @@ fn spaces(count : Int) -> String {
 ///|
 /// Pads a field to at least `width` characters. Longer fields are left alone
 /// rather than truncated: a wrong name is worse than a shifted column.
-fn pad(text : String, width : Int) -> String {
+fn pad(text : String, width : Int32) -> String {
   if text.length() >= width {
     text
   } else {
@@ -137,7 +137,7 @@ pub fn write_mps(model : @model.Model) -> String {
     let (index, coefficient) = term
     col_objective[index] = coefficient
   }
-  let col_rows : Array[Array[(Int, Double)]] = []
+  let col_rows : Array[Array[(Int32, Double)]] = []
   for index = 0; index < nvars; index = index + 1 {
     col_rows.push([])
   }
@@ -226,9 +226,9 @@ pub fn write_mps(model : @model.Model) -> String {
 fn push_column(
   lines : Array[String],
   model : @model.Model,
-  index : Int,
+  index : Int32,
   col_objective : Array[Double],
-  col_rows : Array[Array[(Int, Double)]],
+  col_rows : Array[Array[(Int32, Double)]],
   row_names : Array[String],
   objective_row : String,
 ) -> Unit {

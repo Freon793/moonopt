@@ -172,10 +172,10 @@ pub(all) struct SolveFlags {
   enabled : Bool
   relax : Bool
   presolve : Bool
-  max_rows : Int
+  max_rows : Int32
   /// Zero means the kernel's own default; anything else bounds the run so a large
   /// instance can be sampled instead of waited on.
-  max_iterations : Int
+  max_iterations : Int32
   /// Check the run's certificate with the independent verifier instead of only
   /// reporting the status.
   verify : Bool
@@ -189,10 +189,10 @@ pub(all) struct SolveFlags {
   /// variables the linear kernel's answer is not the model's answer.
   mip : Bool
   /// Node budget for a branch and bound run; zero means the library default.
-  max_nodes : Int
+  max_nodes : Int32
   /// Rounds of cuts at the root of a branch and bound run; negative means the library
   /// default, zero means search the model as written.
-  cut_rounds : Int
+  cut_rounds : Int32
   /// Which rule picks the entering column for a linear run. Pricing changes which
   /// pivots a run takes and what it costs, never its answer, so this is a knob for
   /// measuring the kernel rather than for changing what it reports.
@@ -324,7 +324,10 @@ fn verify_model(model : @model.Model, flags : SolveFlags) -> Bool {
 ///|
 /// Describes what the reduction did, in one line, so a benchmark run shows the
 /// effect per instance instead of only the final answer.
-fn presolve_line(before_rows : Int, reduced : @presolve.ReducedModel) -> String {
+fn presolve_line(
+  before_rows : Int32,
+  reduced : @presolve.ReducedModel,
+) -> String {
   let stats = reduced.stats()
   "       presolve: rows " +
   before_rows.to_string() +

@@ -133,8 +133,8 @@ fn best_by_enumeration(
   tolerance : Double,
 ) -> Double? raise {
   let n = model.num_vars()
-  let lo : Array[Int] = []
-  let hi : Array[Int] = []
+  let lo : Array[Int32] = []
+  let hi : Array[Int32] = []
   for j = 0; j < n; j = j + 1 {
     let variable = model.get_var(j)
     assert_true(variable.is_int)
@@ -143,7 +143,7 @@ fn best_by_enumeration(
     hi.push(variable.ub.to_int())
   }
   let point : Array[Double] = Array::make(n, 0.0)
-  let index : Array[Int] = Array::make(n, 0)
+  let index : Array[Int32] = Array::make(n, 0)
   let mut best : Double? = None
   let mut done = false
   while !done {
@@ -631,22 +631,22 @@ test "a malformed model is not called infeasible" {
 ///|
 /// Deterministic generator for the branch and bound corpus.
 struct MipLcg {
-  mut state : Int
+  mut state : Int32
 }
 
 ///|
-fn MipLcg::new(seed : Int) -> MipLcg {
+fn MipLcg::new(seed : Int32) -> MipLcg {
   { state: seed % 100003, }
 }
 
 ///|
-fn MipLcg::next(self : MipLcg) -> Int {
+fn MipLcg::next(self : MipLcg) -> Int32 {
   self.state = (self.state * 31 + 17) % 100003
   self.state
 }
 
 ///|
-fn MipLcg::below(self : MipLcg, bound : Int) -> Int {
+fn MipLcg::below(self : MipLcg, bound : Int32) -> Int32 {
   if bound <= 1 {
     0
   } else {
@@ -668,7 +668,7 @@ fn random_mip_model(lcg : MipLcg) -> @model.Model {
   }
   let model = @model.Model::new(sense)
   let n = 2 + lcg.below(2)
-  let vars : Array[Int] = []
+  let vars : Array[Int32] = []
   for j = 0; j < n; j = j + 1 {
     vars.push(
       model.add_var(
@@ -679,7 +679,7 @@ fn random_mip_model(lcg : MipLcg) -> @model.Model {
       ),
     )
   }
-  let terms : Array[(Int, Double)] = []
+  let terms : Array[(Int32, Double)] = []
   for j = 0; j < n; j = j + 1 {
     let coefficient = Double::from_int(lcg.below(9) - 4)
     if coefficient != 0.0 {
@@ -690,7 +690,7 @@ fn random_mip_model(lcg : MipLcg) -> @model.Model {
   let rows = 1 + lcg.below(3)
   let mut built = 0
   while built < rows {
-    let row : Array[(Int, Double)] = []
+    let row : Array[(Int32, Double)] = []
     for j = 0; j < n; j = j + 1 {
       let coefficient = Double::from_int(lcg.below(7) - 3)
       if coefficient != 0.0 {

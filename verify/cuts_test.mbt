@@ -32,7 +32,7 @@ fn half_row_certificate() -> @verify.CutCertificate {
 
 ///|
 /// The coefficient of one variable in a cut, or zero when it does not appear.
-fn cut_coefficient(cut : @verify.CutRow, variable : Int) -> Double {
+fn cut_coefficient(cut : @verify.CutRow, variable : Int32) -> Double {
   let mut value = 0.0
   for term in cut.terms {
     let (index, coefficient) = term
@@ -98,7 +98,7 @@ fn point_satisfies_cut(
 
 ///|
 /// Every whole point of the box `[0, limit]ⁿ`, in an order a reader can predict.
-fn box_points(n : Int, limit : Int) -> Array[Array[Double]] {
+fn box_points(n : Int32, limit : Int32) -> Array[Array[Double]] {
   let points : Array[Array[Double]] = []
   let mut total = 1
   for j = 0; j < n; j = j + 1 {
@@ -243,22 +243,22 @@ test "a witness missing a condition of the argument is refused" {
 /// A small random model, and a witness for one of its rows scaled so that one integer
 /// variable's coefficient is exactly one.
 struct CutLcg {
-  mut state : Int
+  mut state : Int32
 }
 
 ///|
-fn CutLcg::new(seed : Int) -> CutLcg {
+fn CutLcg::new(seed : Int32) -> CutLcg {
   { state: seed, }
 }
 
 ///|
-fn CutLcg::next(self : CutLcg) -> Int {
+fn CutLcg::next(self : CutLcg) -> Int32 {
   self.state = (self.state * 31 + 17) % 100003
   self.state
 }
 
 ///|
-fn CutLcg::between(self : CutLcg, low : Int, high : Int) -> Int {
+fn CutLcg::between(self : CutLcg, low : Int32, high : Int32) -> Int32 {
   low + self.next() % (high - low + 1)
 }
 
@@ -268,7 +268,7 @@ fn CutLcg::between(self : CutLcg, low : Int, high : Int) -> Int {
 fn random_cut_model(lcg : CutLcg) -> @model.Model {
   let n = lcg.between(2, 3)
   let model = @model.Model::new(@model.Sense::Minimize)
-  let indices : Array[Int] = []
+  let indices : Array[Int32] = []
   for j = 0; j < n; j = j + 1 {
     indices.push(
       model.add_var("x" + j.to_string(), lb=0.0, ub=4.0, is_int=true),
@@ -276,7 +276,7 @@ fn random_cut_model(lcg : CutLcg) -> @model.Model {
   }
   let rows = lcg.between(1, 3)
   for k = 0; k < rows; k = k + 1 {
-    let terms : Array[(Int, Double)] = []
+    let terms : Array[(Int32, Double)] = []
     for j = 0; j < n; j = j + 1 {
       let coefficient = lcg.between(-3, 3)
       if coefficient != 0 {
@@ -292,7 +292,7 @@ fn random_cut_model(lcg : CutLcg) -> @model.Model {
       model.add_constraint(terms, rel, Double::from_int(lcg.between(0, 6)))
     }
   }
-  let objective : Array[(Int, Double)] = []
+  let objective : Array[(Int32, Double)] = []
   for j = 0; j < n; j = j + 1 {
     objective.push((indices[j], 1.0))
   }

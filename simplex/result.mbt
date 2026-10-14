@@ -21,9 +21,9 @@ pub(all) enum SimplexStatus {
 /// came from: a warm start whose shape does not match is refused and the run falls back
 /// to a cold start, rather than pivoting on columns that are not there.
 pub struct SimplexBasis {
-  nrows : Int
-  ncols : Int
-  basis : Array[Int]
+  nrows : Int32
+  ncols : Int32
+  basis : Array[Int32]
   at_upper : Array[Bool]
 } derive(Debug)
 
@@ -52,7 +52,7 @@ pub struct SimplexResult {
   status : SimplexStatus
   values : Array[Double]
   objective : Double
-  iterations : Int
+  iterations : Int32
   message : String
   duals : Array[Double]
   ray : Array[Double]
@@ -101,8 +101,8 @@ pub(all) enum Pricing {
 /// on; a crash is not. Bounds are bounds now, so the ceiling mostly guards against
 /// runs that cannot be honoured rather than against allocation.
 pub(all) struct SimplexOptions {
-  max_iterations : Int
-  refactorize_every : Int
+  max_iterations : Int32
+  refactorize_every : Int32
   feasibility_tolerance : Double
   pivot_tolerance : Double
   /// A pivot smaller than this fraction of the largest entry of the tableau
@@ -137,7 +137,7 @@ pub(all) struct SimplexOptions {
   /// suspected of breaking — never goes past 6 in 6 000 pivots. Bland's rule is a
   /// termination guarantee, not a fast path: firing it early costs iterations,
   /// never firing it costs an answer.
-  stall_window : Int
+  stall_window : Int32
   /// Number of columns per iteration whose *actual* objective gain is measured
   /// before pivoting; zero keeps plain Dantzig pricing.
   ///
@@ -155,7 +155,7 @@ pub(all) struct SimplexOptions {
   /// of for every column: the Dantzig pick, a few columns that recently showed the
   /// best gains, and a rotating window over the column space. Set this to the total
   /// number of measurements per iteration (`0` disables the whole thing).
-  gain_candidates : Int
+  gain_candidates : Int32
   /// Which rule picks the entering column. `Gain` is the default, and `gain_candidates`
   /// is its budget; `Devex` and `Dantzig` ignore that budget. The rule changes the
   /// path a run takes and what it costs, never its answer.
@@ -181,7 +181,7 @@ pub(all) struct SimplexOptions {
   /// the one quantity a sparse factorization cannot predict from the row count, so
   /// it gets a budget instead of a promise; exceeding it fails the factorization
   /// rather than allocating without limit.
-  max_factor_entries : Int
+  max_factor_entries : Int32
   reduced_cost_tolerance : Double
   /// Treat integer variables as continuous (the LP relaxation of a model).
   relax_integrality : Bool
@@ -199,7 +199,7 @@ pub(all) struct SimplexOptions {
   /// explicit row. Finite upper bounds on ordinary variables used to add a row each,
   /// and on `fast0507` that turned 489 rows into 63 490; the pivot count follows the
   /// row count, so it was also the reason the instance did not finish.
-  max_kernel_rows : Int
+  max_kernel_rows : Int32
 } derive(Debug)
 
 ///|
@@ -255,7 +255,7 @@ pub fn SimplexOptions::relaxed() -> SimplexOptions {
 ///|
 /// Options with an explicit iteration cap, keeping the default tolerances.
 pub fn SimplexOptions::with_max_iterations(
-  max_iterations : Int,
+  max_iterations : Int32,
 ) -> SimplexOptions {
   let base = SimplexOptions::default()
   {
@@ -284,7 +284,7 @@ pub fn SimplexOptions::with_max_iterations(
 /// bounded run stays the run that was asked for.
 pub fn SimplexOptions::limit_iterations(
   self : SimplexOptions,
-  max_iterations : Int,
+  max_iterations : Int32,
 ) -> SimplexOptions {
   {
     max_iterations,
@@ -309,7 +309,9 @@ pub fn SimplexOptions::limit_iterations(
 /// fallback on a problem small enough to solve instantly: the window is a control
 /// on the run, and the run's answer has to be the same whether the fallback fires
 /// at the first stall or never.
-pub fn SimplexOptions::with_stall_window(stall_window : Int) -> SimplexOptions {
+pub fn SimplexOptions::with_stall_window(
+  stall_window : Int32,
+) -> SimplexOptions {
   let base = SimplexOptions::default()
   {
     max_iterations: base.max_iterations,
@@ -334,7 +336,7 @@ pub fn SimplexOptions::with_stall_window(stall_window : Int) -> SimplexOptions {
 /// pricing rule is a control on the *run*: which column enters changes the path, and
 /// the answer has to be the same whether the gain is measured or not.
 pub fn SimplexOptions::with_gain_candidates(
-  gain_candidates : Int,
+  gain_candidates : Int32,
 ) -> SimplexOptions {
   let base = SimplexOptions::default()
   {
@@ -387,7 +389,7 @@ pub fn SimplexOptions::with_pricing(
 /// Options with an explicit kernel row ceiling. Used by the tests to reach the
 /// `TooLarge` path with a model that is small enough to build instantly.
 pub fn SimplexOptions::with_max_kernel_rows(
-  max_kernel_rows : Int,
+  max_kernel_rows : Int32,
 ) -> SimplexOptions {
   let base = SimplexOptions::default()
   {

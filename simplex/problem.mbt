@@ -26,11 +26,11 @@
 ///|
 /// The standard-form problem handed to the kernel.
 pub struct KernelProblem {
-  nrows : Int
-  ncols : Int
+  nrows : Int32
+  ncols : Int32
   /// Number of leading columns that correspond to model variables; the rest are
   /// slack, surplus and artificial columns.
-  structural : Int
+  structural : Int32
   matrix : @core.SparseMatrix
   rhs : Array[Double]
   /// Upper bound of every kernel column, in kernel column order. A column's lower
@@ -45,7 +45,7 @@ pub struct KernelProblem {
   is_artificial : Array[Bool]
   /// Reconstruction of a model variable from kernel columns:
   /// `x_j = var_offset[j] + Σ coefficient · y_column`.
-  var_columns : Array[Array[(Int, Double)]]
+  var_columns : Array[Array[(Int32, Double)]]
   var_offset : Array[Double]
   /// `min` sense constant added to the kernel objective.
   objective_constant : Double
@@ -54,14 +54,14 @@ pub struct KernelProblem {
   /// Column that starts basic in each row: the slack of a `≤` row, the
   /// artificial column of a `≥` or `=` row. Every right hand side is
   /// non-negative by construction, so this basis is feasible for Phase I.
-  initial_basis : Array[Int]
+  initial_basis : Array[Int32]
   /// For each kernel row, the model constraint it came from, or `-1` when this
   /// package invented the row (the row form of a free variable's upper bound, or of
   /// bounds that contradict each other).
   ///
   /// The kernel's duals live on its own rows, so a certificate stated against the
   /// model needs this map: a row that is not a model row has no dual to report.
-  row_source : Array[Int]
+  row_source : Array[Int32]
   /// Multiplier that turns the kernel's dual for that row into a multiplier of the
   /// model row's oriented form, which is the convention certificates use. Zero on an
   /// invented row.
@@ -173,7 +173,7 @@ fn kernel_has_upper(value : Double) -> Bool {
 /// `cⱼ − y_model·aᵢⱼ` for a `≥` or `=` model row, gives the table below. The kernel's
 /// convention for its own rows (a slack forces `y ≤ 0` on a `≤` row, a surplus
 /// `y ≥ 0` on a `≥` one) is what makes the two agree rather than cancel.
-fn dual_factor(source : Int, rel : @model.Rel, sign : Double) -> Double {
+fn dual_factor(source : Int32, rel : @model.Rel, sign : Double) -> Double {
   if source < 0 {
     0.0
   } else {
@@ -191,12 +191,12 @@ fn dual_factor(source : Int, rel : @model.Rel, sign : Double) -> Double {
 /// This is the shape the reference solver in `oracle` accepts as well, which is
 /// what makes differential testing between the two possible.
 pub fn KernelProblem::from_standard(
-  num_vars : Int,
+  num_vars : Int32,
   cost : Array[Double],
   rows : Array[(Array[Double], @model.Rel, Double)],
 ) -> KernelProblem {
   // Model variables are the first `num_vars` columns, one column each.
-  let var_columns : Array[Array[(Int, Double)]] = []
+  let var_columns : Array[Array[(Int32, Double)]] = []
   let var_offset : Array[Double] = []
   let structural_upper : Array[Double] = []
   // The standard form has no model layer of its own: its variables are non-negative with no
@@ -212,14 +212,14 @@ pub fn KernelProblem::from_standard(
     model_lower.push(0.0)
     model_upper.push(@model.infinite_bound)
   }
-  let row_entries : Array[Array[(Int, Double)]] = []
+  let row_entries : Array[Array[(Int32, Double)]] = []
   let row_rels : Array[@model.Rel] = []
   let row_rhs : Array[Double] = []
   // The standard-form entry point has no model rows: its rows *are* the caller's.
-  let row_sources : Array[Int] = []
+  let row_sources : Array[Int32] = []
   for i = 0; i < rows.length(); i = i + 1 {
     let (coefficients, rel, rhs) = rows[i]
-    let entries : Array[(Int, Double)] = []
+    let entries : Array[(Int32, Double)] = []
     for j = 0; j < num_vars && j < coefficients.length(); j = j + 1 {
       if coefficients[j] != 0.0 {
         entries.push((j, coefficients[j]))
@@ -264,7 +264,7 @@ pub fn from_model_with(
     1.0
   }
   // Pass 1: decide a kernel representation for every model variable.
-  let var_columns : Array[Array[(Int, Double)]] = []
+  let var_columns : Array[Array[(Int32, Double)]] = []
   let var_offset : Array[Double] = []
   // Upper bound of each structural column, in column order. Only the explicit row
   // case (below) leaves it at infinity.
@@ -277,7 +277,7 @@ pub fn from_model_with(
   let mut next_column = 0
   // Row form of an upper bound, used only where a column bound cannot express it:
   // a split pair `p − n ≤ ub`, or bounds that contradict each other.
-  let bound_rows : Array[(Array[(Int, Double)], Double)] = []
+  let bound_rows : Array[(Array[(Int32, Double)], Double)] = []
   for j = 0; j < nvars; j = j + 1 {
     let variable = model.get_var(j)
     model_lower.push(variable.lb)
@@ -324,12 +324,12 @@ pub fn from_model_with(
   // Pass 2: rows in kernel-column space. A model row `Σ aⱼ xⱼ rel b` becomes
   // `Σ aⱼ (offsetⱼ + Σ sign·y) rel b`, so the offsets move to the right hand
   // side and each variable contributes one entry per kernel column.
-  let row_entries : Array[Array[(Int, Double)]] = []
+  let row_entries : Array[Array[(Int32, Double)]] = []
   let row_rels : Array[@model.Rel] = []
   let row_rhs : Array[Double] = []
   // Which model row each kernel row came from; the rows this package adds below are
   // not model rows and get -1.
-  let row_sources : Array[Int] = []
+  let row_sources : Array[Int32] = []
   // The model's own right hand sides, the numbers a certificate's multipliers are paired
   // with. `row_rhs` below is the kernel's: the same row with every variable offset already
   // moved to the other side, which is not a number the checker ever sees.
@@ -342,7 +342,7 @@ pub fn from_model_with(
   let model_objective = model.objective()
   for i = 0; i < model.num_constraints(); i = i + 1 {
     let constraint = model.constraint(i)
-    let entries : Array[(Int, Double)] = []
+    let entries : Array[(Int32, Double)] = []
     let mut adjusted_rhs = constraint.rhs
     for k = 0; k < constraint.terms.length(); k = k + 1 {
       let (variable_index, coefficient) = constraint.terms[k]
@@ -424,17 +424,17 @@ pub fn from_model_with(
 /// unchanged because a certificate is stated against the model and never against this
 /// normal form. They are documented field by field on `KernelProblem`.
 fn assemble(
-  structural : Int,
+  structural : Int32,
   structural_cost : Array[Double],
   objective_constant : Double,
   model_sign : Double,
-  var_columns : Array[Array[(Int, Double)]],
+  var_columns : Array[Array[(Int32, Double)]],
   var_offset : Array[Double],
   structural_upper : Array[Double],
-  row_entries : Array[Array[(Int, Double)]],
+  row_entries : Array[Array[(Int32, Double)]],
   row_rels : Array[@model.Rel],
   row_rhs : Array[Double],
-  row_sources : Array[Int],
+  row_sources : Array[Int32],
   model_cost : Array[Double],
   model_lower : Array[Double],
   model_upper : Array[Double],
@@ -447,7 +447,7 @@ fn assemble(
   // the model row's.
   let rels : Array[@model.Rel] = []
   let rhs : Array[Double] = []
-  let rows : Array[Array[(Int, Double)]] = []
+  let rows : Array[Array[(Int32, Double)]] = []
   let dual_factors : Array[Double] = []
   let signs : Array[Double] = []
   for i = 0; i < m; i = i + 1 {
@@ -455,7 +455,7 @@ fn assemble(
     let value = row_rhs[i]
     if value < 0.0 {
       let flipped = row_entries[i]
-      let negated : Array[(Int, Double)] = []
+      let negated : Array[(Int32, Double)] = []
       for k = 0; k < flipped.length(); k = k + 1 {
         let (column, coefficient) = flipped[k]
         negated.push((column, -coefficient))
@@ -480,12 +480,12 @@ fn assemble(
     }
   }
   // Extra columns: one per row (slack) plus surplus and artificial where needed.
-  let extra_columns : Array[Array[(Int, Double)]] = []
+  let extra_columns : Array[Array[(Int32, Double)]] = []
   let extra_cost : Array[Double] = []
   let extra_artificial : Array[Bool] = []
   // For each row: the column that starts basic (slack, or artificial when the
   // row is an equality or a `≥` row) and the surplus column where one exists.
-  let initial_basis_column : Array[Int] = []
+  let initial_basis_column : Array[Int32] = []
   for i = 0; i < m; i = i + 1 {
     let rel = rels[i]
     if rel == @model.Rel::LessEqual {
@@ -510,7 +510,7 @@ fn assemble(
   }
   // Column major packing: structural columns come from the row lists.
   let ncols = structural + extra_columns.length()
-  let columns : Array[Array[(Int, Double)]] = []
+  let columns : Array[Array[(Int32, Double)]] = []
   for index = 0; index < ncols; index = index + 1 {
     columns.push([])
   }
@@ -575,9 +575,9 @@ fn assemble(
 ///|
 /// Column index of the slack (or surplus, for `≥` rows) of row `i`. Used by the
 /// kernel to pick a starting basis.
-pub fn KernelProblem::slack_row_map(self : KernelProblem) -> Array[Int] {
+pub fn KernelProblem::slack_row_map(self : KernelProblem) -> Array[Int32] {
   let m = self.nrows
-  let map : Array[Int] = Array::make(m, -1)
+  let map : Array[Int32] = Array::make(m, -1)
   for j = self.structural; j < self.ncols; j = j + 1 {
     let entries = self.matrix.column(j)
     if entries.length() == 1 && !self.is_artificial[j] {

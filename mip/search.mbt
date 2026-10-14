@@ -8,9 +8,9 @@
 /// model from the root along the chain is O(depth) bound changes, where copying the model
 /// at every node would be O(model) each time.
 priv struct Node {
-  parent : Int
-  depth : Int
-  variable : Int
+  parent : Int32
+  depth : Int32
+  variable : Int32
   lb : Double
   ub : Double
   /// The parent's optimal basis, so the relaxation can be reoptimized instead of rebuilt.
@@ -35,10 +35,10 @@ priv struct Node {
 /// condition is also what keeps the policy out of small budgets: at 300 nodes the reserve is 18
 /// steps, less than one walk, and the run is left alone.
 fn reserve_allows_walk(
-  extra_dive_budget : Int,
-  dive_steps : Int,
-  solved : Int,
-  max_nodes : Int,
+  extra_dive_budget : Int32,
+  dive_steps : Int32,
+  solved : Int32,
+  max_nodes : Int32,
 ) -> Bool {
   extra_dive_budget >= dive_steps && solved * 2 >= max_nodes
 }
@@ -59,11 +59,11 @@ let cut_round_gain : Double = 0.014
 /// The number of rounds a run does whatever that measurement says, which is the number the
 /// default always ran: two. The test can only stop rounds *after* these, so a run whose cuts stop
 /// paying early is left exactly as it was.
-let cut_rounds_always : Int = 2
+let cut_rounds_always : Int32 = 2
 
 ///|
 /// Whether a round that has just been taken is worth following with another one.
-fn another_round_pays(round : Int, added : Double) -> Bool {
+fn another_round_pays(round : Int32, added : Double) -> Bool {
   round < cut_rounds_always || added >= cut_round_gain
 }
 
@@ -79,11 +79,11 @@ fn another_round_pays(round : Int, added : Double) -> Bool {
 /// the instance is proved **in 31 nodes**. The cap is paid once per round, so the whole run spends
 /// at most `cut_rounds × cut_round_iteration_factor × max_iterations` iterations on it — rounds,
 /// not nodes.
-let cut_round_iteration_factor : Int = 4
+let cut_round_iteration_factor : Int32 = 4
 
 ///|
 /// The iteration cap a cut round's re-solve gets.
-fn cut_round_iteration_cap(max_iterations : Int) -> Int {
+fn cut_round_iteration_cap(max_iterations : Int32) -> Int32 {
   max_iterations * cut_round_iteration_factor
 }
 
@@ -93,7 +93,7 @@ fn cut_round_iteration_cap(max_iterations : Int) -> Int {
 /// A pump alternates round → project → round, and the alternation can cycle (the classic failure of
 /// the method), so the attempt is bounded rather than run to a fixpoint. Five is the number the
 /// measurements needed on the instances it is for; the cost of a cycle is five relaxations.
-let pump_iterations : Int = 5
+let pump_iterations : Int32 = 5
 
 ///|
 /// The number of relaxations a walk spends per undecided integer it has to decide.
@@ -116,7 +116,7 @@ let pump_iterations : Int = 5
 /// forty-five from six), while a walk that ends in a dead region spends as much as
 /// seventeen (`blend2`, a hundred and three from six). What the price buys is the pair:
 /// the ceiling has to be the price times a sensible admission, not a number chosen twice.
-let walk_step_price : Int = 5
+let walk_step_price : Int32 = 5
 
 ///|
 /// Whether a walk that has `fractional` undecided integers to decide fits a step ceiling.
@@ -126,7 +126,7 @@ let walk_step_price : Int = 5
 /// valuable thing to buy — it reports neither a point nor a proof, and the tree pays for it
 /// out of the budget it would have searched with. Zero is not a walk: a node with nothing
 /// fractional is a whole point, and the caller takes it as an incumbent instead.
-fn walk_fits_budget(fractional : Int, ceiling : Int) -> Bool {
+fn walk_fits_budget(fractional : Int32, ceiling : Int32) -> Bool {
   fractional > 0 && walk_step_price * fractional <= ceiling
 }
 
@@ -141,7 +141,7 @@ fn walk_fits_budget(fractional : Int, ceiling : Int) -> Bool {
 /// never walked again — `markshare1` reported the pump's 1242 where the walk had produced 274, and
 /// over the two manifests the early pump cost every proof it touched (`22433` 33 -> 91 relaxations,
 /// `p0201` 609 -> 819, `flugpl` 13806 -> 14306) for the same three points it earns here.
-fn pump_window_open(max_nodes : Int, solved : Int) -> Bool {
+fn pump_window_open(max_nodes : Int32, solved : Int32) -> Bool {
   pump_iterations * 4 <= max_nodes && max_nodes - solved <= pump_iterations
 }
 
@@ -152,7 +152,7 @@ fn pump_window_open(max_nodes : Int, solved : Int) -> Bool {
 /// gone past. The one that was missing it was measured — a run with `max_nodes = 300` reported
 /// **301** relaxations (`rout`, when the last node's solve landed exactly on the budget and the
 /// repair that followed spent one more).
-fn budget_left(max_nodes : Int, solved : Int) -> Bool {
+fn budget_left(max_nodes : Int32, solved : Int32) -> Bool {
   solved < max_nodes
 }
 
@@ -198,7 +198,7 @@ fn sense_sign(model : @model.Model) -> Double {
 /// part worth reading.
 priv struct NodeQueue {
   nodes : Array[Node]
-  heap : Array[Int]
+  heap : Array[Int32]
 }
 
 ///|
@@ -212,7 +212,7 @@ fn NodeQueue::is_empty(self : NodeQueue) -> Bool {
 }
 
 ///|
-fn NodeQueue::push(self : NodeQueue, index : Int) -> Unit {
+fn NodeQueue::push(self : NodeQueue, index : Int32) -> Unit {
   self.heap.push(index)
   let mut child = self.heap.length() - 1
   while child > 0 {
@@ -228,7 +228,7 @@ fn NodeQueue::push(self : NodeQueue, index : Int) -> Unit {
 }
 
 ///|
-fn NodeQueue::pop(self : NodeQueue) -> Int {
+fn NodeQueue::pop(self : NodeQueue) -> Int32 {
   let top = self.heap[0]
   let last = self.heap[self.heap.length() - 1]
   self.heap.pop() |> ignore
@@ -321,9 +321,9 @@ fn best_open_key(
 fn node_model(
   root : @model.Model,
   nodes : Array[Node],
-  index : Int,
+  index : Int32,
 ) -> @model.Model {
-  let chain : Array[Int] = []
+  let chain : Array[Int32] = []
   let mut current = index
   while current >= 0 {
     chain.push(current)
@@ -390,7 +390,7 @@ fn fractional_count(
   model : @model.Model,
   values : Array[Double],
   tolerance : Double,
-) -> Int {
+) -> Int32 {
   let mut count = 0
   for j = 0; j < model.num_vars() && j < values.length(); j = j + 1 {
     if !model.get_var(j).is_int {
@@ -409,7 +409,7 @@ fn most_fractional(
   model : @model.Model,
   values : Array[Double],
   tolerance : Double,
-) -> Int {
+) -> Int32 {
   let mut worst = -1
   let mut worst_distance = tolerance
   for j = 0; j < model.num_vars() && j < values.length(); j = j + 1 {
@@ -518,8 +518,8 @@ fn node_refusal(
 priv struct Dive {
   values : Array[Double]
   objective : Double
-  relaxations : Int
-  verified : Int
+  relaxations : Int32
+  verified : Int32
   /// The verifier's account of the first refused certificate, when one was refused.
   refusal : String
 }
@@ -550,7 +550,7 @@ fn dive_for_incumbent(
   options : MipOptions,
   start : NodeSolution,
   basis : @simplex.SimplexBasis?,
-  budget : Int,
+  budget : Int32,
 ) -> Dive {
   let model = problem.clone()
   let mut values = start.values
@@ -737,7 +737,7 @@ fn kernel_node(
   model : @model.Model,
   options : MipOptions,
   basis : @simplex.SimplexBasis?,
-  iterations? : Int = 0,
+  iterations~ : Int32 = 0,
 ) -> (NodeSolution, @simplex.SimplexBasis?) {
   let cap = if iterations > 0 { iterations } else { options.max_iterations }
   let kernel_options = @simplex.SimplexOptions::relaxed().limit_iterations(cap)
@@ -1555,10 +1555,10 @@ fn limit_result(
   incumbent : Array[Double],
   incumbent_objective : Double,
   has_incumbent : Bool,
-  solved : Int,
-  verified : Int,
-  unfinished : Int,
-  cuts_added : Int,
+  solved : Int32,
+  verified : Int32,
+  unfinished : Int32,
+  cuts_added : Int32,
   sign : Double,
   options : MipOptions,
 ) -> MipResult {

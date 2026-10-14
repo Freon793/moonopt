@@ -30,7 +30,7 @@ pub(all) enum VarForm {
   Fixed(Double)
   /// The variable is a linear form of the reduced model's variables:
   /// `x = constant + Σ coefficient · y_k`.
-  Linear(Double, Array[(Int, Double)])
+  Linear(Double, Array[(Int32, Double)])
 } derive(Debug)
 
 ///|
@@ -49,20 +49,20 @@ pub(all) enum PresolveVerdict {
 /// can see which of the reductions fired instead of taking "presolve helped" on
 /// faith.
 pub(all) struct PresolveStats {
-  rows_removed_empty : Int
-  rows_removed_redundant : Int
-  rows_removed_singleton : Int
-  bounds_tightened : Int
-  variables_fixed : Int
+  rows_removed_empty : Int32
+  rows_removed_redundant : Int32
+  rows_removed_singleton : Int32
+  bounds_tightened : Int32
+  variables_fixed : Int32
   /// How many of `variables_fixed` were fixed by dual fixing — a variable whose
   /// improving direction cannot violate a row, rather than one an equality pinned.
-  variables_fixed_dual : Int
+  variables_fixed_dual : Int32
   /// Rows whose coefficients were tightened by integrality. Always zero here: the
   /// strengthening (`strengthen_integer_rows`) is a reduction of the *integer* path,
   /// which this reduction never sees, and it reports its own count.
-  rows_strengthened : Int
-  columns_removed_empty : Int
-  rounds : Int
+  rows_strengthened : Int32
+  columns_removed_empty : Int32
+  rounds : Int32
 } derive(Debug)
 
 ///|
@@ -109,7 +109,7 @@ pub fn ReducedModel::objective_offset(self : ReducedModel) -> Double {
 ///|
 /// Number of variables in the original model, which is also the length of a
 /// reconstructed solution.
-pub fn ReducedModel::num_original_vars(self : ReducedModel) -> Int {
+pub fn ReducedModel::num_original_vars(self : ReducedModel) -> Int32 {
   self.forms.length()
 }
 
@@ -140,7 +140,7 @@ priv struct WorkRow {
   name : String
   rel : @model.Rel
   mut rhs : Double
-  mut terms : Array[(Int, Double)]
+  mut terms : Array[(Int32, Double)]
   mut alive : Bool
 }
 
@@ -182,14 +182,14 @@ priv struct Reduction {
   fixed_values : Array[Double]
   mut infeasible : String
   mut unbounded : String
-  mut rows_removed_empty : Int
-  mut rows_removed_redundant : Int
-  mut rows_removed_singleton : Int
-  mut bounds_tightened : Int
-  mut variables_fixed : Int
-  mut variables_fixed_dual : Int
-  mut columns_removed_empty : Int
-  mut rounds : Int
+  mut rows_removed_empty : Int32
+  mut rows_removed_redundant : Int32
+  mut rows_removed_singleton : Int32
+  mut bounds_tightened : Int32
+  mut variables_fixed : Int32
+  mut variables_fixed_dual : Int32
+  mut columns_removed_empty : Int32
+  mut rounds : Int32
 }
 
 ///|
@@ -259,7 +259,7 @@ fn Reduction::stopped(self : Reduction) -> Bool {
 /// finite number that looks like a proof.
 fn Reduction::activity(
   self : Reduction,
-  terms : Array[(Int, Double)],
+  terms : Array[(Int32, Double)],
 ) -> (Double?, Double?) {
   let mut low = 0.0
   let mut low_unbounded = 0
@@ -384,13 +384,13 @@ fn Reduction::prove_unbounded(self : Reduction, site : String) -> Unit {
 ///|
 /// Drops terms that refer to eliminated variables or carry a zero coefficient.
 /// Returns the number of rows that changed.
-fn Reduction::prune_terms(self : Reduction) -> Int {
+fn Reduction::prune_terms(self : Reduction) -> Int32 {
   let mut changed = 0
   for i = 0; i < self.rows.length(); i = i + 1 {
     if !self.rows[i].alive {
       continue
     }
-    let kept : Array[(Int, Double)] = []
+    let kept : Array[(Int32, Double)] = []
     let mut removed = false
     for term in self.rows[i].terms {
       let (k, coefficient) = term
@@ -411,7 +411,7 @@ fn Reduction::prune_terms(self : Reduction) -> Int {
 ///|
 /// Removes rows the current bounds already satisfy, and stops the run when the
 /// bounds make a row impossible.
-fn Reduction::drop_settled_rows(self : Reduction) -> Int {
+fn Reduction::drop_settled_rows(self : Reduction) -> Int32 {
   let mut changed = 0
   for i = 0; i < self.rows.length(); i = i + 1 {
     if !self.rows[i].alive {
@@ -438,10 +438,10 @@ fn Reduction::drop_settled_rows(self : Reduction) -> Int {
 /// Raises a lower bound, counting a change only when it actually moved.
 fn Reduction::raise_lower(
   self : Reduction,
-  k : Int,
+  k : Int32,
   value : Double,
   tolerance : Double,
-) -> Int {
+) -> Int32 {
   if @core.is_nan(value) {
     return 0
   }
@@ -457,10 +457,10 @@ fn Reduction::raise_lower(
 /// Lowers an upper bound, counting a change only when it actually moved.
 fn Reduction::lower_upper(
   self : Reduction,
-  k : Int,
+  k : Int32,
   value : Double,
   tolerance : Double,
-) -> Int {
+) -> Int32 {
   if @core.is_nan(value) {
     return 0
   }
@@ -492,7 +492,7 @@ fn Reduction::lower_upper(
 /// subtracting the term's own contribution: a variable's bound is usually
 /// infinite in exactly the direction being tightened, and `∞ − ∞` would turn the
 /// most useful case into a NaN that looks like "no information".
-fn Reduction::tighten_from_row(self : Reduction, row : WorkRow) -> Int {
+fn Reduction::tighten_from_row(self : Reduction, row : WorkRow) -> Int32 {
   let tolerance = scale_tolerance(row.rhs)
   let count = row.terms.length()
   let low_finite : Array[Double] = Array::make(count, 0.0)
@@ -592,7 +592,7 @@ fn Reduction::tighten_from_row(self : Reduction, row : WorkRow) -> Int {
 ///|
 /// Turns `a x {≤, ≥, =} b` on a single variable into bounds on that variable, and
 /// consumes the row: after this it carries no information the bounds do not.
-fn Reduction::consume_singleton_rows(self : Reduction) -> Int {
+fn Reduction::consume_singleton_rows(self : Reduction) -> Int32 {
   let mut changed = 0
   for i = 0; i < self.rows.length(); i = i + 1 {
     if !self.rows[i].alive || self.rows[i].terms.length() != 1 {
@@ -631,13 +631,17 @@ fn Reduction::consume_singleton_rows(self : Reduction) -> Int {
 /// Eliminates a variable by substituting its value into every row and into the
 /// objective. The value becomes part of the objective offset, so the caller's
 /// objective stays comparable with the original model's.
-fn Reduction::fix_variable(self : Reduction, k : Int, value : Double) -> Int {
+fn Reduction::fix_variable(
+  self : Reduction,
+  k : Int32,
+  value : Double,
+) -> Int32 {
   self.offset = self.offset + self.vars[k].cost * value
   for i = 0; i < self.rows.length(); i = i + 1 {
     if !self.rows[i].alive {
       continue
     }
-    let kept : Array[(Int, Double)] = []
+    let kept : Array[(Int32, Double)] = []
     let mut touched = false
     for term in self.rows[i].terms {
       let (j, coefficient) = term
@@ -663,7 +667,7 @@ fn Reduction::fix_variable(self : Reduction, k : Int, value : Double) -> Int {
 ///|
 /// Eliminates every variable whose bounds meet, and every variable whose bounds
 /// were proved to meet by a singleton equality.
-fn Reduction::eliminate_fixed(self : Reduction) -> Int {
+fn Reduction::eliminate_fixed(self : Reduction) -> Int32 {
   let mut changed = 0
   for k = 0; k < self.vars.length(); k = k + 1 {
     if !self.vars[k].alive {
@@ -708,7 +712,7 @@ fn Reduction::row_incidence(self : Reduction) -> Array[Bool] {
 /// to drive it to a bound, and if that side has no finite bound the model is
 /// unbounded. With a zero cost any feasible value does, so the variable is fixed
 /// at the first finite bound it has.
-fn Reduction::eliminate_empty_columns(self : Reduction) -> Int {
+fn Reduction::eliminate_empty_columns(self : Reduction) -> Int32 {
   let used = self.row_incidence()
   let mut changed = 0
   for k = 0; k < self.vars.length(); k = k + 1 {
@@ -783,7 +787,7 @@ fn Reduction::eliminate_empty_columns(self : Reduction) -> Int {
 /// the constraint disqualifies the direction, and an equality row disqualifies both.
 /// An integer variable is only pinned at an integer bound, because the claim is that an
 /// optimal solution *at that value* exists, not that a value may be rounded.
-fn Reduction::fix_monotone_columns(self : Reduction) -> Int {
+fn Reduction::fix_monotone_columns(self : Reduction) -> Int32 {
   let n = self.vars.length()
   // Per variable: which single-bound moves are safe in every row it appears in.
   let down_safe = Array::make(n, true)
@@ -918,7 +922,7 @@ fn Reduction::build(self : Reduction) -> (Array[VarForm], @model.Model) {
       )
     }
   }
-  let objective : Array[(Int, Double)] = []
+  let objective : Array[(Int32, Double)] = []
   for k = 0; k < self.vars.length(); k = k + 1 {
     if self.vars[k].alive && !@core.approx_zero(self.vars[k].cost, abs=1.0e-12) {
       objective.push((new_index[k], self.vars[k].cost))
@@ -929,7 +933,7 @@ fn Reduction::build(self : Reduction) -> (Array[VarForm], @model.Model) {
     if !self.rows[i].alive {
       continue
     }
-    let mapped : Array[(Int, Double)] = []
+    let mapped : Array[(Int32, Double)] = []
     for term in self.rows[i].terms {
       let (k, coefficient) = term
       if new_index[k] >= 0 {
@@ -1025,7 +1029,7 @@ pub fn presolve(model : @model.Model) -> ReducedModel {
 /// `Reduction` with the others: the linear presolve never sees an integer model (the
 /// answer to an integer model must not depend on what a reduction fixed), so a rule that
 /// needs integrality has no row to fire on there.
-pub fn strengthen_integer_rows(model : @model.Model) -> (@model.Model, Int) {
+pub fn strengthen_integer_rows(model : @model.Model) -> (@model.Model, Int32) {
   let n = model.num_vars()
   let lower : Array[Double] = []
   let upper : Array[Double] = []
@@ -1037,7 +1041,7 @@ pub fn strengthen_integer_rows(model : @model.Model) -> (@model.Model, Int) {
     is_int.push(variable.is_int)
   }
   let tighter_upper = upper.copy()
-  let rewritten : Array[(String, @model.Rel, Double, Array[(Int, Double)])] = []
+  let rewritten : Array[(String, @model.Rel, Double, Array[(Int32, Double)])] = []
   let mut changed = 0
   for i = 0; i < model.num_constraints(); i = i + 1 {
     let constraint = model.constraint(i)

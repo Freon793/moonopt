@@ -21,25 +21,25 @@
 /// coefficient patterns over the corpus. The constants are small on purpose so the
 /// sequence does not depend on integer wrap-around behaviour.
 priv struct Lcg {
-  mut state : Int
+  mut state : Int32
 }
 
 ///|
 /// Creates a generator from a seed.
-fn Lcg::new(seed : Int) -> Lcg {
+fn Lcg::new(seed : Int32) -> Lcg {
   { state: seed % 100003, }
 }
 
 ///|
 /// Next raw value in `[0, 100003)`.
-fn Lcg::next(self : Lcg) -> Int {
+fn Lcg::next(self : Lcg) -> Int32 {
   self.state = (self.state * 31 + 17) % 100003
   self.state
 }
 
 ///|
 /// Next value in `[0, bound)`.
-fn Lcg::below(self : Lcg, bound : Int) -> Int {
+fn Lcg::below(self : Lcg, bound : Int32) -> Int32 {
   if bound <= 1 {
     0
   } else {
@@ -49,7 +49,7 @@ fn Lcg::below(self : Lcg, bound : Int) -> Int {
 
 ///|
 /// Next value in `[low, high]` as a double.
-fn Lcg::between(self : Lcg, low : Int, high : Int) -> Double {
+fn Lcg::between(self : Lcg, low : Int32, high : Int32) -> Double {
   Double::from_int(low + self.below(high - low + 1))
 }
 
@@ -63,7 +63,7 @@ fn random_model(lcg : Lcg) -> @model.Model {
   }
   let model = @model.Model::new(sense)
   let n = 2 + lcg.below(4)
-  let vars : Array[Int] = []
+  let vars : Array[Int32] = []
   for j = 0; j < n; j = j + 1 {
     let (lb, ub) = match lcg.below(5) {
       0 => (0.0, @model.infinite_bound)
@@ -78,7 +78,7 @@ fn random_model(lcg : Lcg) -> @model.Model {
     }
     vars.push(model.add_var("x" + j.to_string(), lb~, ub~))
   }
-  let objective : Array[(Int, Double)] = []
+  let objective : Array[(Int32, Double)] = []
   for j = 0; j < n; j = j + 1 {
     let coefficient = lcg.between(-3, 3)
     if coefficient != 0.0 {
@@ -88,7 +88,7 @@ fn random_model(lcg : Lcg) -> @model.Model {
   model.set_objective(objective)
   let rows = lcg.below(4)
   for i = 0; i < rows; i = i + 1 {
-    let terms : Array[(Int, Double)] = []
+    let terms : Array[(Int32, Double)] = []
     for j = 0; j < n; j = j + 1 {
       let coefficient = lcg.between(-3, 3)
       if coefficient != 0.0 {

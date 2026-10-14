@@ -27,7 +27,7 @@ fn State::basis_snapshot(self : State) -> SimplexBasis {
 ///|
 /// Number of model rows this kernel problem corresponds to, which is the length of a
 /// certificate's `duals`.
-fn State::model_row_count(self : State) -> Int {
+fn State::model_row_count(self : State) -> Int32 {
   let mut count = 0
   for r = 0; r < self.m; r = r + 1 {
     let source = self.problem.row_source[r]
@@ -123,7 +123,7 @@ fn State::max_dual_sign_violation(
   self : State,
   duals : Array[Double],
   cost_scale : Double,
-) -> (Double, Int) {
+) -> (Double, Int32) {
   let problem = self.problem
   let mut suspect = false
   for r = 0; r < problem.nrows; r = r + 1 {
@@ -205,7 +205,7 @@ fn State::model_cost_scale(self : State) -> Double {
 fn State::row_multiplier_is_negative(
   self : State,
   duals : Array[Double],
-  r : Int,
+  r : Int32,
 ) -> Bool {
   let source = self.problem.row_source[r]
   if source < 0 || source >= duals.length() {
@@ -260,7 +260,7 @@ fn model_has_upper(ub : Double) -> Bool {
 /// be removed without giving the kernel a second copy of the matrix.
 fn State::model_reduced_cost(
   self : State,
-  j : Int,
+  j : Int32,
   duals : Array[Double],
   cost : Double,
 ) -> (Double, Double) {
@@ -446,7 +446,7 @@ fn infeasibility_is_certified(
 fn State::ray_sign_violation(
   self : State,
   ray : Array[Double],
-) -> (Double, Int) {
+) -> (Double, Int32) {
   self.max_dual_sign_violation(ray, 1.0)
 }
 

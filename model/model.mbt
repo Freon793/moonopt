@@ -44,7 +44,7 @@ pub struct Constraint {
   name : String
   rel : Rel
   rhs : Double
-  terms : Array[(Int, Double)]
+  terms : Array[(Int32, Double)]
 } derive(Debug)
 
 ///|
@@ -84,7 +84,7 @@ pub let infinite_bound : Double = 1.0e30
 /// An optimisation model under construction.
 pub struct Model {
   mut sense : Sense
-  mut objective_terms : Array[(Int, Double)]
+  mut objective_terms : Array[(Int32, Double)]
   vars : Array[Var]
   constraints : Array[Constraint]
 } derive(Debug)
@@ -109,13 +109,13 @@ pub fn Model::set_sense(self : Model, sense : Sense) -> Unit {
 
 ///|
 /// Number of variables.
-pub fn Model::num_vars(self : Model) -> Int {
+pub fn Model::num_vars(self : Model) -> Int32 {
   self.vars.length()
 }
 
 ///|
 /// Number of constraint rows.
-pub fn Model::num_constraints(self : Model) -> Int {
+pub fn Model::num_constraints(self : Model) -> Int32 {
   self.constraints.length()
 }
 
@@ -128,10 +128,10 @@ pub fn Model::num_constraints(self : Model) -> Int {
 pub fn Model::add_var(
   self : Model,
   name : String,
-  lb? : Double = 0.0,
-  ub? : Double = infinite_bound,
-  is_int? : Bool = false,
-) -> Int {
+  lb~ : Double = 0.0,
+  ub~ : Double = infinite_bound,
+  is_int~ : Bool = false,
+) -> Int32 {
   self.vars.push({ name, lb, ub, is_int, })
   self.vars.length() - 1
 }
@@ -139,7 +139,7 @@ pub fn Model::add_var(
 ///|
 /// Reads back a variable definition. (`var` is a keyword in MoonBit, hence the
 /// name.)
-pub fn Model::get_var(self : Model, index : Int) -> Var {
+pub fn Model::get_var(self : Model, index : Int32) -> Var {
   self.vars[index]
 }
 
@@ -150,7 +150,7 @@ pub fn Model::get_var(self : Model, index : Int) -> Var {
 /// after the columns, so the variable exists before its final bounds are known.
 pub fn Model::set_var_bounds(
   self : Model,
-  index : Int,
+  index : Int32,
   lb : Double,
   ub : Double,
 ) -> Unit {
@@ -161,7 +161,7 @@ pub fn Model::set_var_bounds(
 ///|
 /// Marks a variable as integer. Kept separate from `set_var_bounds` because
 /// model files express integrality through markers or sections of their own.
-pub fn Model::set_var_integer(self : Model, index : Int) -> Unit {
+pub fn Model::set_var_integer(self : Model, index : Int32) -> Unit {
   let variable = self.vars[index]
   self.vars[index] = {
     name: variable.name,
@@ -173,13 +173,16 @@ pub fn Model::set_var_integer(self : Model, index : Int) -> Unit {
 
 ///|
 /// Replaces the objective, merging duplicates and dropping zeros.
-pub fn Model::set_objective(self : Model, terms : Array[(Int, Double)]) -> Unit {
+pub fn Model::set_objective(
+  self : Model,
+  terms : Array[(Int32, Double)],
+) -> Unit {
   self.objective_terms = normalize_terms(terms)
 }
 
 ///|
 /// Objective as sorted `(variable index, coefficient)` pairs.
-pub fn Model::objective(self : Model) -> Array[(Int, Double)] {
+pub fn Model::objective(self : Model) -> Array[(Int32, Double)] {
   self.objective_terms
 }
 
@@ -187,7 +190,7 @@ pub fn Model::objective(self : Model) -> Array[(Int, Double)] {
 /// Adds an unnamed constraint row.
 pub fn Model::add_constraint(
   self : Model,
-  terms : Array[(Int, Double)],
+  terms : Array[(Int32, Double)],
   rel : Rel,
   rhs : Double,
 ) -> Unit {
@@ -217,7 +220,7 @@ pub fn Model::clone(self : Model) -> Model {
 /// the MPS writer).
 pub fn Model::add_named_constraint(
   self : Model,
-  terms : Array[(Int, Double)],
+  terms : Array[(Int32, Double)],
   rel : Rel,
   rhs : Double,
   name : String,
@@ -227,7 +230,7 @@ pub fn Model::add_named_constraint(
 
 ///|
 /// Reads back a constraint row.
-pub fn Model::constraint(self : Model, index : Int) -> Constraint {
+pub fn Model::constraint(self : Model, index : Int32) -> Constraint {
   self.constraints[index]
 }
 
@@ -297,7 +300,9 @@ pub fn Model::is_valid(self : Model) -> Bool {
 
 ///|
 /// Sorts terms by variable index, merges duplicates and drops zeros.
-pub fn normalize_terms(terms : Array[(Int, Double)]) -> Array[(Int, Double)] {
+pub fn normalize_terms(
+  terms : Array[(Int32, Double)],
+) -> Array[(Int32, Double)] {
   let sorted = terms.copy()
   let n = sorted.length()
   for i = 1; i < n; i = i + 1 {
@@ -309,7 +314,7 @@ pub fn normalize_terms(terms : Array[(Int, Double)]) -> Array[(Int, Double)] {
     }
     sorted[j + 1] = cur
   }
-  let merged : Array[(Int, Double)] = []
+  let merged : Array[(Int32, Double)] = []
   for k = 0; k < n; k = k + 1 {
     let (index, coeff) = sorted[k]
     if merged.length() > 0 && merged[merged.length() - 1].0 == index {
@@ -320,7 +325,7 @@ pub fn normalize_terms(terms : Array[(Int, Double)]) -> Array[(Int, Double)] {
       merged.push((index, coeff))
     }
   }
-  let out : Array[(Int, Double)] = []
+  let out : Array[(Int32, Double)] = []
   for k = 0; k < merged.length(); k = k + 1 {
     if merged[k].1 != 0.0 {
       out.push(merged[k])

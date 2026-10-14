@@ -7,7 +7,7 @@
 /// solves, it just makes the tree infinite.
 
 ///|
-fn node_of(parent : Int, variable : Int, lb : Double, ub : Double) -> Node {
+fn node_of(parent : Int32, variable : Int32, lb : Double, ub : Double) -> Node {
   { parent, depth: 0, variable, lb, ub, basis: None, bound: 0.0, key: 0.0, }
 }
 
@@ -257,7 +257,7 @@ test "the queue always hands back the smallest key" {
     queue.push(k)
   }
   assert_true(!queue.is_empty())
-  let order : Array[Int] = []
+  let order : Array[Int32] = []
   while !queue.is_empty() {
     order.push(queue.pop())
   }

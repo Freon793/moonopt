@@ -92,7 +92,7 @@ pub fn Certificate::to_json(self : Certificate) -> String {
 /// every character.
 priv struct JsonReader {
   chars : Array[Char]
-  mut position : Int
+  mut position : Int32
 }
 
 ///|
@@ -136,7 +136,7 @@ fn JsonReader::skip_space(self : JsonReader) -> Unit {
 
 ///|
 /// The remaining characters, as text, for error-free passthrough of numbers.
-fn JsonReader::token_from(self : JsonReader, start : Int) -> String {
+fn JsonReader::token_from(self : JsonReader, start : Int32) -> String {
   let builder = StringBuilder()
   for i = start; i < self.position; i = i + 1 {
     builder.write_char(self.chars[i])

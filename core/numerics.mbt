@@ -74,8 +74,8 @@ pub fn is_finite(x : Double) -> Bool {
 pub fn approx_eq(
   a : Double,
   b : Double,
-  rel? : Double = default_rel_tolerance,
-  abs? : Double = default_abs_tolerance,
+  rel~ : Double = default_rel_tolerance,
+  abs~ : Double = default_abs_tolerance,
 ) -> Bool {
   if is_nan(a) || is_nan(b) {
     return false
@@ -89,7 +89,7 @@ pub fn approx_eq(
 
 ///|
 /// Returns `true` when `x` counts as zero at the given absolute tolerance.
-pub fn approx_zero(x : Double, abs? : Double = default_abs_tolerance) -> Bool {
+pub fn approx_zero(x : Double, abs~ : Double = default_abs_tolerance) -> Bool {
   fabs(x) <= abs
 }
 
@@ -97,7 +97,7 @@ pub fn approx_zero(x : Double, abs? : Double = default_abs_tolerance) -> Bool {
 /// Returns `true` when `x` counts as strictly positive at the given tolerance.
 pub fn approx_positive(
   x : Double,
-  abs? : Double = default_abs_tolerance,
+  abs~ : Double = default_abs_tolerance,
 ) -> Bool {
   x > abs
 }
@@ -106,7 +106,7 @@ pub fn approx_positive(
 /// Returns `true` when `x` counts as strictly negative at the given tolerance.
 pub fn approx_negative(
   x : Double,
-  abs? : Double = default_abs_tolerance,
+  abs~ : Double = default_abs_tolerance,
 ) -> Bool {
   x < -abs
 }
@@ -170,7 +170,7 @@ pub fn dot_compensated(xs : Array[Double], ys : Array[Double]) -> Double {
 
 ///|
 /// Smaller of two integers (kept local to stay dependency free).
-pub fn fmin_int(a : Int, b : Int) -> Int {
+pub fn fmin_int(a : Int32, b : Int32) -> Int32 {
   if a < b {
     a
   } else {
@@ -180,7 +180,7 @@ pub fn fmin_int(a : Int, b : Int) -> Int {
 
 ///|
 /// Larger of two integers.
-pub fn fmax_int(a : Int, b : Int) -> Int {
+pub fn fmax_int(a : Int32, b : Int32) -> Int32 {
   if a > b {
     a
   } else {
