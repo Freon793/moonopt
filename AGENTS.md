@@ -181,6 +181,16 @@ You can browse and install extra skills here:
 
 - `moon fmt` is used to format your code properly.
 
+  Write the two spellings the current toolchain formats towards, or `moon fmt`
+  will rewrite whole files and CI's `format diff` step will fail on a tree
+  nobody edited: an integer type annotation is `Int32` (never `Int`), and a
+  default argument is `name~` (never `name?`). Both were measured on
+  `moonc v0.10.15+943464bfa`, which rewrites the older spellings across 37 files
+  in this repository. CI installs the unpinned `latest`, so a future compiler
+  release can move these again; when `format diff` fails, the newest toolchain's
+  own `moon fmt` output *is* the answer, and the four reports need regenerating
+  afterwards because their scope paths cover the files that change.
+
 - `moon ide` provides project navigation helpers like `peek-def`, `outline`, and
   `find-references`. See $moonbit-agent-guide for details.
 

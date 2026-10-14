@@ -14,8 +14,8 @@
 
 | # | 验收要求 | 证据 | 复核方式 |
 | --- | --- | --- | --- |
-| 1 | 以 MoonBit 为主要实现语言（`moonc` 不低于 0.10.14） | 非测试 MoonBit 实现 **45 个文件 / 16 510 行**（测试另 28 文件 / 7 258 行，合计 73 文件 / 23 768 行）；仓库里**没有**任何非 MoonBit 的实现文件；零 FFI、零第三方运行期依赖（库包不引任何第三方包，仅 `cmd/parse` 引官方 `moonbitlang/x` 的 `fs`/`sys`）；工具链 **moonc v0.10.14+7d59c7ec9**（本机 `moon version --all` 与 CI 当次日志逐字一致） | `moon check --deny-warn`；`moon version --all`；`git ls-files '*.mbt'` 后按 `_(wb)?test\.mbt$` 分流、用 `[IO.File]::ReadAllLines` 计行（**不能用 `Measure-Object -Line`：它不数空行**，会少算约 800 行；本行数字随每次代码改动重算）；`simplex/moon.pkg` 等包配置 |
-| 2 | GitHub 仓库公开可访问、提交记录清晰 | 公开仓库 `Freon793/moonopt`（默认分支 `main`，Apache-2.0 被 GitHub 识别）；**146 个提交**，唯一作者与仓库所有者一致，全部落在 2026-09-14 ~ 09-30；其中 **130 个提交信息带正文**（写明"做了什么 / 为什么 / 证据"） | `git log --oneline`；GitHub 仓库页；`git rev-list --count HEAD` |
+| 1 | 以 MoonBit 为主要实现语言（`moonc` 不低于 0.10.14） | 非测试 MoonBit 实现 **45 个文件 / 16 524 行**（测试另 28 文件 / 7 258 行，合计 73 文件 / 23 782 行）；仓库里**没有**任何非 MoonBit 的实现文件；零 FFI、零第三方运行期依赖（库包不引任何第三方包，仅 `cmd/parse` 引官方 `moonbitlang/x` 的 `fs`/`sys`）；工具链 **moonc v0.10.15+943464bfa**（本机 `moon version --all` 与 CI 当次日志逐字一致） | `moon check --deny-warn`；`moon version --all`；`git ls-files '*.mbt'` 后按 `_(wb)?test\.mbt$` 分流、用 `[IO.File]::ReadAllLines` 计行（**不能用 `Measure-Object -Line`：它不数空行**，会少算约 800 行；本行数字随每次代码改动重算）；`simplex/moon.pkg` 等包配置 |
+| 2 | GitHub 仓库公开可访问、提交记录清晰 | 公开仓库 `Freon793/moonopt`（默认分支 `main`，Apache-2.0 被 GitHub 识别）；**153 个提交**，唯一作者与仓库所有者一致，全部落在 2026-09-14 ~ 10-15；其中 **137 个提交信息带正文**（写明"做了什么 / 为什么 / 证据"） | `git log --oneline`；GitHub 仓库页；`git rev-list --count HEAD` |
 | 3 | 源代码结构清晰，能完成声明的核心功能 | 10 个包各司其职（`core`/`model`/`format`/`simplex`/`presolve`/`verify`/`mip`/`oracle`/`cmd/*`），包边界与依赖规则写在 [`design.md`](design.md)；核心功能有基准报告 | [`design.md`](design.md)；`bench/parse-report.md`、`bench/solve-report.md`、`bench/mip-report.md`、`bench/mip-report-small.md` |
 | 4 | 提供 README，说明目标 / 安装 / 使用 / 示例，且可复现 | [`../README.md`](../README.md) 的四要素齐备（定位与"为什么需要它"、`moon add` 安装、CLI 与 API 用法、可运行示例）；本文件第 2 节给出评审可执行的最短复现路径 | 见下方"五分钟复现" |
 | 5 | 使用持续集成工具并覆盖**检查、构建、测试**流程 | [`.github/workflows/check.yml`](../.github/workflows/check.yml)：`check` 任务在 Linux / macOS / Windows 上按序跑 `moon check --deny-warn` → `moon build` → `format diff` → `info check` → `moon test --deny-warn` → 报告陈旧性；`targets` 任务在 wasm-gc / js 上跑 `moon build --target <t>` → `moon test --target <t>`。发布 `0.2.0` 的那次运行五个任务全绿，日志里 `Total tests: 198, passed: 198, failed: 0` 与 `4 report(s), 0 stale` | GitHub Actions 运行页；每个任务都在注解里写出本次使用的工具链版本 |
@@ -27,7 +27,7 @@
 ## 2. 五分钟复现（评审可执行）
 
 ```bash
-moon version --all                    # 本仓库验证于 moonc v0.10.14（要求不低于 0.10.14）
+moon version --all                    # 本仓库验证于 moonc v0.10.15（要求不低于 0.10.14）
 git clone https://github.com/Freon793/moonopt && cd moonopt
 
 # ① 检查 / 构建 / 测试（与 CI 相同的三步）
