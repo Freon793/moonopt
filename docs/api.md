@@ -169,6 +169,7 @@ pub(all) struct MipOptions { max_nodes, max_iterations, tolerance, verify_nodes,
 ```
 moon run cmd/parse -- <file> [flags]                # 巡检（默认）
 moon run cmd/parse -- <verb> <file> [flags]         # verb ∈ parse|solve|verify|fmt|bench
+moon run cmd/parse -- <file> --solve --pricing <rule>   # dantzig|gain|devex
 ```
 
 - 文本输出是 `bench/` 四个脚本解析的格式，**逐位稳定**；`--json` 是同一批运行的另一份渲染，
