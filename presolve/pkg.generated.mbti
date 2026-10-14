@@ -15,6 +15,8 @@ pub fn objective_value(@model.Model, Array[Double]) -> Double
 
 pub fn presolve(@model.Model) -> ReducedModel
 
+pub fn strengthen_integer_rows(@model.Model) -> (@model.Model, Int)
+
 // Errors
 
 // Types and methods
@@ -24,6 +26,8 @@ pub(all) struct PresolveStats {
   rows_removed_singleton : Int
   bounds_tightened : Int
   variables_fixed : Int
+  variables_fixed_dual : Int
+  rows_strengthened : Int
   columns_removed_empty : Int
   rounds : Int
 } derive(@debug.Debug)

@@ -146,6 +146,19 @@ priv struct State {
   gain_pool_gains : Array[Double]
   /// Where the rotating window over the column space stands.
   mut gain_cursor : Int
+  /// Devex weights, one per column: an estimate of how long the direction a column
+  /// moves in is, relative to the reference row the weights were last derived from.
+  /// `1` means "no better estimate than the column itself", which is what makes the
+  /// rule start out as Dantzig and what a periodic reset returns it to.
+  devex_weight : Array[Double]
+  /// The pivot row of the current iteration (`e_rᵀB⁻¹`) and the scratch the
+  /// transposed solve needs while building it. One transposed solve and one pass over
+  /// the columns per pivot is the whole extra cost of the rule.
+  devex_row : Array[Double]
+  devex_scratch : Array[Double]
+  /// The pivot row entry of every column, squared, so the weight update is one pass
+  /// to find the largest scaled entry and one to apply it.
+  devex_entry : Array[Double]
   /// Column that entered when the run concluded the objective is unbounded, and the
   /// direction it moved in (`+1` increasing, `-1` decreasing). `-1` means no such
   /// verdict was reached. Together with the direction buffer still holding `B⁻¹aⱼ`,
@@ -222,6 +235,10 @@ fn State::new(problem : KernelProblem, options : SimplexOptions) -> State {
     gain_pool: Array::make(gain_pool_size, -1),
     gain_pool_gains: Array::make(gain_pool_size, 0.0),
     gain_cursor: 0,
+    devex_weight: Array::make(n, 1.0),
+    devex_row: Array::make(m, 0.0),
+    devex_scratch: Array::make(m, 0.0),
+    devex_entry: Array::make(n, 0.0),
     ray_column: -1,
     ray_sigma: 1.0,
     solve_rhs,
@@ -295,12 +312,51 @@ fn State::new_with_basis(
 }
 
 ///|
+/// Count of pivots after which the Devex weights are re-derived from scratch.
+///
+/// The update only ever grows a weight (`w ← max(w, (u/γ)²)` with `γ` the largest
+/// scaled entry of the pivot row), so an endless run would slowly stop scaling the
+/// reduced costs at all and become Dantzig with extra arithmetic. A reset is the
+/// standard answer, and the number is a measurement rather than a guess: see
+/// `docs/algorithms.md` for what the corpus shows at 0 (never) and at 100/1000/10000.
+const DEVEX_RESET_PIVOTS : Int = 1000
+
+///|
+/// Smallest Devex weight. The weights come out of the update as squared, normalized
+/// pivot-row entries, so a column whose direction is orthogonal to the reference row
+/// comes out at zero — and zero in the denominator of `magnitude² / w` is how a ranking
+/// becomes unbounded rather than merely bad. The floor keeps the rule's estimate
+/// finite; it never changes an answer, because the estimate is only read by the ranking.
+const DEVEX_MIN_WEIGHT : Double = 1.0e-8
+
+///|
+/// Applies the weight floor and the ceiling to one weight.
+///
+/// The ceiling is not decoration: the weights are squares of a ratio, so an entry at the
+/// ceiling squared overflows to infinity, and an infinite weight would make a column
+/// permanently ineligible.
+fn devex_weight_floor(weight : Double) -> Double {
+  @core.fmin(@core.fmax(weight, DEVEX_MIN_WEIGHT), 1.0)
+}
+
+///|
+/// Sets every Devex weight back to one.
+fn State::reset_devex_weights(self : State) -> Unit {
+  for j = 0; j < self.n; j = j + 1 {
+    self.devex_weight[j] = 1.0
+  }
+}
+
+///|
 /// Phase I: minimise the sum of the artificial variables.
 fn State::set_phase1(self : State) -> Unit {
   for j = 0; j < self.n; j = j + 1 {
     self.cost[j] = if self.problem.is_artificial[j] { 1.0 } else { 0.0 }
     self.forbid[j] = false
   }
+  // A phase is a different objective over the same basis, so whatever the weights
+  // were derived against no longer describes this run.
+  self.reset_devex_weights()
 }
 
 ///|
@@ -312,6 +368,7 @@ fn State::set_phase2(self : State) -> Unit {
     self.cost[j] = self.problem.cost[j]
     self.forbid[j] = self.problem.is_artificial[j]
   }
+  self.reset_devex_weights()
 }
 
 ///|
@@ -523,12 +580,13 @@ fn State::reduced_cost(
 /// larger instances (a few million short-lived arrays for one solve).
 fn State::choose_entering(self : State, duals : Array[Double]) -> Int {
   let tolerance = self.options.reduced_cost_tolerance
+  let devex = self.options.pricing == Pricing::Devex
   let upper = self.problem.upper
   let pointers = self.problem.matrix.col_pointers()
   let rows = self.problem.matrix.row_indices()
   let values = self.problem.matrix.values_view()
   let mut best = -1
-  let mut best_magnitude = 0.0
+  let mut best_score = 0.0
   for j = 0; j < self.n; j = j + 1 {
     if self.is_basic[j] || self.forbid[j] {
       continue
@@ -545,9 +603,20 @@ fn State::choose_entering(self : State, duals : Array[Double]) -> Int {
         self.enter_sigma = if self.at_upper[j] { -1.0 } else { 1.0 }
         return j
       }
-      if best < 0 || magnitude > best_magnitude {
+      // Devex scales the rate by the length of the direction the column moves in:
+      // the score is what a *unit* step would buy, so a column whose direction is
+      // long is not chosen just because its reduced cost is large. Squared, because
+      // only the ranking matters and `w_j > 0` — that saves the square root, and
+      // `u²/w` is the same ordering as `u/√w`.
+      let score = if devex {
+        let weight = self.devex_weight[j]
+        magnitude * magnitude / (if weight > 0.0 { weight } else { 1.0 })
+      } else {
+        magnitude
+      }
+      if best < 0 || score > best_score {
         best = j
-        best_magnitude = magnitude
+        best_score = score
       }
     }
   }
@@ -1218,6 +1287,94 @@ fn State::choose_by_gain(
 }
 
 ///|
+/// Re-derives the Devex weights from the pivot row of this iteration (Harris 1973).
+///
+/// The pivot row is `e_rᵀB⁻¹` — one transposed solve, the same product-form solve
+/// `duals` already does with `e_r` in place of `c_B`. Its entry in a non-basic column
+/// is `(B⁻¹aⱼ)_r`, the ratio test's own quantity, and Devex re-derives every weight
+/// from it:
+///
+///     G = max over non-basic j of u_j² / w_j      (the square of Harris's γ)
+///     w_j ← u_j² / G                              for every non-basic column
+///     w_entering ← 1                              (the pivot row is the new reference row)
+///
+/// It is an assignment and not a `max`, and that is not a detail: since `G` is the
+/// largest scaled entry, `u_j²/G ≤ w_j` holds for every column, so a `max` form could
+/// never change a single weight — it would be Dantzig with a transposed solve per
+/// iteration. What the assignment does is re-point the weights at the pivot row of this
+/// iteration, which is the reference row the estimate is about; the column with the
+/// largest scaled entry ends at `1` and the others come out below it.
+///
+/// Written with squares so no square root is needed, clamped so an entry near the
+/// floating point ceiling cannot turn `G` into infinity, and floored so a column whose
+/// direction is (numerically) orthogonal to the reference row cannot make the ranking
+/// unbounded. These numbers are used for the **ranking** and nothing else: a wrong
+/// weight costs pivots, never an answer — which is why the tests assert that Devex and
+/// Dantzig land on the same optimum rather than that they take the same path.
+fn State::update_devex_weights(
+  self : State,
+  leave : Int,
+  entering : Int,
+) -> Unit {
+  let y = self.devex_row
+  for i = 0; i < self.m; i = i + 1 {
+    y[i] = 0.0
+  }
+  y[leave] = 1.0
+  let mut e = self.etas.length() - 1
+  while e >= 0 {
+    self.etas[e].apply_transpose(y)
+    e = e - 1
+  }
+  match self.lu {
+    Some(lu) => lu.solve_transpose_into(y, self.devex_scratch)
+    // Without factors the run is about to stop; there is nothing to weight.
+    None => return
+  }
+  let pointers = self.problem.matrix.col_pointers()
+  let rows = self.problem.matrix.row_indices()
+  let values = self.problem.matrix.values_view()
+  let mut largest = 0.0
+  for j = 0; j < self.n; j = j + 1 {
+    if self.is_basic[j] || self.forbid[j] {
+      continue
+    }
+    let mut acc = 0.0
+    let mut k = pointers[j]
+    let end = pointers[j + 1]
+    while k < end {
+      acc = acc + y[rows[k]] * values[k]
+      k = k + 1
+    }
+    let mut squared = acc * acc
+    if !(squared < 1.0e300) {
+      squared = 1.0e300
+    }
+    self.devex_entry[j] = squared
+    let weight = devex_weight_floor(self.devex_weight[j])
+    let scaled = squared / weight
+    if scaled > largest {
+      largest = scaled
+    }
+  }
+  if largest <= 0.0 {
+    // The pivot row is empty over the non-basic columns: it carries no information
+    // about any direction, so the weights stay where they are.
+    return
+  }
+  for j = 0; j < self.n; j = j + 1 {
+    if self.is_basic[j] || self.forbid[j] {
+      continue
+    }
+    self.devex_weight[j] = devex_weight_floor(self.devex_entry[j] / largest)
+  }
+  // The column that just left the basis carries no information either, and the one
+  // that just entered defines the new reference row.
+  self.devex_weight[self.basis[leave]] = 1.0
+  self.devex_weight[entering] = 1.0
+}
+
+///|
 /// Runs the current phase to optimality.
 ///
 /// Codes: `0` optimal, `1` unbounded, `2` iteration limit, `3` numerical
@@ -1236,6 +1393,12 @@ fn State::iterate(self : State) -> Int {
         return 3
       }
     }
+    if self.options.pricing == Pricing::Devex &&
+      DEVEX_RESET_PIVOTS > 0 &&
+      self.iterations > 0 &&
+      self.iterations % DEVEX_RESET_PIVOTS == 0 {
+      self.reset_devex_weights()
+    }
     let duals = self.duals()
     let entering = self.choose_entering(duals)
     if entering < 0 {
@@ -1245,7 +1408,7 @@ fn State::iterate(self : State) -> Int {
     // whose step is worth the most. The direction and the ratio test are redone for
     // the winner below, so the choice is authoritative rather than inherited.
     let mut entering = entering
-    if self.options.gain_candidates > 0 {
+    if self.options.pricing == Pricing::Gain && self.options.gain_candidates > 0 {
       entering = self.choose_by_gain(duals, entering)
       self.enter_sigma = if self.at_upper[entering] { -1.0 } else { 1.0 }
     }
@@ -1301,6 +1464,11 @@ fn State::iterate(self : State) -> Int {
     if flip {
       self.apply_flip(entering, d, step)
     } else {
+      // The weights are re-derived from the basis the ratio test just used, so this
+      // has to run before the pivot changes it.
+      if self.options.pricing == Pricing::Devex {
+        self.update_devex_weights(leave, entering)
+      }
       self.pivot(leave, entering, d, step)
     }
     // Stall detection: switch to Bland's rule when the objective stops moving.
@@ -1440,6 +1608,7 @@ fn solve_problem(
     start_with_bland: true,
     stall_window: options.stall_window,
     gain_candidates: options.gain_candidates,
+    pricing: options.pricing,
     degeneracy_perturbation: options.degeneracy_perturbation,
     max_factor_entries: options.max_factor_entries,
     reduced_cost_tolerance: options.reduced_cost_tolerance,
@@ -1482,6 +1651,7 @@ fn solve_problem(
     start_with_bland: options.start_with_bland,
     stall_window: options.stall_window,
     gain_candidates: options.gain_candidates,
+    pricing: options.pricing,
     degeneracy_perturbation: 0.0,
     max_factor_entries: options.max_factor_entries,
     reduced_cost_tolerance: options.reduced_cost_tolerance,
@@ -1525,6 +1695,7 @@ fn solve_problem(
     start_with_bland: options.start_with_bland,
     stall_window: options.stall_window,
     gain_candidates: 0,
+    pricing: Pricing::Dantzig,
     degeneracy_perturbation: options.degeneracy_perturbation,
     max_factor_entries: options.max_factor_entries,
     reduced_cost_tolerance: options.reduced_cost_tolerance,

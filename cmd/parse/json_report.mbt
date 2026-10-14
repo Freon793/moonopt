@@ -154,7 +154,9 @@ fn kernel_options(flags : SolveFlags) -> @simplex.SimplexOptions {
   } else {
     @simplex.SimplexOptions::default()
   }
-  base.limit_iterations(
+  base
+  .with_pricing(flags.pricing)
+  .limit_iterations(
     if flags.max_iterations > 0 {
       flags.max_iterations
     } else {

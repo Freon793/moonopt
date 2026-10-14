@@ -54,6 +54,13 @@ pub(all) struct PresolveStats {
   rows_removed_singleton : Int
   bounds_tightened : Int
   variables_fixed : Int
+  /// How many of `variables_fixed` were fixed by dual fixing — a variable whose
+  /// improving direction cannot violate a row, rather than one an equality pinned.
+  variables_fixed_dual : Int
+  /// Rows whose coefficients were tightened by integrality. Always zero here: the
+  /// strengthening (`strengthen_integer_rows`) is a reduction of the *integer* path,
+  /// which this reduction never sees, and it reports its own count.
+  rows_strengthened : Int
   columns_removed_empty : Int
   rounds : Int
 } derive(Debug)
@@ -180,6 +187,7 @@ priv struct Reduction {
   mut rows_removed_singleton : Int
   mut bounds_tightened : Int
   mut variables_fixed : Int
+  mut variables_fixed_dual : Int
   mut columns_removed_empty : Int
   mut rounds : Int
 }
@@ -230,6 +238,7 @@ fn Reduction::new(model : @model.Model) -> Reduction {
     rows_removed_singleton: 0,
     bounds_tightened: 0,
     variables_fixed: 0,
+    variables_fixed_dual: 0,
     columns_removed_empty: 0,
     rounds: 0,
   }
@@ -760,6 +769,107 @@ fn Reduction::eliminate_empty_columns(self : Reduction) -> Int {
 }
 
 ///|
+/// Fixes every variable whose improving direction cannot violate a row ("dual fixing").
+///
+/// A variable can be pinned at one of its bounds when moving it the way the objective
+/// wants can only relax the constraints. Decreasing `x` relaxes a row written `a·x ≤ b`
+/// where its coefficient is positive, and a `≥` row where the coefficient is negative;
+/// increasing it is the mirror image. When *every* row the variable appears in is of
+/// that kind, any feasible point can be moved to the bound without becoming infeasible
+/// and without making the objective worse — so an optimal solution with the variable at
+/// that bound exists, and the model can be solved without it.
+///
+/// The check is per row and one-sided on purpose: a single row where the move tightens
+/// the constraint disqualifies the direction, and an equality row disqualifies both.
+/// An integer variable is only pinned at an integer bound, because the claim is that an
+/// optimal solution *at that value* exists, not that a value may be rounded.
+fn Reduction::fix_monotone_columns(self : Reduction) -> Int {
+  let n = self.vars.length()
+  // Per variable: which single-bound moves are safe in every row it appears in.
+  let down_safe = Array::make(n, true)
+  let up_safe = Array::make(n, true)
+  for i = 0; i < self.rows.length(); i = i + 1 {
+    if !self.rows[i].alive {
+      continue
+    }
+    let rel = self.rows[i].rel
+    for term in self.rows[i].terms {
+      let (k, coefficient) = term
+      if coefficient > 0.0 {
+        if rel != @model.Rel::LessEqual {
+          down_safe[k] = false
+        }
+        if rel != @model.Rel::GreaterEqual {
+          up_safe[k] = false
+        }
+      } else if coefficient < 0.0 {
+        if rel != @model.Rel::GreaterEqual {
+          down_safe[k] = false
+        }
+        if rel != @model.Rel::LessEqual {
+          up_safe[k] = false
+        }
+      }
+    }
+  }
+  let mut changed = 0
+  for k = 0; k < n; k = k + 1 {
+    if !self.vars[k].alive {
+      continue
+    }
+    // Conflicting bounds are a verdict, not a variable to pin: pinning `x` at a bound
+    // that its own range no longer contains is how an infeasibility gets papered over.
+    // `eliminate_fixed` owns that case and reports it, and it runs before this.
+    if self.vars[k].lb > self.vars[k].ub + scale_tolerance(self.vars[k].ub) {
+      continue
+    }
+    let cost = self.vars[k].cost
+    let indifferent = @core.approx_zero(cost, abs=1.0e-12)
+    let towards_lower = if self.sense == @model.Sense::Minimize {
+      cost > 0.0
+    } else {
+      cost < 0.0
+    }
+    // A variable the objective is indifferent about may move either way; the lower
+    // bound is preferred so the choice does not depend on the order rows were visited.
+    let mut use_lower = if indifferent {
+      !is_sentinel(self.vars[k].lb)
+    } else {
+      towards_lower
+    }
+    if !indifferent &&
+      !use_lower &&
+      is_sentinel(self.vars[k].ub) &&
+      !is_sentinel(self.vars[k].lb) {
+      // The improving side has no bound at all, so there is nothing to pin the
+      // variable to; reporting unboundedness is the caller's business (an empty column
+      // says it outright), and for a constrained one it is simply not provable here.
+      use_lower = false
+    }
+    let safe = if use_lower { down_safe[k] } else { up_safe[k] }
+    if !safe {
+      continue
+    }
+    let bound = if use_lower { self.vars[k].lb } else { self.vars[k].ub }
+    if is_sentinel(bound) {
+      continue
+    }
+    if self.vars[k].is_int &&
+      !@core.approx_eq(
+        bound,
+        Double::from_int(bound.to_int()),
+        rel=0.0,
+        abs=1.0e-9,
+      ) {
+      continue
+    }
+    changed = changed + self.fix_variable(k, bound)
+    self.variables_fixed_dual = self.variables_fixed_dual + 1
+  }
+  changed
+}
+
+///|
 /// Runs the reductions to a fixpoint. Each round sees the bounds and rows the
 /// previous one produced, which is what lets an implied bound from one row make
 /// another row redundant.
@@ -780,6 +890,11 @@ fn Reduction::run(self : Reduction) -> Unit {
     changed = changed + self.consume_singleton_rows()
     changed = changed + self.eliminate_fixed()
     changed = changed + self.eliminate_empty_columns()
+    // Dual fixing runs last on purpose: an empty column and a variable whose bounds have
+    // already met are more specific explanations for the same fix, and a variable those
+    // reductions own should be attributed to them (and, when its bounds conflict, should
+    // reach `eliminate_fixed`'s verdict rather than being pinned here).
+    changed = changed + self.fix_monotone_columns()
     self.rounds = self.rounds + 1
     round = round + 1
     if changed == 0 {
@@ -871,10 +986,164 @@ pub fn presolve(model : @model.Model) -> ReducedModel {
       rows_removed_singleton: reduction.rows_removed_singleton,
       bounds_tightened: reduction.bounds_tightened,
       variables_fixed: reduction.variables_fixed,
+      variables_fixed_dual: reduction.variables_fixed_dual,
+      rows_strengthened: 0,
       columns_removed_empty: reduction.columns_removed_empty,
       rounds: reduction.rounds,
     },
     verdict,
     reason,
   }
+}
+
+///|
+/// Tightens the coefficients of an integer model's rows, where integrality licenses it
+/// ("coefficient strengthening"). Returns the strengthened model and how many rows
+/// changed; a model with no row it applies to is returned untouched.
+///
+/// A row `Σ aₖxₖ ≤ b` bounds an **integer** variable `xⱼ ≥ lⱼ` by what the right hand
+/// side leaves after the other terms: they can contribute no less than some `rest_min`,
+/// so `aⱼ(xⱼ − lⱼ) ≤ cap := b − aⱼlⱼ − rest_min`, and the largest value the variable can
+/// take is `k := ⌊cap / aⱼ⌋`. The coefficient itself can be raised — but only as far as
+/// the other terms allow them to *rise*: they can also contribute as much as `rest_max`,
+/// and a bigger coefficient must not cut a value that used to be feasible with them at
+/// their largest, so `aⱼ' = ⌊(b − aⱼlⱼ − rest_max) / k⌋`. When `aⱼ' > aⱼ` the row is
+/// stronger and the integers it accepts are the same ones. Using `rest_min` on both sides
+/// would be wrong, and the difference is not academic: `3x + y ≤ 5` with `x, y ∈ [0, 10]`
+/// integer would become `5x + y ≤ 5` and lose `(x, y) = (1, 2)`. The same arithmetic gives
+/// the integer upper bound the row implies (`xⱼ ≤ lⱼ + k`), which is applied too.
+///
+/// Three guards keep the claim honest:
+///
+/// - **the variable whose coefficient moves has to be integer** — raising a coefficient
+///   removes real points, and integrality is what makes the removed ones unreachable;
+///   everything else in the row may be continuous;
+/// - the least the other terms can contribute has to be **finite**, or there is no `cap`;
+/// - equality rows are left alone: the rule is about a one-sided inequality.
+///
+/// This is a presolve for the *integer* path, which is why it does not live in
+/// `Reduction` with the others: the linear presolve never sees an integer model (the
+/// answer to an integer model must not depend on what a reduction fixed), so a rule that
+/// needs integrality has no row to fire on there.
+pub fn strengthen_integer_rows(model : @model.Model) -> (@model.Model, Int) {
+  let n = model.num_vars()
+  let lower : Array[Double] = []
+  let upper : Array[Double] = []
+  let is_int : Array[Bool] = []
+  for j = 0; j < n; j = j + 1 {
+    let variable = model.get_var(j)
+    lower.push(variable.lb)
+    upper.push(variable.ub)
+    is_int.push(variable.is_int)
+  }
+  let tighter_upper = upper.copy()
+  let rewritten : Array[(String, @model.Rel, Double, Array[(Int, Double)])] = []
+  let mut changed = 0
+  for i = 0; i < model.num_constraints(); i = i + 1 {
+    let constraint = model.constraint(i)
+    let terms = @model.normalize_terms(constraint.terms)
+    let out = terms.copy()
+    let mut row_changed = false
+    // Work in `≤` form: a `≥` row is the same row multiplied by −1.
+    let sign = if constraint.rel == @model.Rel::GreaterEqual {
+      -1.0
+    } else {
+      1.0
+    }
+    if constraint.rel != @model.Rel::Equal {
+      let bound = constraint.rhs * sign
+      for t = 0; t < terms.length(); t = t + 1 {
+        let (j, _) = terms[t]
+        let coefficient = out[t].1 * sign
+        if coefficient <= 0.0 || !is_int[j] {
+          continue
+        }
+        if is_sentinel(lower[j]) || is_sentinel(upper[j]) {
+          continue
+        }
+        // The largest and the smallest the other terms can contribute. Both are needed
+        // and they answer different questions: the *smallest* says how far this variable
+        // can reach (the row is easiest for it when the others sit at their minimum), the
+        // *largest* says how much room is left when it is at a value the row has to keep
+        // feasible. A coefficient raised on the minimum alone cuts points the original
+        // row allows — `3x + y ≤ 5` with `x, y ∈ [0, 10]` integer would become
+        // `5x + y ≤ 5`, which throws away `(x, y) = (1, 2)`.
+        let mut rest_min = 0.0
+        let mut rest_max = 0.0
+        let mut finite = true
+        for u = 0; u < out.length(); u = u + 1 {
+          if u == t {
+            continue
+          }
+          let (k, value) = out[u]
+          let flipped = value * sign
+          let low_end = if flipped > 0.0 { lower[k] } else { upper[k] }
+          let high_end = if flipped > 0.0 { upper[k] } else { lower[k] }
+          if is_sentinel(low_end) || is_sentinel(high_end) {
+            finite = false
+            break
+          }
+          rest_min = rest_min + flipped * low_end
+          rest_max = rest_max + flipped * high_end
+        }
+        if !finite {
+          continue
+        }
+        // `cap` is what this variable's own term may spend, after shifting it to zero.
+        let room = bound - coefficient * lower[j]
+        let cap = room - rest_min
+        if cap <= 0.0 {
+          continue
+        }
+        let reachable = (cap / coefficient).to_int()
+        let span = upper[j] - lower[j]
+        if reachable < 1 || Double::from_int(reachable) >= span - 1.0e-9 {
+          // Either only the lower bound is reachable (bound tightening's business) or
+          // the variable's own range already fits, so there is nothing to raise.
+          continue
+        }
+        // The raise must keep every reachable value feasible whatever the other terms
+        // do, so it is bounded by the room left when they contribute their maximum.
+        let left = room - rest_max
+        if left <= 0.0 {
+          continue
+        }
+        let raised = Double::from_int(
+          (left / Double::from_int(reachable)).to_int(),
+        )
+        if raised > coefficient + 1.0e-12 {
+          out[t] = (j, raised * sign)
+          row_changed = true
+          let implied = lower[j] + Double::from_int(reachable)
+          if implied < tighter_upper[j] {
+            tighter_upper[j] = implied
+          }
+        }
+      }
+    }
+    if row_changed {
+      changed = changed + 1
+    }
+    rewritten.push((constraint.name, constraint.rel, constraint.rhs, out))
+  }
+  if changed == 0 {
+    return (model, 0)
+  }
+  let out = @model.Model::new(model.sense())
+  for j = 0; j < n; j = j + 1 {
+    let variable = model.get_var(j)
+    out.add_var(
+      variable.name,
+      lb=variable.lb,
+      ub=tighter_upper[j],
+      is_int=variable.is_int,
+    )
+    |> ignore
+  }
+  out.set_objective(@model.normalize_terms(model.objective()))
+  for row in rewritten {
+    let (name, rel, rhs, terms) = row
+    out.add_named_constraint(terms, rel, rhs, name)
+  }
+  (out, changed)
 }

@@ -55,6 +55,12 @@ pub fn KernelProblem::from_standard(Int, Array[Double], Array[(Array[Double], @m
 pub fn KernelProblem::slack_row_map(Self) -> Array[Int]
 pub fn KernelProblem::solution(Self, Array[Double]) -> Array[Double]
 
+pub(all) enum Pricing {
+  Dantzig
+  Gain
+  Devex
+} derive(Eq, @debug.Debug)
+
 pub struct SimplexBasis {
   nrows : Int
   ncols : Int
@@ -71,6 +77,7 @@ pub(all) struct SimplexOptions {
   start_with_bland : Bool
   stall_window : Int
   gain_candidates : Int
+  pricing : Pricing
   degeneracy_perturbation : Double
   max_factor_entries : Int
   reduced_cost_tolerance : Double
@@ -83,6 +90,7 @@ pub fn SimplexOptions::relaxed() -> Self
 pub fn SimplexOptions::with_gain_candidates(Int) -> Self
 pub fn SimplexOptions::with_max_iterations(Int) -> Self
 pub fn SimplexOptions::with_max_kernel_rows(Int) -> Self
+pub fn SimplexOptions::with_pricing(Self, Pricing) -> Self
 pub fn SimplexOptions::with_stall_window(Int) -> Self
 
 pub struct SimplexResult {

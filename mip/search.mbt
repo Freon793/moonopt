@@ -777,12 +777,32 @@ fn kernel_node(
 }
 
 ///|
-/// Solves a model with integer variables by branch and bound.
+/// Solves a model with integer variables by branch and bound, after strengthening its
+/// rows.
+///
+/// **Coefficient strengthening runs first** (`@presolve.strengthen_integer_rows`): where a
+/// row's integrality says that one of its coefficients can be raised without losing an
+/// integer point, the coefficient is raised and the integer bound the row implies is
+/// applied. The relation this preserves is the one that matters here — the *integer*
+/// feasible set of the model is unchanged, exactly — so the search runs on a stronger
+/// relaxation of the same integer problem, and every point it reports is a point of the
+/// model the caller wrote. The rewrite touches neither the variables nor their indices,
+/// so the values in the result are in the caller's own variable space.
+///
+/// A model whose rows give it nothing to strengthen is searched unchanged (the reduction
+/// returns the model it was given).
+pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
+  let (strengthened, _) = @presolve.strengthen_integer_rows(model)
+  solve_mip_unchanged(strengthened, options)
+}
+
+///|
+/// Branch and bound over the model exactly as it was handed in.
 ///
 /// See the package doc for what the statuses mean: in particular, only `Optimal` claims an
 /// answer, and an unbounded relaxation is reported as such rather than as an unbounded
 /// model.
-pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
+fn solve_mip_unchanged(model : @model.Model, options : MipOptions) -> MipResult {
   let issues = model.validate()
   if issues.length() > 0 {
     return {

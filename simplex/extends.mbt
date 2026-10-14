@@ -8,6 +8,18 @@ pub extend KernelProblem with @debug.Debug::{to_repr}
 
 ///|
 #doc(hidden)
+pub extend Pricing with @debug.Debug::{to_repr}
+
+///|
+#doc(hidden)
+pub extend Pricing with Eq::{equal}
+
+///|
+#doc(hidden)
+pub extend Pricing with Eq::{not_equal}
+
+///|
+#doc(hidden)
 pub extend SimplexBasis with @debug.Debug::{to_repr}
 
 ///|

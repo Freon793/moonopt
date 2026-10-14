@@ -64,6 +64,30 @@ pub struct SimplexResult {
 } derive(Debug)
 
 ///|
+/// Which rule picks the entering column.
+///
+/// Pricing decides the *path* a run takes, never its answer: the same model solved
+/// under any of these rules has to reach the same optimum, and the tests assert it.
+/// What changes is the cost per iteration and the number of pivots — which is
+/// exactly why the default is the rule that measured best on the corpus rather than
+/// the one that sounds most modern, and why the others stay reachable.
+pub(all) enum Pricing {
+  /// Largest reduced cost: the classical rule. Cheap per iteration, and easily
+  /// fooled by a column whose improvement *rate* is large while the step it can
+  /// take is tiny (`fast0507` priced a column at `r = −121.1` whose gain was
+  /// `0.76`, while a sampled column with `r = −6` was worth `6.0`).
+  Dantzig
+  /// Largest *measured* gain `|r| · step` over a bounded candidate set. The default;
+  /// the candidate budget is `gain_candidates`, and zero there means Dantzig.
+  Gain
+  /// Devex (Harris 1973): largest reduced cost scaled by a per-column weight that
+  /// approximates the steepest-edge norm `‖B⁻¹aⱼ‖`, taken from the pivot row and
+  /// updated after every pivot. The weights are re-derived periodically so they
+  /// cannot drift; a column's weight is the only thing this rule adds to the state.
+  Devex
+} derive(Eq, Debug)
+
+///|
 /// Tuning knobs for a kernel run.
 ///
 /// The tolerances are the ones the algorithm actually consults, so they can be
@@ -132,6 +156,10 @@ pub(all) struct SimplexOptions {
   /// best gains, and a rotating window over the column space. Set this to the total
   /// number of measurements per iteration (`0` disables the whole thing).
   gain_candidates : Int
+  /// Which rule picks the entering column. `Gain` is the default, and `gain_candidates`
+  /// is its budget; `Devex` and `Dantzig` ignore that budget. The rule changes the
+  /// path a run takes and what it costs, never its answer.
+  pricing : Pricing
   /// Relative size of the perturbation added to the right hand side before the run
   /// starts. This is the classical answer to degeneracy, and degeneracy — not
   /// scaling — is what breaks this kernel on the hard instance: noswot's
@@ -193,6 +221,7 @@ pub fn SimplexOptions::default() -> SimplexOptions {
     start_with_bland: false,
     stall_window: 500,
     gain_candidates: 32,
+    pricing: Pricing::Gain,
     degeneracy_perturbation: 1.0e-12,
     max_factor_entries: 20000000,
     reduced_cost_tolerance: 1.0e-9,
@@ -214,6 +243,7 @@ pub fn SimplexOptions::relaxed() -> SimplexOptions {
     start_with_bland: base.start_with_bland,
     stall_window: base.stall_window,
     gain_candidates: base.gain_candidates,
+    pricing: base.pricing,
     degeneracy_perturbation: base.degeneracy_perturbation,
     max_factor_entries: base.max_factor_entries,
     reduced_cost_tolerance: base.reduced_cost_tolerance,
@@ -237,6 +267,7 @@ pub fn SimplexOptions::with_max_iterations(
     start_with_bland: base.start_with_bland,
     stall_window: base.stall_window,
     gain_candidates: base.gain_candidates,
+    pricing: base.pricing,
     degeneracy_perturbation: base.degeneracy_perturbation,
     max_factor_entries: base.max_factor_entries,
     reduced_cost_tolerance: base.reduced_cost_tolerance,
@@ -264,6 +295,7 @@ pub fn SimplexOptions::limit_iterations(
     start_with_bland: self.start_with_bland,
     stall_window: self.stall_window,
     gain_candidates: self.gain_candidates,
+    pricing: self.pricing,
     degeneracy_perturbation: self.degeneracy_perturbation,
     max_factor_entries: self.max_factor_entries,
     reduced_cost_tolerance: self.reduced_cost_tolerance,
@@ -288,6 +320,7 @@ pub fn SimplexOptions::with_stall_window(stall_window : Int) -> SimplexOptions {
     start_with_bland: base.start_with_bland,
     stall_window,
     gain_candidates: base.gain_candidates,
+    pricing: base.pricing,
     degeneracy_perturbation: base.degeneracy_perturbation,
     max_factor_entries: base.max_factor_entries,
     reduced_cost_tolerance: base.reduced_cost_tolerance,
@@ -313,11 +346,40 @@ pub fn SimplexOptions::with_gain_candidates(
     start_with_bland: base.start_with_bland,
     stall_window: base.stall_window,
     gain_candidates,
+    pricing: base.pricing,
     degeneracy_perturbation: base.degeneracy_perturbation,
     max_factor_entries: base.max_factor_entries,
     reduced_cost_tolerance: base.reduced_cost_tolerance,
     relax_integrality: base.relax_integrality,
     max_kernel_rows: base.max_kernel_rows,
+  }
+}
+
+///|
+/// The same options with a different pricing rule, keeping every other field.
+///
+/// Used by the tests, and by callers who want to trade the per-iteration cost of a rule
+/// against the number of pivots it needs: which column enters changes the path a run
+/// takes, and the answer must not change with it.
+pub fn SimplexOptions::with_pricing(
+  self : SimplexOptions,
+  pricing : Pricing,
+) -> SimplexOptions {
+  {
+    max_iterations: self.max_iterations,
+    refactorize_every: self.refactorize_every,
+    feasibility_tolerance: self.feasibility_tolerance,
+    pivot_tolerance: self.pivot_tolerance,
+    pivot_relative_tolerance: self.pivot_relative_tolerance,
+    start_with_bland: self.start_with_bland,
+    stall_window: self.stall_window,
+    gain_candidates: self.gain_candidates,
+    pricing,
+    degeneracy_perturbation: self.degeneracy_perturbation,
+    max_factor_entries: self.max_factor_entries,
+    reduced_cost_tolerance: self.reduced_cost_tolerance,
+    relax_integrality: self.relax_integrality,
+    max_kernel_rows: self.max_kernel_rows,
   }
 }
 
@@ -337,6 +399,7 @@ pub fn SimplexOptions::with_max_kernel_rows(
     start_with_bland: base.start_with_bland,
     stall_window: base.stall_window,
     gain_candidates: base.gain_candidates,
+    pricing: base.pricing,
     degeneracy_perturbation: base.degeneracy_perturbation,
     max_factor_entries: base.max_factor_entries,
     reduced_cost_tolerance: base.reduced_cost_tolerance,

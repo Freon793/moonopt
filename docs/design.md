@@ -20,7 +20,7 @@ format    MPS/LP 读写。依赖 core、model。
 simplex   稀疏修正单纯形与对偶单纯形，含证书的生产端自检。依赖 core、model。
 presolve  presolve / postsolve。依赖 core、model。
 verify    证书校验与割的再推导。依赖 core、model。
-mip       分支定界与割平面。依赖 simplex、verify。
+mip       分支定界与割平面。依赖 core、model、simplex、verify、presolve（整数行的系数强化）。
 moonopt   根包：对外的 solve / solve_with 与结果类型，只做编排。
 ```
 

@@ -45,13 +45,16 @@ fn print_usage() -> Unit {
     "       moon run cmd/parse -- <file> --mip [--max-nodes <n>] [--cut-rounds <n>]",
   )
   println(
+    "       moon run cmd/parse -- <file> --solve [--presolve] [--pricing dantzig|gain|devex]",
+  )
+  println(
     "       moon run cmd/parse -- <file> --certificate <certificate.json>",
   )
   println("")
   println("subcommands (the flags above all still apply):")
   println("       moon run cmd/parse -- parse <file> ...")
   println(
-    "       moon run cmd/parse -- solve <file> [--presolve] [--mip] [--json]",
+    "       moon run cmd/parse -- solve <file> [--presolve] [--mip] [--pricing <rule>] [--json]",
   )
   println(
     "       moon run cmd/parse -- verify <file> [--certificate <path>] [--json]",
@@ -190,6 +193,23 @@ pub(all) struct SolveFlags {
   /// Rounds of cuts at the root of a branch and bound run; negative means the library
   /// default, zero means search the model as written.
   cut_rounds : Int
+  /// Which rule picks the entering column for a linear run. Pricing changes which
+  /// pivots a run takes and what it costs, never its answer, so this is a knob for
+  /// measuring the kernel rather than for changing what it reports.
+  pricing : @simplex.Pricing
+}
+
+///|
+/// Turns a `--pricing` argument into a rule. Unknown names are refused rather than
+/// defaulted: a run that silently used a different rule than the one asked for is a
+/// measurement about the wrong thing.
+fn pricing_of(name : String) -> @simplex.Pricing? {
+  match name {
+    "dantzig" => Some(@simplex.Pricing::Dantzig)
+    "gain" => Some(@simplex.Pricing::Gain)
+    "devex" => Some(@simplex.Pricing::Devex)
+    _ => None
+  }
 }
 
 ///|
@@ -274,17 +294,8 @@ fn verify_model(model : @model.Model, flags : SolveFlags) -> Bool {
     }
     return verify_and_report(model, certificate)
   }
-  let options = (if flags.relax {
-    @simplex.SimplexOptions::relaxed()
-  } else {
-    @simplex.SimplexOptions::default()
-  }).limit_iterations(
-    if flags.max_iterations > 0 {
-      flags.max_iterations
-    } else {
-      20000
-    },
-  )
+  let options = kernel_options(flags)
+
   let result = match @simplex.solve_model_with(model, options) {
     Err(reason) => {
       println("       solve=refused(" + reason + ")")
@@ -435,17 +446,8 @@ fn status_name(status : @simplex.SimplexStatus) -> String {
 /// the run is also the shape reoptimization takes inside a branch and bound tree: a
 /// bound changes and the same model is solved again.
 fn reoptimize_report(model : @model.Model, flags : SolveFlags) -> Bool {
-  let options = (if flags.relax {
-    @simplex.SimplexOptions::relaxed()
-  } else {
-    @simplex.SimplexOptions::default()
-  }).limit_iterations(
-    if flags.max_iterations > 0 {
-      flags.max_iterations
-    } else {
-      20000
-    },
-  )
+  let options = kernel_options(flags)
+
   let first = match @simplex.solve_model_with(model, options) {
     Err(reason) => {
       println("       solve=refused(" + reason + ")")
@@ -760,17 +762,8 @@ fn report_solution(model : @model.Model, flags : SolveFlags) -> Unit {
     )
     return
   }
-  let options = (if flags.relax {
-    @simplex.SimplexOptions::relaxed()
-  } else {
-    @simplex.SimplexOptions::default()
-  }).limit_iterations(
-    if flags.max_iterations > 0 {
-      flags.max_iterations
-    } else {
-      20000
-    },
-  )
+  let options = kernel_options(flags)
+
   if !flags.presolve {
     match @simplex.solve_model_with(model, options) {
       Err(reason) => println("       solve=refused(" + reason + ")")
@@ -907,6 +900,7 @@ fn main {
   let mut mip_enabled = false
   let mut max_nodes = 0
   let mut cut_rounds = -1
+  let mut pricing = @simplex.Pricing::Gain
   let mut certificate_path = ""
   let mut json_mode = false
   let mut output_path = ""
@@ -1040,6 +1034,26 @@ fn main {
         continue
       }
     }
+    if argument == "--pricing" {
+      if index + 1 < args.length() {
+        match pricing_of(args[index + 1]) {
+          Some(rule) => pricing = rule
+          None => {
+            println(
+              "--pricing expects one of: dantzig, gain, devex (got \"" +
+              args[index + 1] +
+              "\")",
+            )
+            @sys.exit(2)
+          }
+        }
+        solve_enabled = true
+        index = index + 2
+        continue
+      }
+      print_usage()
+      @sys.exit(2)
+    }
     if argument == "--manifest" {
       if index + 1 < args.length() {
         manifest = args[index + 1]
@@ -1092,6 +1106,7 @@ fn main {
     mip: mip_enabled,
     max_nodes,
     cut_rounds,
+    pricing,
   }
   // `fmt` writes models, so it is the one verb that does not go through the inspection
   // path.

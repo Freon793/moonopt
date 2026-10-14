@@ -110,6 +110,85 @@ test "presolve eliminates a fixed variable and keeps its objective contribution"
 }
 
 ///|
+/// Dual fixing pins a variable when the direction the objective wants can only relax the
+/// constraints it appears in, and it must not fire when that direction tightens one.
+/// The pair of models below differs only in the relation of the single row, which is
+/// exactly the distinction the reduction is about.
+test "dual fixing fires only when the improving direction relaxes every row" {
+  // min x + y  s.t.  x + y <= 4,  0 <= x, y <= 10  ->  both can be pinned at 0
+  let slack = @model.Model::new(@model.Sense::Minimize)
+  let x = slack.add_var("x", ub=10.0)
+  let y = slack.add_var("y", ub=10.0)
+  slack.set_objective([(x, 1.0), (y, 1.0)])
+  slack.add_constraint([(x, 1.0), (y, 1.0)], @model.Rel::LessEqual, 4.0)
+  let reduced = presolve(slack)
+  assert_eq(reduced.reduced().num_vars(), 0)
+  assert_true(@core.approx_eq(reduced.objective(0.0), 0.0, rel=0.0, abs=1.0e-9))
+  assert_true(
+    reduced.stats().variables_fixed_dual + reduced.stats().columns_removed_empty ==
+    2,
+  )
+  // The same model with `>=`: decreasing either variable makes the row harder, so the
+  // reduction has to leave both alone — and the optimum is 4, not 0.
+  let tight = @model.Model::new(@model.Sense::Minimize)
+  let p = tight.add_var("p", ub=10.0)
+  let q = tight.add_var("q", ub=10.0)
+  tight.set_objective([(p, 1.0), (q, 1.0)])
+  tight.add_constraint([(p, 1.0), (q, 1.0)], @model.Rel::GreaterEqual, 4.0)
+  let kept = presolve(tight)
+  assert_eq(kept.stats().variables_fixed_dual, 0)
+  assert_eq(kept.reduced().num_vars(), 2)
+}
+
+///|
+/// Coefficient strengthening is a claim about the *integer* points a row accepts, so the
+/// test that settles it enumerates them: over the whole box, the row before and after the
+/// rewrite has to accept exactly the same points. The pair below is the one that matters —
+/// a row where the raise is licensed, and the same row with a variable given a range wide
+/// enough that the raise would cut a point (`3x + y ≤ 5` losing `(1, 2)`).
+test "coefficient strengthening keeps exactly the integer points of a row" {
+  let holds = @model.Model::new(@model.Sense::Minimize)
+  let x = holds.add_var("x", lb=0.0, ub=10.0, is_int=true)
+  let y = holds.add_var("y", lb=0.0, ub=1.0, is_int=true)
+  holds.set_objective([(x, 1.0), (y, 1.0)])
+  holds.add_named_constraint(
+    [(x, 3.0), (y, 1.0)],
+    @model.Rel::LessEqual,
+    5.0,
+    "cap",
+  )
+  let (strong, rows) = strengthen_integer_rows(holds)
+  assert_eq(rows, 1)
+  // `3x + y ≤ 5` with `y ≤ 1` and `x` integer reaches `x = 1`, and the coefficient can rise.
+  assert_true(strong.get_var(0).ub <= 1.0 + 1.0e-9)
+  assert_true(strong.constraint(0).terms[0].1 >= 3.0)
+  for i = 0; i <= 10; i = i + 1 {
+    for j = 0; j <= 1; j = j + 1 {
+      let point : Array[Double] = [Double::from_int(i), Double::from_int(j)]
+      assert_eq(
+        max_row_violation(holds, point) <= 1.0e-9,
+        max_row_violation(strong, point) <= 1.0e-9,
+      )
+    }
+  }
+  // `y` free up to 10 instead: with `x = 1` the row still allows `y = 2`, so raising the
+  // coefficient would lose that point and the reduction has to decline.
+  let wide = @model.Model::new(@model.Sense::Minimize)
+  let a = wide.add_var("a", lb=0.0, ub=10.0, is_int=true)
+  let b = wide.add_var("b", lb=0.0, ub=10.0, is_int=true)
+  wide.set_objective([(a, 1.0), (b, 1.0)])
+  wide.add_named_constraint(
+    [(a, 3.0), (b, 1.0)],
+    @model.Rel::LessEqual,
+    5.0,
+    "cap",
+  )
+  let (untouched, wide_rows) = strengthen_integer_rows(wide)
+  assert_eq(wide_rows, 0)
+  assert_true(untouched.constraint(0).terms[0].1 == 3.0)
+}
+
+///|
 /// A variable no row mentions is decided by its own cost alone. Here that happens
 /// twice: `x` never appears in a row, and `y` stops appearing in one as soon as
 /// its singleton row is consumed.

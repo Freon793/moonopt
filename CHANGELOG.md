@@ -7,7 +7,22 @@
 
 ## [Unreleased]
 
-（下一轮的改动在此累积。）
+### Added
+
+- **Devex 定价**（`simplex::Pricing::Devex`，Harris 1973）：按枢轴行给出每个非基列的权重，用
+  `检验数²/权重` 排序近似最陡边。权重只影响**走哪条路**，不影响答案；`SimplexOptions::with_pricing`
+  选规则，CLI 用 `--pricing dantzig|gain|devex`。表见 `docs/algorithms.md`。
+- **对偶固定**（线性 presolve）：目标想走的方向不会让任何一行更难时，把变量钉在那个界上。
+  计数见 `PresolveStats::variables_fixed_dual`。
+- **系数强化**（`presolve::strengthen_integer_rows`，分支定界的入口调用）：把整数行的系数抬到
+  "不丢掉任何一个整数点"的最高值，并应用该行隐含的整数界；线性 presolve 见不到整数模型，所以它跑在
+  整数路径上。
+
+### Fixed
+
+- CLI 的文本路径自己拼了一套内核选项，于是 `--pricing`（以及任何只加在共用的选项构造处的选项）在
+  `solve` / `verify` / `--reoptimize` 三条文本路径上**静默无效**：同一条命令在 `--json` 下走的是共用
+  构造，在文本下走的是另一套。现在三条路径都走同一个 `kernel_options`。
 
 ## [0.2.0] — 2026-09-30
 

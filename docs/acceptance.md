@@ -92,7 +92,8 @@ moon add Freon793/moonopt
   报 `NumericalFailure`，搜索按"没有结论的松弛"继续。限度：射线的**构造**仍是 Phase I 的最优对偶解，
   不是显式导出的射线；**无界主张的射线**只自检了"点可行"；
 - 整数无界性（整数射线）未证明；`fast0507` 在报告的枢轴上限（20 000）内跑不完；
-  DeVex / steepest-edge 定价与部分 presolve 归约未做；
+  精确 steepest-edge 与行 / 列的支配检测等 presolve 归约未做（Dantzig / 实测增益 / Devex 三条定价规则、
+  对偶固定、整数路径的系数强化都已落地并附实测）；
 - `bench/mip-report-small.md` 口径下 10 个实例中 **5 个证到公开已知最优值、5 个到节点预算**
   （`check-mip-objectives.ps1` 对 5 项取等）；该口径的**节点预算 30 000 与求解报告的枢轴上限 20 000
   都是实测定的**（见 [`history.md`](history.md)），换一个上限就是另一场实验，不能互相比较。

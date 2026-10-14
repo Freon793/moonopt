@@ -1,6 +1,10 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "Freon793/moonopt/cmd/parse"
 
+import {
+  "Freon793/moonopt/simplex",
+}
+
 // Values
 
 // Errors
@@ -18,6 +22,7 @@ pub(all) struct SolveFlags {
   mip : Bool
   max_nodes : Int
   cut_rounds : Int
+  pricing : @simplex.Pricing
 }
 
 // Type aliases

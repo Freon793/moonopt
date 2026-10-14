@@ -796,3 +796,119 @@ test "a refusal from the warm path goes to the cold path" {
   assert_true(warm_result_is_usable(SimplexStatus::Unbounded))
   assert_true(warm_result_is_usable(SimplexStatus::IterationLimit))
 }
+
+///|
+/// Devex pricing is the third rule over the same decision — which column enters — and
+/// like the other two it may only change the *run*. This pins that on the model the
+/// gain-pricing test uses, so the three rules can be read off the same numbers.
+test "devex pricing changes the run, not the answer" {
+  // min -x - 2y  s.t.  x + y <= 4,  x + 3y <= 6  ->  -5 at (3, 1)
+  let cost : Array[Double] = [-1.0, -2.0]
+  let rows : Array[(Array[Double], @model.Rel, Double)] = [
+    ([1.0, 1.0], @model.Rel::LessEqual, 4.0),
+    ([1.0, 3.0], @model.Rel::LessEqual, 6.0),
+  ]
+  let dantzig = solve_standard_with(
+    2,
+    cost,
+    rows,
+    SimplexOptions::default().with_pricing(Pricing::Dantzig),
+  )
+  let devex = solve_standard_with(
+    2,
+    cost,
+    rows,
+    SimplexOptions::default().with_pricing(Pricing::Devex),
+  )
+  assert_eq(dantzig.status, Optimal)
+  assert_eq(devex.status, Optimal)
+  assert_true(
+    @core.approx_eq(devex.objective, dantzig.objective, rel=1.0e-9, abs=1.0e-9),
+  )
+}
+
+///|
+/// Dantzig pricing is reachable two ways — the rule by name, and a gain budget of zero —
+/// and the two spellings have to be the *same run*, not merely two runs that agree on
+/// the optimum: the gain pass is skipped either way, so the pivots are the same ones.
+test "dantzig stated two ways is one run" {
+  let cost : Array[Double] = [-1.0, -2.0, -1.0]
+  let rows : Array[(Array[Double], @model.Rel, Double)] = [
+    ([1.0, 1.0, 0.0], @model.Rel::LessEqual, 4.0),
+    ([1.0, 3.0, 1.0], @model.Rel::LessEqual, 6.0),
+  ]
+  let by_name = solve_standard_with(
+    3,
+    cost,
+    rows,
+    SimplexOptions::default().with_pricing(Pricing::Dantzig),
+  )
+  let by_budget = solve_standard_with(
+    3,
+    cost,
+    rows,
+    SimplexOptions::with_gain_candidates(0),
+  )
+  assert_eq(by_name.status, by_budget.status)
+  assert_eq(by_name.iterations, by_budget.iterations)
+  assert_eq(by_name.objective, by_budget.objective)
+}
+
+///|
+/// The Devex weights are state of the run, so they have to behave like it: positive,
+/// finite, actually moved by the pivots, re-derived by the reset, and reproducible.
+///
+/// Only the ranking reads them, so a weight of zero or infinity shows up as a slow run
+/// rather than as a wrong answer — which is exactly the kind of defect that would
+/// otherwise sit in the kernel unnoticed until someone measured pivots.
+test "devex weights stay finite, are moved by pivots and are re-derived" {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let x = model.add_var("x", ub=10.0)
+  let y = model.add_var("y", ub=10.0)
+  let z = model.add_var("z", ub=10.0)
+  model.set_objective([(x, -1.0), (y, -2.0), (z, -1.0)])
+  model.add_constraint([(x, 1.0), (y, 1.0)], @model.Rel::LessEqual, 4.0)
+  model.add_constraint(
+    [(x, 1.0), (y, 3.0), (z, 1.0)],
+    @model.Rel::LessEqual,
+    6.0,
+  )
+  let problem = match from_model_with(model, false) {
+    Ok(problem) => problem
+    Err(reason) => fail("kernel refused the model: " + reason)
+  }
+  let options = SimplexOptions::default().with_pricing(Pricing::Devex)
+  let state = State::new(problem, options)
+  state.set_phase2()
+  assert_eq(state.iterate(), 0)
+  let mut moved = 0
+  for j = 0; j < state.n; j = j + 1 {
+    let weight = state.devex_weight[j]
+    // The update assigns squared, normalized pivot-row entries, so a weight lives in
+    // `(0, 1]`: one is "no better estimate than the column itself", anything below one
+    // is an estimate that this column's direction is shorter than the reference row's.
+    // Zero would make the ranking unbounded, which is what the floor prevents.
+    assert_true(weight > 0.0)
+    assert_true(weight <= 1.0)
+    if weight < 1.0 - 1.0e-12 {
+      moved = moved + 1
+    }
+  }
+  // A bounds-only test would pass on an update that never ran; the pivot row of a real
+  // pivot reaches non-basic columns, so at least one weight has to have moved.
+  assert_true(moved > 0)
+  // Same inputs, same weights: the rule is a deterministic function of the model and
+  // the options, like every other control in this kernel.
+  let twin = State::new(problem, options)
+  twin.set_phase2()
+  assert_eq(twin.iterate(), 0)
+  for j = 0; j < state.n; j = j + 1 {
+    assert_eq(twin.devex_weight[j], state.devex_weight[j])
+  }
+  // The reset is what keeps a long run from living on one stale reference row, so it is
+  // a behaviour, not an implementation detail.
+  state.reset_devex_weights()
+  for j = 0; j < state.n; j = j + 1 {
+    assert_eq(state.devex_weight[j], 1.0)
+  }
+}
