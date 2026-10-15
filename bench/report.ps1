@@ -136,11 +136,28 @@ try {
       }
       $result += ("{0}: {1}" -f ($name -replace ' \(.*\)$', ''), $value)
     }
+    # Two questions, and the index has to ask both. "Did a commit after the report's own change
+    # the code behind it" is `git diff <commit>..HEAD`; "is the tree the report describes still
+    # the tree on disk" is `git status`, because a report generated from a commit says nothing
+    # about uncommitted work - and a report whose numbers were produced by a *modified* file is
+    # exactly the case this index exists to name. Untracked files count too: a new `.mbt` in one
+    # of these directories is part of the package the report measured, whether git knows it or
+    # not. Both lists are reported together, so a reader sees which files, not just how many.
     $changed = @(& git diff --name-only ("{0}..HEAD" -f $commit) -- $report.Paths 2>&1 | Where-Object { $_ -ne "" })
     if ($LASTEXITCODE -ne 0) {
       Write-Error ("git cannot compare {0} with HEAD; no report written" -f $commit)
       exit 4
     }
+    $dirty = @(
+      & git status --porcelain -- $report.Paths 2>&1 |
+        Where-Object { $_ -ne "" } |
+        ForEach-Object { $_.ToString().Substring(3).Trim() }
+    )
+    if ($LASTEXITCODE -ne 0) {
+      Write-Error "git cannot read the working tree; no report written"
+      exit 4
+    }
+    $changed = @($changed + $dirty | Sort-Object -Unique)
     $status = "current"
     if ($changed.Count -gt 0) {
       $status = ("STALE ({0} changed since)" -f $changed.Count)
@@ -182,13 +199,16 @@ foreach ($row in $rows) {
 }
 $build += ""
 $build += "``current`` means no file under the report's own source paths changed between the commit it"
-$build += "was generated from and HEAD, so the numbers still describe the code in the tree. ``STALE``"
-$build += "means they describe an older one: the run happened and the report is its record, but"
-$build += "re-running the command would not have to reproduce it. Regenerating a stale report is part"
-$build += "of the round that made it stale, and this table is how that is noticed."
+$build += "was generated from and HEAD *and* none of them is modified in the working tree - so the"
+$build += "numbers still describe the code on disk. ``STALE`` means they describe an older one: the run"
+$build += "happened and the report is its record, but re-running the command would not have to"
+$build += "reproduce it. Regenerating a stale report is part of the round that made it stale, and this"
+$build += "table is how that is noticed."
 $build += ""
 $build += "The staleness test is deliberately conservative: it compares the *files* a report's numbers"
-$build += "depend on, so a changed comment counts as a change even though it cannot move a number."
+$build += "depend on, so a changed comment counts as a change even though it cannot move a number, and an"
+$build += "uncommitted edit counts even though the report's own commit is untouched. Untracked files count"
+$build += "as well - a new ``.mbt`` in one of those directories is part of the package the report measured."
 $build += "That direction is the safe one - a report is flagged when it might no longer describe the"
 $build += "current code, never cleared when it might not - and the only thing that settles a flagged"
 $build += "report is re-running its command (or measuring that the numbers it would print are"
