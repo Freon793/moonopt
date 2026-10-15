@@ -15,7 +15,7 @@ pub fn objective_value(@model.Model, Array[Double]) -> Double
 
 pub fn presolve(@model.Model) -> ReducedModel
 
-pub fn strengthen_integer_rows(@model.Model) -> (@model.Model, Int)
+pub fn strengthen_integer_rows(@model.Model) -> (@model.Model, StrengthenStats)
 
 // Errors
 
@@ -54,6 +54,11 @@ pub fn ReducedModel::reconstruct(Self, Array[Double]) -> Array[Double]
 pub fn ReducedModel::reduced(Self) -> @model.Model
 pub fn ReducedModel::stats(Self) -> PresolveStats
 pub fn ReducedModel::verdict(Self) -> PresolveVerdict
+
+pub(all) struct StrengthenStats {
+  rows_rewritten : Int
+  bounds_tightened : Int
+} derive(Eq, @debug.Debug)
 
 pub(all) enum VarForm {
   Fixed(Double)

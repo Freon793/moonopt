@@ -59,7 +59,8 @@ pub(all) struct PresolveStats {
   variables_fixed_dual : Int32
   /// Rows whose coefficients were tightened by integrality. Always zero here: the
   /// strengthening (`strengthen_integer_rows`) is a reduction of the *integer* path,
-  /// which this reduction never sees, and it reports its own count.
+  /// which this reduction never sees, and it reports its own counters
+  /// (`StrengthenStats`).
   rows_strengthened : Int32
   columns_removed_empty : Int32
   rounds : Int32
@@ -1001,35 +1002,174 @@ pub fn presolve(model : @model.Model) -> ReducedModel {
 }
 
 ///|
-/// Tightens the coefficients of an integer model's rows, where integrality licenses it
-/// ("coefficient strengthening"). Returns the strengthened model and how many rows
-/// changed; a model with no row it applies to is returned untouched.
+/// What one call to `strengthen_integer_rows` rewrote.
 ///
-/// A row `Σ aₖxₖ ≤ b` bounds an **integer** variable `xⱼ ≥ lⱼ` by what the right hand
-/// side leaves after the other terms: they can contribute no less than some `rest_min`,
-/// so `aⱼ(xⱼ − lⱼ) ≤ cap := b − aⱼlⱼ − rest_min`, and the largest value the variable can
-/// take is `k := ⌊cap / aⱼ⌋`. The coefficient itself can be raised — but only as far as
-/// the other terms allow them to *rise*: they can also contribute as much as `rest_max`,
-/// and a bigger coefficient must not cut a value that used to be feasible with them at
-/// their largest, so `aⱼ' = ⌊(b − aⱼlⱼ − rest_max) / k⌋`. When `aⱼ' > aⱼ` the row is
-/// stronger and the integers it accepts are the same ones. Using `rest_min` on both sides
-/// would be wrong, and the difference is not academic: `3x + y ≤ 5` with `x, y ∈ [0, 10]`
-/// integer would become `5x + y ≤ 5` and lose `(x, y) = (1, 2)`. The same arithmetic gives
-/// the integer upper bound the row implies (`xⱼ ≤ lⱼ + k`), which is applied too.
+/// The two halves are counted apart because different arithmetic licenses them and they fire
+/// on different rows: raising a coefficient needs *both* extremes of a row's other terms to be
+/// finite, while the integer bound a row implies needs only their minimum.
+pub(all) struct StrengthenStats {
+  /// Rows whose coefficients were raised.
+  rows_rewritten : Int32
+  /// Variable bounds an integer row implied that were tighter than the model's own.
+  bounds_tightened : Int32
+} derive(Debug, Eq)
+
+///|
+/// How much of a row's magnitude a computed capacity may be wrong by, per term of the row.
+///
+/// A capacity here is a right hand side minus a sum of that row's terms, divided by one
+/// coefficient: its error grows with the row's magnitude and with how many terms went into the
+/// sum, and not with the capacity itself, which is routinely a small difference of large
+/// numbers. That matters in exactly one direction — a whole number read off a value a hair too
+/// small is a bound a whole unit too tight, and a bound one unit too tight is a feasible
+/// integer point thrown away. So every whole number taken below is taken with this allowance
+/// added on the safe side.
+const STRENGTHEN_MARGIN : Double = 1.0e-12
+
+///|
+/// The largest magnitude this rewrite reads a whole number out of. Past it the truncation into
+/// the integer type is no longer exact, and a bound derived from a value that cannot be rounded
+/// exactly is a bound that may be a unit too tight.
+const STRENGTHEN_CAPACITY_LIMIT : Double = 1.0e9
+
+///|
+/// The allowance for one capacity, given the row's magnitude per unit of its coefficient.
+fn strengthen_margin(scale : Double, terms : Int32) -> Double {
+  STRENGTHEN_MARGIN * (1.0 + Double::from_int(terms) * @core.fabs(scale))
+}
+
+///|
+/// Whether a capacity is a number a whole number can be read out of at all.
+fn fits_integer(value : Double) -> Bool {
+  !@core.is_nan(value) && @core.fabs(value) <= STRENGTHEN_CAPACITY_LIMIT
+}
+
+///|
+/// The magnitude below which whole numbers add and multiply exactly. IEEE doubles hold every
+/// integer up to 2⁵³ exactly, and a sum or a product whose exact result is in that range is
+/// returned exactly as well, so arithmetic within this bound is a proof rather than a reading.
+const STRENGTHEN_EXACT_LIMIT : Double = 4.0e15
+
+///|
+/// Whether a value is a whole number that the exact arithmetic above can be trusted on.
+fn whole(value : Double) -> Bool {
+  fits_integer(value) && Double::from_int(value.to_int()) == value
+}
+
+///|
+/// Whether a raised coefficient is licensed in *exact* arithmetic:
+/// `coefficient * steps + rest_max ≤ room`.
+///
+/// This is the license itself, not a rounding of it — a coefficient `ā` keeps every integer
+/// point of the row exactly when `ā` times the largest reachable step, plus the largest the
+/// other terms can contribute, still fits in the room the row leaves. It answers `false` for
+/// anything it cannot check exactly, and then the conservative reading decides instead.
+fn raise_licensed(
+  coefficient : Double,
+  steps : Double,
+  rest_max : Double,
+  room : Double,
+) -> Bool {
+  if !whole(coefficient) || !whole(steps) || !whole(rest_max) || !whole(room) {
+    return false
+  }
+  if @core.fabs(coefficient) > STRENGTHEN_EXACT_LIMIT ||
+    @core.fabs(steps) > STRENGTHEN_EXACT_LIMIT ||
+    @core.fabs(rest_max) > STRENGTHEN_EXACT_LIMIT ||
+    @core.fabs(room) > STRENGTHEN_EXACT_LIMIT {
+    return false
+  }
+  coefficient * steps + rest_max <= room
+}
+
+///|
+/// The greatest whole number `capacity` reaches, with `allowance` already added. The caller has
+/// checked that the sum fits the integer type.
+fn reach_floor(capacity : Double, allowance : Double) -> Double {
+  let shifted = capacity + allowance
+  let truncated = Double::from_int(shifted.to_int())
+  if truncated > shifted {
+    truncated - 1.0
+  } else {
+    truncated
+  }
+}
+
+///|
+/// The least whole number `capacity` reaches, with `allowance` already taken off. The caller
+/// has checked that the difference fits the integer type.
+fn reach_ceil(capacity : Double, allowance : Double) -> Double {
+  let shifted = capacity - allowance
+  let truncated = Double::from_int(shifted.to_int())
+  if truncated < shifted {
+    truncated + 1.0
+  } else {
+    truncated
+  }
+}
+
+///|
+/// Rewrites an integer model's rows where integrality licenses it: it applies the integer
+/// bounds the rows imply, and it raises coefficients ("coefficient strengthening"). Returns the
+/// rewritten model and what was rewritten; a model with nothing to rewrite is returned
+/// untouched.
+///
+/// Both products come out of the same arithmetic, and a row can give either, both or neither.
+/// Work in `≤` form — a `≥` row is the same row multiplied by −1 — so a row reads
+/// `Σ aₖxₖ ≤ b`, and `rest_min`/`rest_max` are the least and the greatest the *other* terms of
+/// that row can contribute.
+///
+/// **The integer bound.** `aⱼxⱼ ≤ b − rest_min`, so an **integer** `xⱼ` is bounded by
+/// `xⱼ ≤ ⌊(b − rest_min)/aⱼ⌋` when `aⱼ > 0`, and by `xⱼ ≥ ⌈(b − rest_min)/aⱼ⌉` when `aⱼ < 0`.
+/// That takes integer points away from the *relaxation* and none away from the model, which is
+/// the whole point of a presolve for the integer path. It is not applied when it would cross
+/// the variable's other bound: `lb` above `ub` is a verdict for `eliminate_fixed`, not for a
+/// rewrite.
+///
+/// **The coefficient.** Write `xⱼ = lⱼ + yⱼ`; the row allows `yⱼ ≤ k` with
+/// `k := ⌊(b − aⱼlⱼ − rest_min)/aⱼ⌋`, and the coefficient can be raised as far as the other
+/// terms allow them to *rise*, because a bigger coefficient must not cut a value that used to
+/// be feasible with them at their largest: `aⱼ' = ⌊(b − aⱼlⱼ − rest_max)/k⌋`. Using `rest_min`
+/// on both sides would be wrong, and the difference is not academic: `3x + y ≤ 5` with
+/// `x, y ∈ [0, 10]` integer would become `5x + y ≤ 5` and lose `(x, y) = (1, 2)`.
+///
+/// The two rules round in opposite directions, because their errors cost opposite things. A
+/// bound read a unit too loose costs pruning and nothing else, so the whole number for it is
+/// taken with the allowance *added*; a coefficient read a unit too large costs an integer point,
+/// so the whole number for it is taken with the allowance *taken off*. That conservative reading
+/// would refuse a license landing exactly on a whole number — and those are the common ones in a
+/// model whose data is whole — so wherever the arithmetic allows it the license is not read at
+/// all but *proved* (`raise_licensed`): `ā·k + rest_max ≤ room` over whole numbers below 2⁵³ is
+/// exact, and on that proof a coefficient is raised even where the allowance would have declined
+/// it.
+///
+/// Raising one coefficient lifts what that term contributes at its own upper end, which is part
+/// of `rest_max` for every other term of the row, so the sums the next term reads are corrected
+/// as the raise is made rather than recomputed.
 ///
 /// Three guards keep the claim honest:
 ///
-/// - **the variable whose coefficient moves has to be integer** — raising a coefficient
-///   removes real points, and integrality is what makes the removed ones unreachable;
-///   everything else in the row may be continuous;
-/// - the least the other terms can contribute has to be **finite**, or there is no `cap`;
-/// - equality rows are left alone: the rule is about a one-sided inequality.
+/// - **the variable a bound or a coefficient is derived for has to be integer** — both a
+///   rounded bound and a raised coefficient remove real points, and integrality is what makes
+///   the removed ones unreachable;
+/// - the other terms' contributions have to be **finite** on the side the arithmetic needs: the
+///   integer bound needs only `rest_min` (the least they contribute, which is finite whenever
+///   every other term has a bound on the side its sign spends), the coefficient needs both;
+/// - equality rows are left alone: both rules are about a one-sided inequality.
 ///
-/// This is a presolve for the *integer* path, which is why it does not live in
-/// `Reduction` with the others: the linear presolve never sees an integer model (the
-/// answer to an integer model must not depend on what a reduction fixed), so a rule that
-/// needs integrality has no row to fire on there.
-pub fn strengthen_integer_rows(model : @model.Model) -> (@model.Model, Int32) {
+/// Everything is rounded away from the boundary it would otherwise sit on (`strengthen_margin`)
+/// and nothing is read out of a number the whole-number conversion cannot hold
+/// (`fits_integer`), because the one way this rewrite can be wrong is by being a unit too
+/// tight: a bound a unit too tight, or a coefficient a unit too large, removes integer points
+/// that the row it came from still admits, and no check downstream would notice.
+///
+/// This is a presolve for the *integer* path, which is why it does not live in `Reduction` with
+/// the others: the linear presolve never sees an integer model (the answer to an integer model
+/// must not depend on what a reduction fixed), so a rule that needs integrality has no row to
+/// fire on there.
+pub fn strengthen_integer_rows(
+  model : @model.Model,
+) -> (@model.Model, StrengthenStats) {
   let n = model.num_vars()
   let lower : Array[Double] = []
   let upper : Array[Double] = []
@@ -1040,15 +1180,18 @@ pub fn strengthen_integer_rows(model : @model.Model) -> (@model.Model, Int32) {
     upper.push(variable.ub)
     is_int.push(variable.is_int)
   }
-  let tighter_upper = upper.copy()
+  // The bounds the rewrite will settle on. Both start where the model has them, and a bound is
+  // only ever moved to a value the row proves, so the integer points of the model survive.
+  let tight_lower = lower.copy()
+  let tight_upper = upper.copy()
   let rewritten : Array[(String, @model.Rel, Double, Array[(Int32, Double)])] = []
-  let mut changed = 0
+  let mut rows_rewritten = 0
+  let mut bounds_tightened = 0
   for i = 0; i < model.num_constraints(); i = i + 1 {
     let constraint = model.constraint(i)
     let terms = @model.normalize_terms(constraint.terms)
     let out = terms.copy()
     let mut row_changed = false
-    // Work in `≤` form: a `≥` row is the same row multiplied by −1.
     let sign = if constraint.rel == @model.Rel::GreaterEqual {
       -1.0
     } else {
@@ -1056,90 +1199,154 @@ pub fn strengthen_integer_rows(model : @model.Model) -> (@model.Model, Int32) {
     }
     if constraint.rel != @model.Rel::Equal {
       let bound = constraint.rhs * sign
-      for t = 0; t < terms.length(); t = t + 1 {
+      let count = terms.length()
+      // What the whole row can contribute at least and at most, and how many of its terms have
+      // no end on either side. This term's own share is taken back out below, which is why the
+      // counts are kept: one unbounded term still leaves every other variable of the row
+      // bounded.
+      let low_sum = @core.CompensatedSum::new()
+      let high_sum = @core.CompensatedSum::new()
+      let mut magnitude = @core.fabs(bound)
+      let mut low_open = 0
+      let mut high_open = 0
+      for u = 0; u < count; u = u + 1 {
+        let (k, value) = terms[u]
+        let flipped = value * sign
+        let low_end = if flipped > 0.0 { lower[k] } else { upper[k] }
+        let high_end = if flipped < 0.0 { lower[k] } else { upper[k] }
+        if is_sentinel(low_end) {
+          low_open = low_open + 1
+        } else {
+          low_sum.add(flipped * low_end)
+          magnitude = magnitude + @core.fabs(flipped * low_end)
+        }
+        if is_sentinel(high_end) {
+          high_open = high_open + 1
+        } else {
+          high_sum.add(flipped * high_end)
+          magnitude = magnitude + @core.fabs(flipped * high_end)
+        }
+      }
+      for t = 0; t < count; t = t + 1 {
         let (j, _) = terms[t]
+        if !is_int[j] {
+          continue
+        }
         let coefficient = out[t].1 * sign
-        if coefficient <= 0.0 || !is_int[j] {
+        if coefficient == 0.0 {
           continue
         }
-        if is_sentinel(lower[j]) || is_sentinel(upper[j]) {
-          continue
+        let low_end = if coefficient > 0.0 { lower[j] } else { upper[j] }
+        let high_end = if coefficient < 0.0 { lower[j] } else { upper[j] }
+        let own_low_open = is_sentinel(low_end)
+        let own_high_open = is_sentinel(high_end)
+        let rest_min_open = if own_low_open { low_open - 1 } else { low_open }
+        let rest_max_open = if own_high_open {
+          high_open - 1
+        } else {
+          high_open
         }
-        // The largest and the smallest the other terms can contribute. Both are needed
-        // and they answer different questions: the *smallest* says how far this variable
-        // can reach (the row is easiest for it when the others sit at their minimum), the
-        // *largest* says how much room is left when it is at a value the row has to keep
-        // feasible. A coefficient raised on the minimum alone cuts points the original
-        // row allows — `3x + y ≤ 5` with `x, y ∈ [0, 10]` integer would become
-        // `5x + y ≤ 5`, which throws away `(x, y) = (1, 2)`.
-        let mut rest_min = 0.0
-        let mut rest_max = 0.0
-        let mut finite = true
-        for u = 0; u < out.length(); u = u + 1 {
-          if u == t {
-            continue
+        let rest_min = if own_low_open {
+          low_sum.value()
+        } else {
+          low_sum.value() - coefficient * low_end
+        }
+        let rest_max = if own_high_open {
+          high_sum.value()
+        } else {
+          high_sum.value() - coefficient * high_end
+        }
+        // The allowance this term's arithmetic is rounded with, and the two conditions that
+        // make it usable: a number the whole-number conversion holds, and smaller than a unit
+        // of the variable — an allowance bigger than a unit says the bound cannot be decided
+        // better than to a unit, and then rounding it is not licensed at all.
+        let scale = magnitude / @core.fabs(coefficient)
+        let allowance = strengthen_margin(scale, count)
+        let numeric = fits_integer(allowance) && allowance <= 1.0
+        // The bound the row implies for this variable, which needs only the least the other
+        // terms contribute.
+        if numeric && rest_min_open == 0 {
+          let capacity = bound - rest_min
+          let quotient = capacity / coefficient
+          if fits_integer(quotient) {
+            if coefficient > 0.0 {
+              let implied = reach_floor(quotient, allowance)
+              // Against the *tightened* bounds, not the model's: a bound that crosses its
+              // opposite number would leave a model no solver should be handed (`lb` above
+              // `ub`), and the row that proves the cross is the one that decides
+              // infeasibility at solve time, not this rewrite.
+              if implied < tight_upper[j] && implied >= tight_lower[j] {
+                tight_upper[j] = implied
+                bounds_tightened = bounds_tightened + 1
+              }
+            } else {
+              let implied = reach_ceil(quotient, allowance)
+              if implied > tight_lower[j] && implied <= tight_upper[j] {
+                tight_lower[j] = implied
+                bounds_tightened = bounds_tightened + 1
+              }
+            }
           }
-          let (k, value) = out[u]
-          let flipped = value * sign
-          let low_end = if flipped > 0.0 { lower[k] } else { upper[k] }
-          let high_end = if flipped > 0.0 { upper[k] } else { lower[k] }
-          if is_sentinel(low_end) || is_sentinel(high_end) {
-            finite = false
-            break
-          }
-          rest_min = rest_min + flipped * low_end
-          rest_max = rest_max + flipped * high_end
         }
-        if !finite {
-          continue
-        }
-        // `cap` is what this variable's own term may spend, after shifting it to zero.
-        let room = bound - coefficient * lower[j]
-        let cap = room - rest_min
-        if cap <= 0.0 {
-          continue
-        }
-        let reachable = (cap / coefficient).to_int()
-        let span = upper[j] - lower[j]
-        if reachable < 1 || Double::from_int(reachable) >= span - 1.0e-9 {
-          // Either only the lower bound is reachable (bound tightening's business) or
-          // the variable's own range already fits, so there is nothing to raise.
-          continue
-        }
-        // The raise must keep every reachable value feasible whatever the other terms
-        // do, so it is bounded by the room left when they contribute their maximum.
-        let left = room - rest_max
-        if left <= 0.0 {
-          continue
-        }
-        let raised = Double::from_int(
-          (left / Double::from_int(reachable)).to_int(),
-        )
-        if raised > coefficient + 1.0e-12 {
-          out[t] = (j, raised * sign)
-          row_changed = true
-          let implied = lower[j] + Double::from_int(reachable)
-          if implied < tighter_upper[j] {
-            tighter_upper[j] = implied
+        // The coefficient, which needs both extremes: the raise is bounded by the room left
+        // when the other terms contribute their maximum.
+        if numeric &&
+          coefficient > 0.0 &&
+          rest_min_open == 0 &&
+          rest_max_open == 0 &&
+          !own_low_open &&
+          !own_high_open {
+          let room = bound - coefficient * lower[j]
+          let reachable = room - rest_min
+          let reach = reachable / coefficient
+          let left = room - rest_max
+          let span = upper[j] - lower[j]
+          if fits_integer(reach) {
+            let steps = reach_floor(reach, allowance)
+            let raise_to = left / steps
+            if steps >= 1.0 && steps < span - 1.0e-9 && fits_integer(raise_to) {
+              // Two readings of the licensed coefficient: the one the arithmetic points at, and
+              // the one the allowance leaves. They part company only when the license lands near
+              // a whole number, and there the pointed-at reading is taken only when it can be
+              // *proved* licensed in exact arithmetic — which is how a license that lands
+              // exactly on a whole number is kept instead of being declined.
+              let pointed = reach_floor(raise_to, 0.0)
+              let conservative = reach_floor(raise_to, -allowance)
+              let raised = if pointed > conservative &&
+                raise_licensed(pointed, steps, rest_max, room) {
+                pointed
+              } else {
+                conservative
+              }
+              if raised > coefficient + 1.0e-12 {
+                out[t] = (j, raised * sign)
+                row_changed = true
+                low_sum.add((raised - coefficient) * low_end)
+                high_sum.add((raised - coefficient) * high_end)
+                magnitude = magnitude +
+                  @core.fabs(raised - coefficient) * @core.fabs(high_end)
+              }
+            }
           }
         }
       }
     }
     if row_changed {
-      changed = changed + 1
+      rows_rewritten = rows_rewritten + 1
     }
     rewritten.push((constraint.name, constraint.rel, constraint.rhs, out))
   }
-  if changed == 0 {
-    return (model, 0)
+  let stats : StrengthenStats = { rows_rewritten, bounds_tightened, }
+  if rows_rewritten == 0 && bounds_tightened == 0 {
+    return (model, stats)
   }
   let out = @model.Model::new(model.sense())
   for j = 0; j < n; j = j + 1 {
     let variable = model.get_var(j)
     out.add_var(
       variable.name,
-      lb=variable.lb,
-      ub=tighter_upper[j],
+      lb=tight_lower[j],
+      ub=tight_upper[j],
       is_int=variable.is_int,
     )
     |> ignore
@@ -1149,5 +1356,5 @@ pub fn strengthen_integer_rows(model : @model.Model) -> (@model.Model, Int32) {
     let (name, rel, rhs, terms) = row
     out.add_named_constraint(terms, rel, rhs, name)
   }
-  (out, changed)
+  (out, stats)
 }

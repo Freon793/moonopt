@@ -3,6 +3,7 @@ package "Freon793/moonopt/mip"
 
 import {
   "Freon793/moonopt/model",
+  "Freon793/moonopt/presolve",
   "Freon793/moonopt/verify",
   "moonbitlang/core/debug",
 }
@@ -18,6 +19,7 @@ pub(all) struct MipOptions {
   max_iterations : Int
   tolerance : Double
   verify_nodes : Bool
+  row_strengthening : Bool
   dive_steps : Int
   dive_attempts : Int
   cut_rounds : Int
@@ -32,6 +34,7 @@ pub fn MipOptions::with_node_solver(Self, (@model.Model) -> NodeSolution) -> Sel
 pub fn MipOptions::without_cuts(Self) -> Self
 pub fn MipOptions::without_primal_dive(Self) -> Self
 pub fn MipOptions::without_primal_rounding(Self) -> Self
+pub fn MipOptions::without_row_strengthening(Self) -> Self
 pub fn MipOptions::without_verification(Self) -> Self
 
 pub struct MipResult {
@@ -43,6 +46,7 @@ pub struct MipResult {
   nodes : Int
   verified : Int
   cuts : Int
+  strengthening : @presolve.StrengthenStats
   message : String
 } derive(@debug.Debug)
 

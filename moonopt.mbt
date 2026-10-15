@@ -372,6 +372,7 @@ pub fn solve_with(model : @model.Model, options : SolveOptions) -> Solution {
       dive_attempts: base.dive_attempts,
       cut_rounds: options.cut_rounds,
       primal_rounding: base.primal_rounding,
+      row_strengthening: base.row_strengthening,
       node_solver: base.node_solver,
       cut_hook: base.cut_hook,
     }

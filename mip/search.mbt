@@ -777,32 +777,47 @@ fn kernel_node(
 }
 
 ///|
-/// Solves a model with integer variables by branch and bound, after strengthening its
-/// rows.
+/// Solves a model with integer variables by branch and bound, after strengthening its rows.
 ///
-/// **Coefficient strengthening runs first** (`@presolve.strengthen_integer_rows`): where a
-/// row's integrality says that one of its coefficients can be raised without losing an
-/// integer point, the coefficient is raised and the integer bound the row implies is
-/// applied. The relation this preserves is the one that matters here — the *integer*
-/// feasible set of the model is unchanged, exactly — so the search runs on a stronger
-/// relaxation of the same integer problem, and every point it reports is a point of the
-/// model the caller wrote. The rewrite touches neither the variables nor their indices,
-/// so the values in the result are in the caller's own variable space.
+/// **Integer-row strengthening runs first** (`@presolve.strengthen_integer_rows`), unless the
+/// options switch it off (`MipOptions::without_row_strengthening`): where integrality says that
+/// a row implies a whole-number bound for one of its variables, the bound is applied, and where
+/// it licenses raising one of the row's coefficients, the coefficient is raised. The relation
+/// this preserves is the one that matters here — the *integer* feasible set of the model is
+/// unchanged, exactly — so the search runs on a stronger relaxation of the same integer
+/// problem, and every point it reports is a point of the model the caller wrote. The rewrite
+/// touches neither the variables nor their indices, so the values in the result are in the
+/// caller's own variable space, and what it changed is reported in
+/// `MipResult::strengthening`.
 ///
 /// A model whose rows give it nothing to strengthen is searched unchanged (the reduction
 /// returns the model it was given).
 pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
-  let (strengthened, _) = @presolve.strengthen_integer_rows(model)
-  solve_mip_unchanged(strengthened, options)
+  if !options.row_strengthening {
+    // The caller asked for the model as written, and the counters then report the truth about
+    // this run: the search saw exactly the rows it was handed.
+    let untouched : @presolve.StrengthenStats = {
+      rows_rewritten: 0,
+      bounds_tightened: 0,
+    }
+    return solve_mip_unchanged(model, options, untouched)
+  }
+  let (strengthened, stats) = @presolve.strengthen_integer_rows(model)
+  solve_mip_unchanged(strengthened, options, stats)
 }
 
 ///|
-/// Branch and bound over the model exactly as it was handed in.
+/// Branch and bound over the model exactly as it was handed in, with `stats` describing the
+/// rewriting that produced it (all zeroes when there was none).
 ///
 /// See the package doc for what the statuses mean: in particular, only `Optimal` claims an
 /// answer, and an unbounded relaxation is reported as such rather than as an unbounded
 /// model.
-fn solve_mip_unchanged(model : @model.Model, options : MipOptions) -> MipResult {
+fn solve_mip_unchanged(
+  model : @model.Model,
+  options : MipOptions,
+  stats : @presolve.StrengthenStats,
+) -> MipResult {
   let issues = model.validate()
   if issues.length() > 0 {
     return {
@@ -814,6 +829,7 @@ fn solve_mip_unchanged(model : @model.Model, options : MipOptions) -> MipResult 
       nodes: 0,
       verified: 0,
       cuts: 0,
+      strengthening: stats,
       message: "model is not well formed: " + issues[0],
     }
   }
@@ -891,7 +907,7 @@ fn solve_mip_unchanged(model : @model.Model, options : MipOptions) -> MipResult 
     if solved >= options.max_nodes {
       return limit_result(
         nodes, queue, unjudged, incumbent, incumbent_objective, has_incumbent, solved,
-        verified, unfinished_nodes, cuts_added, sign, options,
+        verified, unfinished_nodes, cuts_added, sign, options, stats,
       )
     }
     let index = queue.pop()
@@ -932,6 +948,7 @@ fn solve_mip_unchanged(model : @model.Model, options : MipOptions) -> MipResult 
           nodes: solved,
           verified,
           cuts: cuts_added,
+          strengthening: stats,
           message: "a relaxation's certificate was refused at node " +
           index.to_string() +
           " (depth " +
@@ -983,6 +1000,7 @@ fn solve_mip_unchanged(model : @model.Model, options : MipOptions) -> MipResult 
                   nodes: solved,
                   verified,
                   cuts: cuts_added,
+                  strengthening: stats,
                   message: reason,
                 }
               Ok(cuts) => cuts
@@ -1037,6 +1055,7 @@ fn solve_mip_unchanged(model : @model.Model, options : MipOptions) -> MipResult 
                   nodes: solved,
                   verified,
                   cuts: cuts_added,
+                  strengthening: stats,
                   message: "the relaxation of the cut root was refused: " +
                   refused,
                 }
@@ -1077,6 +1096,7 @@ fn solve_mip_unchanged(model : @model.Model, options : MipOptions) -> MipResult 
                 return limit_result(
                   nodes, queue, unjudged, incumbent, incumbent_objective, has_incumbent,
                   solved, verified, unfinished_nodes, cuts_added, sign, options,
+                  stats,
                 )
               }
               // Either the tightened relaxation is whole (the round has done its job and
@@ -1107,6 +1127,7 @@ fn solve_mip_unchanged(model : @model.Model, options : MipOptions) -> MipResult 
           nodes: solved,
           verified,
           cuts: cuts_added,
+          strengthening: stats,
           message: "a relaxation is unbounded, which does not prove the integer problem is",
         }
       NodeStatus::Unfinished => {
@@ -1231,6 +1252,7 @@ fn solve_mip_unchanged(model : @model.Model, options : MipOptions) -> MipResult 
                 nodes: solved,
                 verified,
                 cuts: cuts_added,
+                strengthening: stats,
                 message: "a certificate was refused while the primal heuristic repaired a rounding of node " +
                 index.to_string() +
                 ": " +
@@ -1302,6 +1324,7 @@ fn solve_mip_unchanged(model : @model.Model, options : MipOptions) -> MipResult 
                 nodes: solved,
                 verified,
                 cuts: cuts_added,
+                strengthening: stats,
                 message: "a certificate was refused while the primal heuristic pumped node " +
                 index.to_string() +
                 ": " +
@@ -1435,6 +1458,7 @@ fn solve_mip_unchanged(model : @model.Model, options : MipOptions) -> MipResult 
                   nodes: solved,
                   verified,
                   cuts: cuts_added,
+                  strengthening: stats,
                   message: "a certificate was refused while the primal heuristic walked node " +
                   index.to_string() +
                   " down to a whole point: " +
@@ -1455,6 +1479,7 @@ fn solve_mip_unchanged(model : @model.Model, options : MipOptions) -> MipResult 
                 return limit_result(
                   nodes, queue, unjudged, incumbent, incumbent_objective, has_incumbent,
                   solved, verified, unfinished_nodes, cuts_added, sign, options,
+                  stats,
                 )
               }
             }
@@ -1515,6 +1540,7 @@ fn solve_mip_unchanged(model : @model.Model, options : MipOptions) -> MipResult 
       nodes: solved,
       verified,
       cuts: cuts_added,
+      strengthening: stats,
       message: unfinished_nodes.to_string() +
       " node relaxation(s) did not finish, so the tree is not exhausted",
     }
@@ -1529,6 +1555,7 @@ fn solve_mip_unchanged(model : @model.Model, options : MipOptions) -> MipResult 
       nodes: solved,
       verified,
       cuts: cuts_added,
+      strengthening: stats,
       message: "every node was pruned without an integer point, so none exists",
     }
   }
@@ -1541,6 +1568,7 @@ fn solve_mip_unchanged(model : @model.Model, options : MipOptions) -> MipResult 
     nodes: solved,
     verified,
     cuts: cuts_added,
+    strengthening: stats,
     message: "",
   }
 }
@@ -1561,6 +1589,7 @@ fn limit_result(
   cuts_added : Int32,
   sign : Double,
   options : MipOptions,
+  stats : @presolve.StrengthenStats,
 ) -> MipResult {
   // The nodes still in the queue, and the regions whose node reached no verdict, are the
   // uncertainty: the best of their bounds is what the incumbent is measured against.
@@ -1578,6 +1607,7 @@ fn limit_result(
     nodes: solved,
     verified,
     cuts: cuts_added,
+    strengthening: stats,
     message: "relaxation budget of " +
     options.max_nodes.to_string() +
     " reached with " +

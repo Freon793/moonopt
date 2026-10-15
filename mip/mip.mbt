@@ -90,6 +90,12 @@ pub struct MipResult {
   /// an invalid cut removes integer points from every node below it and nothing
   /// downstream would notice — see `verify/cuts.mbt`.
   cuts : Int32
+  /// What the integer-row strengthening rewrote before the search started, as counted by
+  /// `@presolve.strengthen_integer_rows`. The rewrite preserves the model's integer feasible
+  /// set exactly, so it changes how the tree is explored and never what an answer means — but
+  /// whether a reduction fired at all is otherwise invisible to a caller, and a reduction that
+  /// fires on nothing while being documented as firing is a claim with no evidence.
+  strengthening : @presolve.StrengthenStats
   /// The verifier's account of the first refusal, when the run ended `Unverified`; the
   /// reason a run ended otherwise (an invalid model, a limit, an unbounded relaxation).
   message : String
@@ -140,6 +146,18 @@ pub(all) struct MipOptions {
   /// Verify every node's relaxation with `@verify` before branching on it. On by
   /// default; the tests turn it off to show it changes nothing but the count.
   verify_nodes : Bool
+  /// Whether the model's rows are strengthened by its integrality before the search starts
+  /// (`@presolve.strengthen_integer_rows`). On by default.
+  ///
+  /// It is a rewrite of the model rather than a change to the search, and the one thing it
+  /// must never do is change the answer: the integer feasible set is preserved exactly, so a
+  /// stronger relaxation of the same integer problem is searched and every point reported is a
+  /// point of the model the caller wrote. A caller measuring the search *itself* — the trace
+  /// tests, and anyone comparing two runs of the same model — turns it off, because a run on a
+  /// different model is not a run of the same experiment. What it rewrote is in the result
+  /// (`MipResult::strengthening`), so "it did nothing here" is a measurement rather than an
+  /// assumption.
+  row_strengthening : Bool
   /// How many relaxations one launch of the primal heuristic may spend walking a node's
   /// relaxation down to a whole point, or `0` to switch the heuristic off.
   ///
@@ -225,6 +243,7 @@ pub fn MipOptions::default() -> MipOptions {
     dive_attempts: 2,
     cut_rounds: 4,
     primal_rounding: true,
+    row_strengthening: true,
     node_solver: None,
     cut_hook: None,
   }
@@ -243,6 +262,7 @@ pub fn MipOptions::with_max_nodes(max_nodes : Int32) -> MipOptions {
     dive_attempts: base.dive_attempts,
     cut_rounds: base.cut_rounds,
     primal_rounding: base.primal_rounding,
+    row_strengthening: base.row_strengthening,
     node_solver: base.node_solver,
     cut_hook: base.cut_hook,
   }
@@ -261,6 +281,7 @@ pub fn MipOptions::without_cuts(self : MipOptions) -> MipOptions {
     dive_attempts: self.dive_attempts,
     cut_rounds: 0,
     primal_rounding: self.primal_rounding,
+    row_strengthening: self.row_strengthening,
     node_solver: self.node_solver,
     cut_hook: self.cut_hook,
   }
@@ -283,6 +304,7 @@ pub fn MipOptions::with_cut_hook(
     dive_attempts: self.dive_attempts,
     cut_rounds: self.cut_rounds,
     primal_rounding: self.primal_rounding,
+    row_strengthening: self.row_strengthening,
     node_solver: self.node_solver,
     cut_hook: Some(hook),
   }
@@ -301,6 +323,7 @@ pub fn MipOptions::without_verification(self : MipOptions) -> MipOptions {
     dive_attempts: self.dive_attempts,
     cut_rounds: self.cut_rounds,
     primal_rounding: self.primal_rounding,
+    row_strengthening: self.row_strengthening,
     node_solver: self.node_solver,
     cut_hook: self.cut_hook,
   }
@@ -319,6 +342,7 @@ pub fn MipOptions::without_primal_dive(self : MipOptions) -> MipOptions {
     dive_attempts: 0,
     cut_rounds: self.cut_rounds,
     primal_rounding: self.primal_rounding,
+    row_strengthening: self.row_strengthening,
     node_solver: self.node_solver,
     cut_hook: self.cut_hook,
   }
@@ -337,6 +361,26 @@ pub fn MipOptions::without_primal_rounding(self : MipOptions) -> MipOptions {
     dive_attempts: self.dive_attempts,
     cut_rounds: self.cut_rounds,
     primal_rounding: false,
+    row_strengthening: self.row_strengthening,
+    node_solver: self.node_solver,
+    cut_hook: self.cut_hook,
+  }
+}
+
+///|
+/// The same options with the model handed to the search as it is, for tests and measurements
+/// that have to run the model they wrote rather than a rewrite of it.
+pub fn MipOptions::without_row_strengthening(self : MipOptions) -> MipOptions {
+  {
+    max_nodes: self.max_nodes,
+    max_iterations: self.max_iterations,
+    tolerance: self.tolerance,
+    verify_nodes: self.verify_nodes,
+    dive_steps: self.dive_steps,
+    dive_attempts: self.dive_attempts,
+    cut_rounds: self.cut_rounds,
+    primal_rounding: self.primal_rounding,
+    row_strengthening: false,
     node_solver: self.node_solver,
     cut_hook: self.cut_hook,
   }
@@ -358,6 +402,7 @@ pub fn MipOptions::with_node_solver(
     dive_attempts: self.dive_attempts,
     cut_rounds: self.cut_rounds,
     primal_rounding: self.primal_rounding,
+    row_strengthening: self.row_strengthening,
     node_solver: Some(solver),
     cut_hook: self.cut_hook,
   }

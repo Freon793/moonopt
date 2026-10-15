@@ -141,12 +141,21 @@ test "dual fixing fires only when the improving direction relaxes every row" {
 }
 
 ///|
-/// Coefficient strengthening is a claim about the *integer* points a row accepts, so the
-/// test that settles it enumerates them: over the whole box, the row before and after the
-/// rewrite has to accept exactly the same points. The pair below is the one that matters —
-/// a row where the raise is licensed, and the same row with a variable given a range wide
-/// enough that the raise would cut a point (`3x + y ≤ 5` losing `(1, 2)`).
-test "coefficient strengthening keeps exactly the integer points of a row" {
+/// Both products of the rewrite are claims about the *integer* points a row accepts, so the
+/// test that settles them enumerates the points: over the whole box, the model before and after
+/// the rewrite has to accept exactly the same ones.
+///
+/// The first pair is the row that licenses a coefficient raise. The second is the same row with
+/// a variable given a range wide enough that the raise would cut a point (`3x + y ≤ 5` losing
+/// `(1, 2)`), where the coefficient half has to decline — and the integer bound the row implies
+/// does not depend on that room, so it comes down for both variables there.
+test "row strengthening keeps exactly the integer points of a row" {
+  // Feasibility against the model's own rows *and* its bounds: a tightening is a bound, so a
+  // check that only looks at the rows cannot see the way this rewrite can go wrong.
+  let feasible = fn(model : @model.Model, point : Array[Double]) -> Bool {
+    max_row_violation(model, point) <= 1.0e-9 &&
+    max_bound_violation(model, point) <= 1.0e-9
+  }
   let holds = @model.Model::new(@model.Sense::Minimize)
   let x = holds.add_var("x", lb=0.0, ub=10.0, is_int=true)
   let y = holds.add_var("y", lb=0.0, ub=1.0, is_int=true)
@@ -157,22 +166,21 @@ test "coefficient strengthening keeps exactly the integer points of a row" {
     5.0,
     "cap",
   )
-  let (strong, rows) = strengthen_integer_rows(holds)
-  assert_eq(rows, 1)
-  // `3x + y ≤ 5` with `y ≤ 1` and `x` integer reaches `x = 1`, and the coefficient can rise.
+  let (strong, stats) = strengthen_integer_rows(holds)
+  assert_eq(stats.rows_rewritten, 1)
+  assert_eq(stats.bounds_tightened, 1)
+  // `3x + y ≤ 5` with `y ≤ 1` reaches `x = 1`, so the bound comes down to it and the
+  // coefficient can rise (to `⌊(5 − 0 − 1)/1⌋ = 4`).
   assert_true(strong.get_var(0).ub <= 1.0 + 1.0e-9)
   assert_true(strong.constraint(0).terms[0].1 >= 3.0)
   for i = 0; i <= 10; i = i + 1 {
     for j = 0; j <= 1; j = j + 1 {
       let point : Array[Double] = [Double::from_int(i), Double::from_int(j)]
-      assert_eq(
-        max_row_violation(holds, point) <= 1.0e-9,
-        max_row_violation(strong, point) <= 1.0e-9,
-      )
+      assert_eq(feasible(holds, point), feasible(strong, point))
     }
   }
   // `y` free up to 10 instead: with `x = 1` the row still allows `y = 2`, so raising the
-  // coefficient would lose that point and the reduction has to decline.
+  // coefficient would lose that point. The bounds still come down, to `x ≤ 1` and `y ≤ 5`.
   let wide = @model.Model::new(@model.Sense::Minimize)
   let a = wide.add_var("a", lb=0.0, ub=10.0, is_int=true)
   let b = wide.add_var("b", lb=0.0, ub=10.0, is_int=true)
@@ -183,9 +191,52 @@ test "coefficient strengthening keeps exactly the integer points of a row" {
     5.0,
     "cap",
   )
-  let (untouched, wide_rows) = strengthen_integer_rows(wide)
-  assert_eq(wide_rows, 0)
-  assert_true(untouched.constraint(0).terms[0].1 == 3.0)
+  let (tightened, wide_stats) = strengthen_integer_rows(wide)
+  assert_eq(wide_stats.rows_rewritten, 0)
+  assert_eq(wide_stats.bounds_tightened, 2)
+  assert_true(tightened.constraint(0).terms[0].1 == 3.0)
+  assert_true(tightened.get_var(0).ub <= 1.0 + 1.0e-9)
+  assert_true(tightened.get_var(1).ub <= 5.0 + 1.0e-9)
+  for i = 0; i <= 10; i = i + 1 {
+    for j = 0; j <= 10; j = j + 1 {
+      let point : Array[Double] = [Double::from_int(i), Double::from_int(j)]
+      assert_eq(feasible(wide, point), feasible(tightened, point))
+    }
+  }
+}
+
+///|
+/// A row bounds an integer variable from below as well as from above: in flipped form that is
+/// the same arithmetic with a negative coefficient, divided the other way and rounded the other
+/// way. `2x + y ≥ 5` with `y ≤ 1` says `2x ≥ 4` for whole numbers, so `x ≥ 2`.
+test "a row tightens an integer bound downwards too" {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let x = model.add_var("x", lb=0.0, ub=10.0, is_int=true)
+  let y = model.add_var("y", lb=0.0, ub=1.0, is_int=true)
+  model.set_objective([(x, 1.0), (y, 1.0)])
+  model.add_named_constraint(
+    [(x, 2.0), (y, 1.0)],
+    @model.Rel::GreaterEqual,
+    5.0,
+    "floor",
+  )
+  let (strong, stats) = strengthen_integer_rows(model)
+  assert_eq(stats.bounds_tightened, 1)
+  assert_true(strong.get_var(0).lb >= 2.0 - 1.0e-9)
+  // The other variable is bounded by the same row, but that bound is not a tightening:
+  // `y ≥ ⌈(−5 + 20)/(−1)⌉ = −15`.
+  assert_true(strong.get_var(1).lb == 0.0)
+  for i = 0; i <= 10; i = i + 1 {
+    for j = 0; j <= 1; j = j + 1 {
+      let point : Array[Double] = [Double::from_int(i), Double::from_int(j)]
+      assert_eq(
+        max_row_violation(model, point) <= 1.0e-9 &&
+        max_bound_violation(model, point) <= 1.0e-9,
+        max_row_violation(strong, point) <= 1.0e-9 &&
+        max_bound_violation(strong, point) <= 1.0e-9,
+      )
+    }
+  }
 }
 
 ///|

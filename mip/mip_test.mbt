@@ -285,12 +285,15 @@ test "the primal heuristic finds an incumbent the tree has not reached yet" {
   // switched off because this test is about the walk: with the root's row rounded away,
   // the same three-relaxation budget proves optimality instead of running out. Rounding is
   // switched off for the same reason — with a second primal mechanism running, the point could
-  // come from either of them and the test would no longer be about the walk.
+  // come from either of them and the test would no longer be about the walk. The row
+  // strengthening is off for that reason too: the model is handed to the search as it was
+  // written, so the three relaxations are the three relaxations of *this* model.
   let without = @mip.solve_mip(
     model,
     @mip.MipOptions::with_max_nodes(3)
     .without_primal_dive()
     .without_primal_rounding()
+    .without_row_strengthening()
     .without_cuts(),
   )
   assert_eq(without.status, @mip.MipStatus::NodeLimit)
@@ -298,7 +301,10 @@ test "the primal heuristic finds an incumbent the tree has not reached yet" {
   assert_eq(without.verified, without.nodes)
   let dived = @mip.solve_mip(
     model,
-    @mip.MipOptions::with_max_nodes(3).without_primal_rounding().without_cuts(),
+    @mip.MipOptions::with_max_nodes(3)
+    .without_primal_rounding()
+    .without_row_strengthening()
+    .without_cuts(),
   )
   assert_eq(dived.status, @mip.MipStatus::NodeLimit)
   // The point it found is a real answer to the model, checked without the search's own
@@ -522,13 +528,16 @@ fn answers_the_root_and_the_first_child(
 /// best bound is 7.
 test "an unjudged node keeps its bound in the open set" {
   let model = one_row_three_and_a_half_mip()
-  // Cuts, the walk and the rounding are off: the three-relaxation budget has to go to the root, the
-  // child that answers and the child that does not, which is the state this test is about.
+  // Cuts, the walk, the rounding and the row strengthening are off: the three-relaxation
+  // budget has to go to the root, the child that answers and the child that does not, which is
+  // the state this test is about — and the node solver below answers *this* model, so the model
+  // is the one handed in rather than a rewrite of it.
   let base = @mip.MipOptions::with_max_nodes(3)
   let options = base
     .without_cuts()
     .without_primal_dive()
     .without_primal_rounding()
+    .without_row_strengthening()
     .with_node_solver(answers_the_root_and_the_first_child)
   let result = @mip.solve_mip(model, options)
   assert_eq(result.status, @mip.MipStatus::NodeLimit)

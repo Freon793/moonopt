@@ -45,6 +45,9 @@ priv struct FileOutcome {
   mut nodes : Int32
   mut verified : Int32
   mut cuts : Int32
+  /// Rows the integer-row strengthening rewrote, and bounds it tightened, before the search.
+  mut strengthened_rows : Int32
+  mut strengthened_bounds : Int32
   mut has_bound : Bool
   mut bound : Double
   mut gap : Double
@@ -110,6 +113,8 @@ fn new_outcome(path : String, model : @model.Model) -> FileOutcome {
     nodes: 0,
     verified: 0,
     cuts: 0,
+    strengthened_rows: 0,
+    strengthened_bounds: 0,
     has_bound: false,
     bound: 0.0,
     gap: 0.0,
@@ -191,6 +196,7 @@ fn branch_options(flags : SolveFlags) -> @mip.MipOptions {
       base.cut_rounds
     },
     primal_rounding: base.primal_rounding,
+    row_strengthening: base.row_strengthening,
     node_solver: base.node_solver,
     cut_hook: base.cut_hook,
   }
@@ -303,6 +309,16 @@ fn FileOutcome::to_json(self : FileOutcome) -> String {
       parts.push(json_field("nodes", self.nodes.to_string()))
       parts.push(json_field("verified", self.verified.to_string()))
       parts.push(json_field("cuts", self.cuts.to_string()))
+      // What the integer-row strengthening rewrote before the search started. It is the only
+      // way to see from outside whether that reduction did anything at all: the answer is the
+      // same either way, and a reduction that fires on nothing looks exactly like one that
+      // fires and helps.
+      parts.push(
+        json_field("strengthened_rows", self.strengthened_rows.to_string()),
+      )
+      parts.push(
+        json_field("strengthened_bounds", self.strengthened_bounds.to_string()),
+      )
       if self.has_bound {
         parts.push(json_field("bound", json_number(self.bound)))
         parts.push(json_field("gap", json_number(self.gap)))
@@ -403,6 +419,8 @@ fn run_mip(
   outcome.nodes = result.nodes
   outcome.verified = result.verified
   outcome.cuts = result.cuts
+  outcome.strengthened_rows = result.strengthening.rows_rewritten
+  outcome.strengthened_bounds = result.strengthening.bounds_tightened
   outcome.has_bound = result.status == @mip.MipStatus::NodeLimit
   outcome.bound = result.bound
   outcome.gap = result.gap

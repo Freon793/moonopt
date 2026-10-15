@@ -8,6 +8,18 @@ pub extend PresolveStats with @debug.Debug::{to_repr}
 
 ///|
 #doc(hidden)
+pub extend StrengthenStats with @debug.Debug::{to_repr}
+
+///|
+#doc(hidden)
+pub extend StrengthenStats with Eq::{equal}
+
+///|
+#doc(hidden)
+pub extend StrengthenStats with Eq::{not_equal}
+
+///|
+#doc(hidden)
 pub extend PresolveVerdict with @debug.Debug::{to_repr}
 
 ///|
