@@ -80,7 +80,11 @@ You can browse and install extra skills here:
     and a model presolve proves infeasible or unbounded is reported as such rather
     than handed to the kernel. `strengthen_integer_rows` is the one reduction that
     needs integrality, so it is exported for the integer path instead of living in
-    the reduction loop: a linear presolve never sees an integer model.
+    the reduction loop: a linear presolve never sees an integer model. It is also the
+    only one that reports counters of its own (`StrengthenStats`), because whether it
+    fires is invisible in the answer — it preserves the integer feasible set exactly, so
+    a run that rewrote everything looks like a run that rewrote nothing, and "it did
+    nothing here" has to be a measurement rather than an assumption.
   - `verify/`: the **independent** checker for a claimed answer. Primal feasibility,
     dual feasibility, complementary slackness and the duality gap for an optimality
     claim; a Farkas ray for an infeasibility claim; a feasible point plus a recession
@@ -92,12 +96,15 @@ You can browse and install extra skills here:
     convention, and the kernel's mapping onto it lives in `simplex/certificate.mbt`.
   - `mip/`: branch and bound over the linear kernel, added milestone by milestone,
     see `docs/roadmap.md`. `solve_mip` first runs `@presolve.strengthen_integer_rows`
-    over the model: an integer row's coefficient is raised as far as integrality licenses
-    (which needs *both* extremes of the other terms — see the function's note), the
-    integer feasible set is preserved exactly, and the search gets a stronger relaxation
-    of the same problem; the rewrite touches neither variables nor their indices, so
-    results stay in the caller's variable space, and a model with nothing to strengthen
-    is searched unchanged. A node is its parent plus one tightened bound, rebuilt
+    over the model, unless `MipOptions::row_strengthening` is off: every integer row
+    gives the integer bound it implies (`xⱼ ≤ ⌊(b − rest_min)/aⱼ⌋` and the mirror for a
+    negative coefficient), and where integrality licenses it one of that row's
+    coefficients is raised (which needs *both* extremes of the other terms — see the
+    function's note). The integer feasible set is preserved exactly and the search gets a
+    stronger relaxation of the same problem; the rewrite touches neither variables nor
+    their indices, so results stay in the caller's variable space, a model with nothing to
+    strengthen is searched unchanged, and what it rewrote is reported in
+    `MipResult::strengthening` rather than left for a reader to assume. A node is its parent plus one tightened bound, rebuilt
     from the root along the chain rather than copied per node; the child is solved
     warm from the basis its parent ended on (`solve_model_with_basis`), because a
     bound change leaves the reduced costs alone. The search is best-bound, prunes

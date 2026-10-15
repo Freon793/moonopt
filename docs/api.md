@@ -102,20 +102,23 @@ pub fn SimplexOptions::with_pricing(self, pricing) -> SimplexOptions
 
 ```moonbit
 pub fn presolve(model) -> ReducedModel
-pub fn strengthen_integer_rows(model) -> (Model, Int)
+pub fn strengthen_integer_rows(model) -> (Model, StrengthenStats)
 pub fn max_row_violation(model, x)   -> Double
 pub fn max_bound_violation(model, x) -> Double
 pub fn objective_value(model, x)     -> Double
+
+pub(all) struct StrengthenStats { rows_rewritten : Int, bounds_tightened : Int }
 ```
 
 - 每条归约**先证明再触发**；`ReducedModel::verdict()` 为 `Reduced` / `Infeasible` / `Unbounded`，
   后两者是化简自己证出来的结论，带 `reason()`。`ReducedModel::stats()` 逐项报告哪些归约触发过
   （`variables_fixed_dual` 是对偶固定的计数；`rows_strengthened` 在这里恒为 0，因为系数强化属于整数
   路径，见下一条）。
-- `strengthen_integer_rows` 是**整数路径**上的归约：把整数行的系数抬到"不丢掉任何一个整数点"的最高值，
-  并应用该行隐含的整数界。它不动变量与下标、也不需要 postsolve；返回强化后的模型与被改动的行数
-  （没有可改的行时原样返回）。`mip::solve_mip` 在搜索之前调用它，所以分支定界跑的是同一个整数问题的
-  一个更强的松弛。
+- `strengthen_integer_rows` 是**整数路径**上的归约，做两件事：应用整数行隐含的整数界，以及把整数行
+  的系数抬到"不丢掉任何一个整数点"的最高值。它不动变量与下标、也不需要 postsolve；返回强化后的模型与
+  `StrengthenStats`（`rows_rewritten` = 系数被抬高的行数，`bounds_tightened` = 被收紧的变量界个数；
+  两样都没有时原样返回）。`mip::solve_mip` 在搜索之前调用它，所以分支定界跑的是同一个整数问题的一个
+  更强的松弛，而调用方拿到的点仍是自己那个模型的点。
 - **还原必须被独立复核**：`reconstruct` 把化简解映回原变量，调用方**必须**用上面三个函数在**原模型**上
   量行违反、界违反与目标值——不能拿化简自己的记账当证据（`cmd/parse` 的 `reconstructed:` 一行就是这么
   做的）。
@@ -148,9 +151,14 @@ pub fn solve_mip(model, options) -> MipResult
 
 pub(all) enum MipStatus { Optimal, Infeasible, NodeLimit, UnboundedRelaxation, Unverified, Invalid }
 pub(all) struct MipOptions { max_nodes, max_iterations, tolerance, verify_nodes,
-                             dive_steps, dive_attempts, cut_rounds, primal_rounding,
-                             node_solver, cut_hook }
+                             row_strengthening, dive_steps, dive_attempts, cut_rounds,
+                             primal_rounding, node_solver, cut_hook }
 ```
+
+- `MipOptions::row_strengthening`（默认开）决定搜索之前是否调用 `strengthen_integer_rows`；关掉它，
+  搜索拿到的就是调用方写的那个模型。`MipResult::strengthening` 如实报告它改了什么——两样都没改时
+  全为零，于是"这条归约在这里到底有没有触发"是测量而不是假设（`--json` 的 `strengthened_rows` /
+  `strengthened_bounds` 两个字段就是它）。
 
 | 规则 | 说明 |
 | --- | --- |

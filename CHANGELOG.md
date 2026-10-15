@@ -17,6 +17,14 @@
 - **系数强化**（`presolve::strengthen_integer_rows`，分支定界的入口调用）：把整数行的系数抬到
   "不丢掉任何一个整数点"的最高值，并应用该行隐含的整数界；线性 presolve 见不到整数模型，所以它跑在
   整数路径上。
+- **整数行强化的另一半**：同一份算术现在**也**单独应用整数行隐含的整数界（`aⱼ > 0` 给上界、
+  `aⱼ < 0` 给下界），它只需要其它项的**最小**贡献有限，因此比抬高系数那一半宽得多。整数可行集仍然逐点
+  不变（两条穷举整数点的测试，含变量界）。返回值从"改了几行"换成 `presolve::StrengthenStats`
+  （`rows_rewritten` + `bounds_tightened`），`mip::MipResult::strengthening` 如实转发，`--json` 的
+  `strengthened_rows` / `strengthened_bounds` 两个字段就是它：这条归约有没有触发，从此是可测量的，
+  而不是从答案里猜的。
+- `mip::MipOptions::row_strengthening`（默认开）与 `MipOptions::without_row_strengthening()`：关掉它，
+  搜索拿到的就是调用方写的那个模型，而不是它的重写（trace 测试与"量搜索本身"的测量需要这个开关）。
 
 ### Changed
 
