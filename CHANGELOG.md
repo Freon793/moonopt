@@ -9,6 +9,12 @@
 
 ### Added
 
+- **`moonopt::relaxation(model)`**：整数模型不会以松弛的形式被回答（那是刻意的），所以"我要的是界，不是最优
+  整点"需要一个显式入口。它返回同一个模型去掉整数性——变量与顺序、行、右端项、目标都不动——于是调用方手上
+  那个点仍在同一空间里，可以用 `presolve::objective_value` / `max_row_violation` 读回，"当前方案 gap ≤ X%"
+  因此是可算的。返回的是普通线性模型，走与其它线性模型完全相同的 `solve`（含化简与独立复核）。
+- **`examples/schedule_bound`**：上面这条链路的完整可运行示例——LP 界、已证最优、手上那份方案的 gap，以及
+  **界自己离最优有多远**（界线报告不写后者，读者就会把界当成答案）。
 - **Devex 定价**（`simplex::Pricing::Devex`，Harris 1973）：按枢轴行给出每个非基列的权重，用
   `检验数²/权重` 排序近似最陡边。权重只影响**走哪条路**，不影响答案；`SimplexOptions::with_pricing`
   选规则，CLI 用 `--pricing dantzig|gain|devex`。表见 `docs/algorithms.md`。

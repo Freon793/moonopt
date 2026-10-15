@@ -49,11 +49,12 @@ fn demo() -> Unit {
 用到两个包：`Freon793/moonopt`（求解入口）与 `Freon793/moonopt/model`（模型构造）。
 整数变量用 `m.add_var("n", lb=0.0, ub=10.0, is_int=true)` 声明，`solve` 会自动走分支定界。
 
-两个完整可运行的例子：
+三个完整可运行的例子：
 
 ```bash
 moon run examples/production_plan    # 两产品生产计划（最优 21 at (3, 1.5)）
 moon run examples/transportation     # 产销平衡运输问题（全等式约束，走 Phase I；最优 11）
+moon run examples/schedule_bound     # 手上已有一份排班表时它值多少：LP 界 7.5、最优 11、这份方案 12
 moon run cmd/main                    # 打印示例模型与一个"当前不支持"的诚实案例
 ```
 

@@ -31,12 +31,19 @@ $ErrorActionPreference = "Continue"
 # The reports, in the order a reader should read them: input first, then the kernel, then
 # branch and bound at each of its two budgets. `Paths` is what each report's numbers depend
 # on - a change anywhere in there makes the report a statement about older code.
+#
+# The list is "every package whose code runs during that command", not "the packages the
+# report is about": all four commands read their instances through `format`, and read +
+# validate them through `model`, which decides its own comparisons with `core`. Those three
+# were missing from three of the four lists, which meant a change to the MPS reader could
+# move the kernel's numbers without any report noticing. `moonopt.mbt` (the root package) is
+# deliberately absent: `cmd/parse` does not import it, so no report passes through it.
 $reports = @(
   @{
     File = "bench/parse-report.md"
     Scope = "model file parsing (MPS/LP reader)"
     Metrics = @("instances attempted", "parsed", "failed")
-    Paths = @("format", "model", "cmd/parse")
+    Paths = @("format", "model", "core", "cmd/parse")
     Command = "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-parse.ps1"
     Backs = "the claim that the reader takes the whole manifest: every instance parses, none fails"
   },
@@ -44,7 +51,7 @@ $reports = @(
     File = "bench/solve-report.md"
     Scope = "continuous kernel (LP relaxation, presolve, certificates)"
     Metrics = @("instances in manifest", "solved to optimality", "skipped (row count over the limit)", "other outcomes")
-    Paths = @("simplex", "presolve", "verify", "core", "model", "cmd/parse")
+    Paths = @("simplex", "presolve", "verify", "core", "model", "format", "cmd/parse")
     Command = "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 1000 -MaxIterations 20000 -Presolve"
     Backs = "the kernel's answer quality on real models: optima found, size refusals, numerical failures"
   },
@@ -52,7 +59,7 @@ $reports = @(
     File = "bench/mip-report.md"
     Scope = "branch and bound, 300-node budget over the whole manifest"
     Metrics = @("instances in manifest", "proven optimal (tree exhausted or every open bound closed)", "stopped at the node budget", "skipped (row count over the limit)", 'relaxations verified by `verify`', 'cuts added and verified by `verify_cut`')
-    Paths = @("mip", "simplex", "verify", "presolve", "core", "model", "cmd/parse")
+    Paths = @("mip", "simplex", "verify", "presolve", "core", "model", "format", "cmd/parse")
     Command = "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -MaxRows 300 -MaxNodes 300 -MaxIterations 5000"
     Backs = "that no run ends on a refused certificate, and that every reported point is an integer point of the model"
   },
@@ -60,7 +67,7 @@ $reports = @(
     File = "bench/mip-report-small.md"
     Scope = "branch and bound, 30000-node budget over the small-instance list"
     Metrics = @("instances in manifest", "proven optimal (tree exhausted or every open bound closed)", "stopped at the node budget", 'relaxations verified by `verify`', 'cuts added and verified by `verify_cut`')
-    Paths = @("mip", "simplex", "verify", "presolve", "core", "model", "cmd/parse")
+    Paths = @("mip", "simplex", "verify", "presolve", "core", "model", "format", "cmd/parse")
     Command = "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -Manifest bench/data/instances/small.txt -MaxRows 300 -MaxNodes 30000 -MaxIterations 20000 -Output bench/mip-report-small.md"
     Backs = "the M5 criterion that small integer instances reach their published optimum; cross-checked by bench/check-mip-objectives.ps1, which compares each proven objective with MIPLIB's own table and requires equality"
   }

@@ -10,6 +10,7 @@
 ```moonbit
 pub fn solve(model : @model.Model) -> Solution
 pub fn solve_with(model : @model.Model, options : SolveOptions) -> Solution
+pub fn relaxation(model : @model.Model) -> @model.Model
 
 pub(all) struct SolveOptions { max_iterations, presolve, max_nodes, cut_rounds }
 pub struct Solution { status, values, objective, iterations, nodes, bound, gap, message }
@@ -23,6 +24,7 @@ pub(all) enum SolveStatus { Optimal, Infeasible, Unbounded, NodeLimit, NotSolved
 | 三类情况一律 `NotSolved` 并带原话 | 松弛无界（改善射线不含整数性）、证书被拒（那是关于内核的陈述，不是关于模型的结论）、模型非法；另加"量到违反却写不出不可行证书"——Phase I 的人工和不足以解释它要证明的违反量 |
 | `values` 非空时才有 `objective` | 预算到顶且没找到整数点时 `objective` 为 0，`message` 用文字说明"还没有整数点" |
 | `bound` / `gap` 在所有路径同义 | 线性求解下 `bound = objective`、`gap = 0`（线性解就是它自己的界）；`NodeLimit` 下是仍在开的界 |
+| `relaxation` 是"另一问"的入口 | 整数模型不会以松弛的形式被回答，所以想要**界**（而不是最优整点）的调用方显式要它：同一个模型、同一批变量与顺序、相同的行、去掉整数性。它返回一个普通线性模型，走与任何线性模型相同的 `solve`（含化简与独立复核）；调用方手上那个点仍在同一空间里，可以用 `presolve` 的 `objective_value` / `max_row_violation` 读回，于是"当前方案 gap ≤ X%"是可算的（`examples/schedule_bound` 是这条链路的完整示例） |
 
 **状态口径与外部标准**：外部参照是 MathOptInterface 的 `TerminationStatusCode`。逐条比较过之后只有一处
 是实质差异：MOI 有 `ITERATION_LIMIT`，本项目的公开面**没有**枢轴上限用尽这个状态，它与数值失败、规模

@@ -124,6 +124,65 @@ fn continuous_lp() -> @model.Model {
 }
 
 ///|
+/// `relaxation` answers the other question a caller can ask about an integer model: not
+/// "what is the best whole point" but "what is the bound every whole point is measured
+/// against", which is what makes a plan someone already has checkable. The relaxation of
+/// `integer_mip()` is the same model without integrality, so its optimum (73/6) bounds the
+/// integer answer (10) — from above, because that model maximises; the direction is the
+/// model's sense, and getting it wrong is how a "gap" comes out negative. The variables keep
+/// their order, so the caller's own point still lives in the same space.
+test "the relaxation bounds the whole points and keeps the caller's space" {
+  let model = integer_mip()
+  let relaxed = @moonopt.relaxation(model)
+  assert_eq(relaxed.num_vars(), model.num_vars())
+  assert_eq(relaxed.num_constraints(), model.num_constraints())
+  for j = 0; j < relaxed.num_vars(); j = j + 1 {
+    assert_false(relaxed.get_var(j).is_int)
+    assert_true(relaxed.get_var(j).name == model.get_var(j).name)
+    assert_true(relaxed.get_var(j).ub == model.get_var(j).ub)
+  }
+  let bound = @moonopt.solve(relaxed)
+  assert_eq(bound.status, @moonopt.SolveStatus::Optimal)
+  assert_true(
+    @core.approx_eq(bound.objective, 73.0 / 6.0, rel=1.0e-9, abs=1.0e-9),
+  )
+  // A linear solve is its own bound, which is what makes the two numbers a gap.
+  assert_true(
+    @core.approx_eq(bound.bound, bound.objective, rel=1.0e-12, abs=0.0),
+  )
+  // A maximisation's relaxation is an upper bound, and here it is strictly above the integer
+  // answer: that difference is the number the relaxation exists to produce.
+  let answer = @moonopt.solve(model)
+  assert_eq(answer.status, @moonopt.SolveStatus::Optimal)
+  assert_true(bound.objective > answer.objective + 1.0e-6)
+  // The same model minimised instead: there the relaxation is a lower bound. Both directions
+  // are asserted because "a relaxation bounds the whole points" is all the helper promises.
+  let minimised = @model.Model::new(@model.Sense::Minimize)
+  let a = minimised.add_var("a", ub=2.0, is_int=true)
+  let b = minimised.add_var("b", ub=2.0, is_int=true)
+  minimised.set_objective([(a, 5.0), (b, 4.0)])
+  minimised.add_constraint([(a, 6.0), (b, 4.0)], @model.Rel::GreaterEqual, 13.0)
+  let low = @moonopt.solve(@moonopt.relaxation(minimised))
+  let whole = @moonopt.solve(minimised)
+  assert_eq(low.status, @moonopt.SolveStatus::Optimal)
+  assert_eq(whole.status, @moonopt.SolveStatus::Optimal)
+  assert_true(low.objective < whole.objective - 1.0e-6)
+  // The point of the plan the caller wrote down reads back on the relaxation: the same
+  // variable indices, the same rows, so the comparison is meaningful in both directions.
+  let plan : Array[Double] = [2.0, 0.0]
+  assert_true(
+    @core.approx_eq(
+      @presolve.objective_value(relaxed, plan),
+      10.0,
+      rel=1.0e-9,
+      abs=1.0e-9,
+    ),
+  )
+  assert_true(@presolve.max_row_violation(relaxed, plan) <= 1.0e-9)
+  assert_true(@presolve.max_bound_violation(relaxed, plan) <= 1.0e-9)
+}
+
+///|
 /// A model with integer variables is answered by the branch and bound, not by its
 /// relaxation: the relaxation's optimum here is 73/6 and the answer is 10.
 test "an integer model is solved to the integer optimum, not to its relaxation" {

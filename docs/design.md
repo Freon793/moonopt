@@ -21,7 +21,7 @@ simplex   稀疏修正单纯形与对偶单纯形，含证书的生产端自检�
 presolve  presolve / postsolve。依赖 core、model。
 verify    证书校验与割的再推导。依赖 core、model。
 mip       分支定界与割平面。依赖 core、model、simplex、verify、presolve（整数行的系数强化）。
-moonopt   根包：对外的 solve / solve_with 与结果类型，只做编排。
+moonopt   根包：对外的 solve / solve_with / relaxation 与结果类型，只做编排。
 ```
 
 规则：**算法细节只出现在被它服务的包里**，根包保持薄；包之间只经由 `.mbti` 公开接口通信。

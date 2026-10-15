@@ -315,6 +315,42 @@ pub fn solve(model : @model.Model) -> Solution {
 }
 
 ///|
+/// The same model with every integrality flag cleared — its **LP relaxation**.
+///
+/// This package answers a model with integer variables with the branch and bound (`mip`), on
+/// purpose: a relaxation is not an answer to an integer model. A caller who wants the *bound*
+/// instead — the number a plan they already have is measured against — asks for that
+/// explicitly, and this is the question: the same variables in the same order, the same rows,
+/// the same objective, no integrality. What comes back is an ordinary linear model, so it goes
+/// through `Model::solve` like any other, reduction and independent verification included, and
+/// `bound`/`gap` mean what they mean there (a linear solve is its own bound).
+///
+/// The variables keep their indices, so a point the caller already holds is still a point of
+/// the same space and can be read back on the relaxation: compare its `objective_value` with
+/// the relaxation's optimum to get the gap the plan is worth, and check
+/// `max_row_violation`/`max_bound_violation` on it if the plan is not known to be feasible.
+/// `examples/schedule_bound` is that whole workflow in one file.
+pub fn relaxation(model : @model.Model) -> @model.Model {
+  let relaxed = @model.Model::new(model.sense())
+  for j = 0; j < model.num_vars(); j = j + 1 {
+    let variable = model.get_var(j)
+    relaxed.add_var(variable.name, lb=variable.lb, ub=variable.ub, is_int=false)
+    |> ignore
+  }
+  relaxed.set_objective(@model.normalize_terms(model.objective()))
+  for i = 0; i < model.num_constraints(); i = i + 1 {
+    let constraint = model.constraint(i)
+    relaxed.add_named_constraint(
+      @model.normalize_terms(constraint.terms),
+      constraint.rel,
+      constraint.rhs,
+      constraint.name,
+    )
+  }
+  relaxed
+}
+
+///|
 /// `true` when the model has at least one integer variable.
 fn has_integer_variables(model : @model.Model) -> Bool {
   for j = 0; j < model.num_vars(); j = j + 1 {

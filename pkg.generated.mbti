@@ -7,6 +7,8 @@ import {
 }
 
 // Values
+pub fn relaxation(@model.Model) -> @model.Model
+
 pub fn solve(@model.Model) -> Solution
 
 pub fn solve_with(@model.Model, SolveOptions) -> Solution
