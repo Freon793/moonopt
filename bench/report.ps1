@@ -57,10 +57,10 @@ $reports = @(
   },
   @{
     File = "bench/mip-report.md"
-    Scope = "branch and bound, 300-node budget over the whole manifest"
+    Scope = "branch and bound, 600-node budget over the whole manifest"
     Metrics = @("instances in manifest", "proven optimal (tree exhausted or every open bound closed)", "stopped at the node budget", "skipped (row count over the limit)", 'relaxations verified by `verify`', 'cuts added and verified by `verify_cut`')
     Paths = @("mip", "simplex", "verify", "presolve", "core", "model", "format", "cmd/parse")
-    Command = "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -MaxRows 300 -MaxNodes 300 -MaxIterations 5000"
+    Command = "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -MaxRows 300 -MaxNodes 600 -MaxIterations 5000"
     Backs = "that no run ends on a refused certificate, and that every reported point is an integer point of the model"
   },
   @{
@@ -232,7 +232,7 @@ $build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/fetch-insta
 $build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-parse.ps1"
 $build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 1000 -MaxIterations 20000 -Presolve"
 $build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-relaxation-bounds.ps1"
-$build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -MaxRows 300 -MaxNodes 300 -MaxIterations 5000"
+$build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -MaxRows 300 -MaxNodes 600 -MaxIterations 5000"
 $build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -Manifest bench/data/instances/small.txt -MaxRows 300 -MaxNodes 30000 -MaxIterations 20000 -Output bench/mip-report-small.md"
 $build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-mip-objectives.ps1"
 $build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-mip-objectives.ps1 -Report bench/mip-report-small.md"

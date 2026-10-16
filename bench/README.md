@@ -34,7 +34,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File bench/fetch-instances.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-parse.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 1000 -MaxIterations 20000 -Presolve
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-relaxation-bounds.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -MaxRows 300 -MaxNodes 300 -MaxIterations 5000
+powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -MaxRows 300 -MaxNodes 600 -MaxIterations 5000
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-mip-objectives.ps1
 # 小规模实例的满预算口径（完成标准"M5 ①：小规模实例求到公开已知最优值"的证据）
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -Manifest bench/data/instances/small.txt -MaxRows 300 -MaxNodes 30000 -MaxIterations 20000 -Output bench/mip-report-small.md
@@ -118,7 +118,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-mip-objectives.p
   读不出来（索引宁可不出也不能印一个猜的数）、git 无法回答陈旧性。已验证：缺报告 `exit 2`、无 git 历史 `exit 4`。
 - `parse-report.md`：解析报告。含工具链版本与产生它的提交哈希，因此每个数字都可追溯到具体代码；
   记录每个实例的规模、整数列数与校验结论，失败的实例逐条给出原因与位置。
-- `mip-report.md`：分支定界报告（行数上限 300、节点预算 300）。清单里 32 个实例，逐实例给状态、
+- `mip-report.md`：分支定界报告（行数上限 300、节点预算 **600**、迭代上限 5000）。清单里 32 个实例，逐实例给状态、
   目标值、仍在开的界、`nodes` / `verified` / `cuts` 与点复核结论；脚本在退出码非零、条目数不符、
   出现被拒证书或点没通过复核时**拒绝写报告**。
 - `mip-report-small.md`：**小规模实例的满预算口径**（清单 `bench/data/instances/small.txt`、行数上限 300、

@@ -106,7 +106,7 @@ moon run cmd/parse -- bench --manifest instances.txt --mip --max-nodes 300
 | --- | --- | --- |
 | [`bench/parse-report.md`](bench/parse-report.md) | 全清单解析 | 32 个实例全部解析成功 |
 | [`bench/solve-report.md`](bench/solve-report.md) | 32 个实例、1000 行上限、20000 枢轴上限、presolve | 20 个求到最优、11 个超行数上限跳过、1 个到枢轴上限 |
-| [`bench/mip-report.md`](bench/mip-report.md) | 32 个实例、300 节点 | 3 个证到最优、12 个到节点预算、17 个跳过 |
+| [`bench/mip-report.md`](bench/mip-report.md) | 32 个实例、600 节点 | 4 个证到最优、11 个到节点预算、17 个跳过 |
 | [`bench/mip-report-small.md`](bench/mip-report-small.md) | 10 个实例、30000 节点 | 5 个证到公开已知最优值、5 个到节点预算 |
 
 上限是结果的一部分：报告头部逐字记录行数上限、枢轴上限与节点预算，不同上限下的计数不能互相比较。
