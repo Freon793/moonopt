@@ -300,3 +300,187 @@ test "the kernel's gap counts a reduced cost inside the tolerance band" {
   }
   assert_eq(seen, 1)
 }
+
+///|
+/// `min −x` subject to `x − y ≤ 1`, `x, y ≥ 0`: travelling `(1, 1)` keeps the row satisfied and
+/// lowers the objective without limit, and neither variable's bound stops it.
+fn unbounded_ray_model() -> @model.Model {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let x = model.add_var("x", lb=0.0)
+  let y = model.add_var("y", lb=0.0)
+  model.set_objective([(x, -1.0)])
+  model.add_constraint([(x, 1.0), (y, -1.0)], @model.Rel::LessEqual, 1.0)
+  model
+}
+
+///|
+/// The same model with the objective maximised: the *same* direction is now the improving one,
+/// and `verify` reads costs in the minimisation sense (`sense_sign · c`), so the rate has to come
+/// out negative.
+fn unbounded_ray_max_model() -> @model.Model {
+  let model = @model.Model::new(@model.Sense::Maximize)
+  let x = model.add_var("x", lb=0.0)
+  let y = model.add_var("y", lb=0.0)
+  model.set_objective([(x, 1.0)])
+  model.add_constraint([(x, 1.0), (y, -1.0)], @model.Rel::LessEqual, 1.0)
+  model
+}
+
+///|
+/// And with `x` free, which the kernel splits into two columns: the model's direction is a
+/// combination of kernel columns there rather than one of them, and both the slope and the
+/// objective rate have to be read off the model's variable rather than off the columns.
+fn unbounded_ray_free_model() -> @model.Model {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let x = model.add_var("x", lb=-@model.infinite_bound)
+  let y = model.add_var("y", lb=0.0)
+  model.set_objective([(x, -1.0)])
+  model.add_constraint([(x, 1.0), (y, -1.0)], @model.Rel::LessEqual, 1.0)
+  model
+}
+
+///|
+/// Solves `model`, hands the certificate to the checker, and compares the kernel's own reading of
+/// its direction with the four measurements the checker made. Returns how many of them the kernel
+/// reproduced, so a missing or mismatched one fails the test that calls this.
+fn check_unbounded_reading(model : @model.Model) -> Int32 raise {
+  let problem = match KernelProblem::from_model(model) {
+    Ok(value) => value
+    Err(reason) => fail("kernel refused the model: " + reason)
+  }
+  let options = SimplexOptions::default()
+  let state = State::new(problem, options)
+  let result = solve_with_state(state, problem, options)
+  assert_eq(result.status, Unbounded)
+  let certificate : @verify.Certificate = {
+    claim: @verify.Claim::Unbounded,
+    values: result.values,
+    duals: [],
+    ray: result.ray,
+    objective: 0.0,
+  }
+  let verdict = @verify.verify(model, certificate)
+  // The certificate is one the checker accepts, so the numbers below are about a certificate it
+  // judged rather than about one it refused for something else first.
+  assert_true(verdict.accepted)
+  let reading = state.unbounded_ray_reading(state.kernel_ray())
+  let mut seen = 0
+  for item in verdict.checks {
+    let matches = if item.name == "rows do not block the ray" {
+      @core.approx_eq(
+        reading.row_block,
+        item.measured,
+        rel=1.0e-12,
+        abs=1.0e-18,
+      )
+    } else if item.name == "bounds do not block the ray" {
+      @core.approx_eq(
+        reading.bound_block,
+        item.measured,
+        rel=1.0e-12,
+        abs=1.0e-18,
+      )
+    } else if item.name == "ray magnitude (must exceed the tolerance)" {
+      @core.approx_eq(
+        reading.magnitude,
+        item.measured,
+        rel=1.0e-12,
+        abs=1.0e-18,
+      )
+    } else if item.name == "objective improves along the ray" {
+      @core.approx_eq(
+        reading.improvement,
+        item.measured,
+        rel=1.0e-12,
+        abs=1.0e-18,
+      )
+    } else {
+      false
+    }
+    if matches {
+      seen = seen + 1
+    }
+  }
+  seen
+}
+
+///|
+/// The four measurements a checker makes about an **unboundedness ray**, on models the kernel
+/// solved itself: they have to come back as the checker's own numbers.
+///
+/// Unboundedness was the last claim the kernel stated without measuring its own certificate. It
+/// checked the *point* (a run that finds no limiting row is standing on a feasible one, and two
+/// `noswot` nodes reached this verdict while violating a row by its whole scale) and never looked
+/// at the *direction*, which the checker reads for four separate things. The models below are the
+/// three shapes that decide whether the reading is the checker's: a direction that leaves every
+/// row and every bound alone, the same direction on a maximisation (where the objective rate has
+/// to be negative because costs are read in the minimisation sense), and a free variable, whose
+/// model-side direction is a combination of two kernel columns.
+test "the kernel measures an unbounded ray the way the checker reads one" {
+  assert_eq(check_unbounded_reading(unbounded_ray_model()), 4)
+  assert_eq(check_unbounded_reading(unbounded_ray_max_model()), 4)
+  assert_eq(check_unbounded_reading(unbounded_ray_free_model()), 4)
+}
+
+///|
+/// The four ways a direction and its claim can part company, each measured rather than assumed.
+///
+/// `unbounded_ray_reading` is a function of the direction and the model, so the vectors below can
+/// be handed to it directly — which is what makes the failure modes testable at all: a run that is
+/// working correctly does not produce them, and the check exists for the runs that are not. On the
+/// model above the structural columns are `x` and `y` and the row's slack follows them.
+test "a direction that is not a recession direction is measured as one that fails" {
+  let problem = match KernelProblem::from_model(unbounded_ray_model()) {
+    Ok(value) => value
+    Err(reason) => fail("kernel refused the model: " + reason)
+  }
+  let state = State::new(problem, SimplexOptions::default())
+  // Travels into the row: `x` alone makes `x − y` grow, and a `≤` row cannot absorb that.
+  let against_the_row : Array[Double] = [1.0, 0.0, 0.0]
+  let row_reading = state.unbounded_ray_reading(against_the_row)
+  assert_true(row_reading.row_block > 1.0e-7)
+  assert_true(
+    @core.approx_eq(row_reading.row_block, 0.5, rel=1.0e-12, abs=1.0e-15),
+  )
+  // The zero vector satisfies both of the first two conditions and proves nothing, which is why
+  // the magnitude is measured at all.
+  let nothing : Array[Double] = [0.0, 0.0, 0.0]
+  let empty_reading = state.unbounded_ray_reading(nothing)
+  assert_true(empty_reading.magnitude <= 1.0e-7)
+  assert_true(empty_reading.row_block <= 1.0e-7)
+  assert_true(empty_reading.bound_block <= 1.0e-7)
+  assert_true(empty_reading.improvement >= -1.0e-7)
+  // A variable with both bounds cannot travel at all, whatever the rows allow: this is the same
+  // `(1, 1)` direction on a model where `y` is boxed.
+  let boxed = @model.Model::new(@model.Sense::Minimize)
+  let bx = boxed.add_var("x", lb=0.0)
+  let by = boxed.add_var("y", lb=0.0, ub=1.0)
+  boxed.set_objective([(bx, -1.0)])
+  boxed.add_constraint([(bx, 1.0), (by, -1.0)], @model.Rel::LessEqual, 1.0)
+  let boxed_problem = match KernelProblem::from_model(boxed) {
+    Ok(value) => value
+    Err(reason) => fail("kernel refused the model: " + reason)
+  }
+  let boxed_state = State::new(boxed_problem, SimplexOptions::default())
+  let travel : Array[Double] = [1.0, 1.0, 0.0]
+  let boxed_reading = boxed_state.unbounded_ray_reading(travel)
+  assert_true(boxed_reading.bound_block > 1.0e-7)
+  assert_true(boxed_reading.row_block <= 1.0e-7)
+  // And a direction that is a recession direction but improves nothing: it is the one condition
+  // that says the direction is worth travelling, and `min x` makes `(1, 1)` a worsening one.
+  let wrong_way = @model.Model::new(@model.Sense::Minimize)
+  let wx = wrong_way.add_var("x", lb=0.0)
+  let wy = wrong_way.add_var("y", lb=0.0)
+  wrong_way.set_objective([(wx, 1.0)])
+  wrong_way.add_constraint([(wx, 1.0), (wy, -1.0)], @model.Rel::LessEqual, 1.0)
+  let wrong_problem = match KernelProblem::from_model(wrong_way) {
+    Ok(value) => value
+    Err(reason) => fail("kernel refused the model: " + reason)
+  }
+  let wrong_state = State::new(wrong_problem, SimplexOptions::default())
+  let wrong_reading = wrong_state.unbounded_ray_reading(travel)
+  assert_true(wrong_reading.improvement >= -1.0e-7)
+  assert_true(wrong_reading.row_block <= 1.0e-7)
+  assert_true(wrong_reading.bound_block <= 1.0e-7)
+  assert_true(wrong_reading.magnitude > 1.0e-7)
+}

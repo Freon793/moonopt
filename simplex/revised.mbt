@@ -1989,6 +1989,7 @@ fn solve_with_state(
       false,
       problem.rhs,
     )
+    let unbounded_model_values = problem.solution(unbounded_values)
     if unbounded_residual > options.feasibility_tolerance {
       return {
         status: NumericalFailure,
@@ -2003,16 +2004,65 @@ fn solve_with_state(
         "), so the unboundedness verdict is not supported",
       }
     }
+    // The point has to satisfy the model's own bounds too, which the rows cannot see: a variable
+    // can sit inside every row and still be outside its own range. This is the measurement
+    // `finish_optimal` makes of the point it reports, and the unboundedness branch was the one
+    // place it was missing.
+    let unbounded_bounds = max_bound_violation(problem, unbounded_model_values)
+    if unbounded_bounds > options.feasibility_tolerance {
+      return {
+        status: NumericalFailure,
+        values: [],
+        objective: 0.0,
+        iterations: state.iterations,
+        duals: [],
+        ray: [],
+        basis: None,
+        message: "no limiting row was found, but the point the run is standing on leaves a variable's own bounds (scaled bound violation " +
+        unbounded_bounds.to_string() +
+        "), so the unboundedness verdict is not supported",
+      }
+    }
+    // And the *direction* has to be one: the ratio test finding no limit is a statement about the
+    // basis, and the checker reads the direction it produces for four separate things (the rows
+    // do not block it, the bounds do not block it, it is not the zero vector, and it improves the
+    // objective). A verdict that claims the objective is unbounded on the strength of a vector
+    // only one of those four was measured for is a wrong answer with a confident status.
+    let kernel_ray = state.kernel_ray()
+    let ray_reading = state.unbounded_ray_reading(kernel_ray)
+    if ray_reading.row_block > options.feasibility_tolerance ||
+      ray_reading.bound_block > options.feasibility_tolerance ||
+      ray_reading.magnitude <= options.feasibility_tolerance ||
+      ray_reading.improvement >= -options.feasibility_tolerance {
+      return {
+        status: NumericalFailure,
+        values: [],
+        objective: 0.0,
+        iterations: state.iterations,
+        duals: [],
+        ray: [],
+        basis: None,
+        message: "no limiting row was found, but the direction the ratio test produced is not a recession direction the checker reads (row block " +
+        ray_reading.row_block.to_string() +
+        ", bound block " +
+        ray_reading.bound_block.to_string() +
+        ", magnitude " +
+        ray_reading.magnitude.to_string() +
+        ", improvement " +
+        ray_reading.improvement.to_string() +
+        "), so the unboundedness verdict is not supported",
+      }
+    }
     return {
       status: Unbounded,
       // An unboundedness proof is a feasible point *plus* a direction that leaves it
       // improving forever, and the run is standing on the feasible point when the
       // ratio test finds nothing that limits the step.
-      values: problem.solution(state.values()),
+      values: unbounded_model_values,
       objective: 0.0,
       iterations: state.iterations,
       duals: [],
-      ray: state.model_ray(),
+      ray: state.model_ray_of(kernel_ray),
       basis: None,
       message: "the objective is unbounded on the feasible set",
     }

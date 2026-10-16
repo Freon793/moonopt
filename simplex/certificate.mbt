@@ -556,23 +556,43 @@ fn State::farkas_margin(self : State, ray : Array[Double]) -> (Double, Double) {
 }
 
 ///|
-/// The recession direction of an unbounded verdict, one entry per model variable.
+/// What the checker measures about the direction of an unboundedness claim, as the kernel
+/// measures it: the worst blocking by a row, the worst blocking by a variable's own bounds, the
+/// largest entry, and the rate the objective improves at. Every one of them is compared against
+/// the tolerance, and a direction that fails any of them is not a direction a checker will read
+/// as a proof.
+priv struct RayReading {
+  row_block : Double
+  bound_block : Double
+  magnitude : Double
+  improvement : Double
+}
+
+///|
+/// The recession direction of an unbounded verdict, in kernel columns.
 ///
-/// In kernel columns the direction is a single vector: the entering column moves by
-/// `σ` and the basic variable of row `i` moves by `−σ·dᵢ`, every other non-basic
-/// column staying put. Model variables are linear combinations of kernel columns, so
-/// the model-side direction is the same combination with the constant offsets
-/// dropped — a direction has no offset.
-fn State::model_ray(self : State) -> Array[Double] {
-  if self.ray_column < 0 {
-    return []
-  }
+/// Since a run that finds no limiting row is standing on a basis, the direction is a single
+/// vector: the entering column moves by `σ` and the basic variable of row `i` moves by
+/// `−σ·dᵢ`, every other non-basic column staying put.
+fn State::kernel_ray(self : State) -> Array[Double] {
   let kernel : Array[Double] = Array::make(self.n, 0.0)
+  if self.ray_column < 0 {
+    return kernel
+  }
   kernel[self.ray_column] = self.ray_sigma
   for i = 0; i < self.m; i = i + 1 {
     let column = self.basis[i]
     kernel[column] = kernel[column] - self.ray_sigma * self.direction_buffer[i]
   }
+  kernel
+}
+
+///|
+/// The recession direction of an unbounded verdict, one entry per model variable.
+///
+/// Model variables are linear combinations of kernel columns, so the model-side direction
+/// is the same combination with the constant offsets dropped — a direction has no offset.
+fn State::model_ray_of(self : State, kernel : Array[Double]) -> Array[Double] {
   let out : Array[Double] = []
   for m = 0; m < self.problem.var_columns.length(); m = m + 1 {
     let acc = @core.CompensatedSum::new()
@@ -583,4 +603,117 @@ fn State::model_ray(self : State) -> Array[Double] {
     out.push(acc.value())
   }
   out
+}
+
+///|
+/// The four numbers `verify` reads the **direction** of an unboundedness claim for, in the
+/// checker's own expressions and at the checker's own scales.
+///
+/// This is the last claimant the kernel was writing without measuring. Round 39, 41 and 42 closed
+/// the optimality claim (residual, multiplier signs, duality gap), the infeasibility claim (a
+/// Farkas ray's signs, its absorption by the box, its margin) and, for a point, the model's own
+/// variable bounds — and left the unboundedness claim checking one thing out of five. What it
+/// checked was the *point*: a run that finds no limiting row must be standing on a feasible one,
+/// and two `noswot` nodes reached this verdict while violating a row by its whole scale. What it
+/// never looked at is the *direction*, and the checker reads four separate things about it:
+///
+/// - **the rows do not block it**: for row `i`, `aᵢ·d` has to be `≤ 0` on a `≤` row, `≥ 0` on a
+///   `≥` row and `0` on an equality, scaled by `1 + |aᵢ·d|`;
+/// - **the bounds do not block it**: a variable with two bounds cannot travel at all, one with a
+///   single bound only in the direction it has room in, scaled by `1 + |dⱼ|`;
+/// - **it is a direction**: `max|dⱼ|` has to be above the tolerance, because the zero vector
+///   satisfies the two conditions above and proves nothing;
+/// - **the objective improves along it**: `c·d / (1 + Σ|cⱼdⱼ|)` has to be negative, which is the
+///   only one of the four that says the direction is worth travelling.
+///
+/// Every operand is the model's own, carried through the standard-form construction rather than
+/// recovered from it (`model_cost`, `model_lower`, `model_upper`, `row_relation`, `row_sign`), for
+/// the reason the rest of this file gives: a self-check that stands in for the checker has to
+/// measure what the checker measures. Two places where the two can still part company are the
+/// summation order — the row slopes are accumulated out of the CSC arrays, plain, as
+/// `max_scaled_residual` accumulates its own row-space sum — and a variable the kernel split in
+/// two, whose model entry is formed the same way `model_ray_of` forms it. Both are roundings of
+/// the last place, and neither can move a verdict that is judged at `tolerance` against a scale
+/// floored at one.
+fn State::unbounded_ray_reading(
+  self : State,
+  kernel : Array[Double],
+) -> RayReading {
+  let problem = self.problem
+  // `aᵢ·d` per kernel row, from the model's own columns only: the slack, surplus and artificial
+  // columns this package adds are kernel variables, and a model row is measured against the
+  // model's variables.
+  let slope : Array[Double] = Array::make(problem.nrows, 0.0)
+  let pointers = problem.matrix.col_pointers()
+  let rows = problem.matrix.row_indices()
+  let coefficients = problem.matrix.values_view()
+  for j = 0; j < problem.structural; j = j + 1 {
+    let value = kernel[j]
+    if value == 0.0 {
+      continue
+    }
+    let mut k = pointers[j]
+    let end = pointers[j + 1]
+    while k < end {
+      let row = rows[k]
+      slope[row] = slope[row] + coefficients[k] * value
+      k = k + 1
+    }
+  }
+  let mut row_block = 0.0
+  for r = 0; r < problem.nrows; r = r + 1 {
+    if problem.row_source[r] < 0 {
+      continue
+    }
+    // The kernel row is the model row or its negation, and `row_sign` is that `±1`. Multiplying
+    // (or dividing) a float by `±1` is exact, so this is the model's own `aᵢ·d`.
+    let model_slope = slope[r] / problem.row_sign[r]
+    let raw = match problem.row_relation[r] {
+      @model.Rel::LessEqual => @core.fmax(0.0, model_slope)
+      @model.Rel::GreaterEqual => @core.fmax(0.0, -model_slope)
+      @model.Rel::Equal => @core.fabs(model_slope)
+    }
+    let scaled = raw / (1.0 + @core.fabs(model_slope))
+    if scaled > row_block {
+      row_block = scaled
+    }
+  }
+  let direction = self.model_ray_of(kernel)
+  let mut bound_block = 0.0
+  let mut magnitude = 0.0
+  for j = 0; j < direction.length(); j = j + 1 {
+    let d = direction[j]
+    if @core.fabs(d) > magnitude {
+      magnitude = @core.fabs(d)
+    }
+    // "Is there a bound here" is asked with the checker's rule, not one of this file's own: a
+    // producer that answers it differently puts a term into the check the checker leaves out.
+    let lower = model_has_lower(problem.model_lower[j])
+    let upper = model_has_upper(problem.model_upper[j])
+    let raw = if lower && upper {
+      @core.fabs(d)
+    } else if lower {
+      @core.fmax(0.0, -d)
+    } else if upper {
+      @core.fmax(0.0, d)
+    } else {
+      0.0
+    }
+    let scaled = raw / (1.0 + @core.fabs(d))
+    if scaled > bound_block {
+      bound_block = scaled
+    }
+  }
+  let rate_acc = @core.CompensatedSum::new()
+  let abs_acc = @core.CompensatedSum::new()
+  for j = 0; j < direction.length(); j = j + 1 {
+    rate_acc.add(problem.model_cost[j] * direction[j])
+    abs_acc.add(@core.fabs(problem.model_cost[j] * direction[j]))
+  }
+  {
+    row_block,
+    bound_block,
+    magnitude,
+    improvement: rate_acc.value() / (1.0 + abs_acc.value()),
+  }
 }
