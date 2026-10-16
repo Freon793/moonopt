@@ -32,7 +32,7 @@ MIPLIB 2017 —— 它提供同样性质的工业实例，但以纯 MPS（gzip �
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/fetch-instances.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-parse.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 1000 -MaxIterations 20000 -Presolve
+powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 2200 -MaxIterations 20000 -Presolve
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-relaxation-bounds.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -MaxRows 300 -MaxNodes 600 -MaxIterations 5000
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-mip-objectives.ps1
@@ -139,15 +139,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-mip-objectives.p
   逐实例给出状态、目标值与枢轴迭代数；非最优结果逐条如实列出，包含内核自检测得的残差与负值。
   **枢轴上限是基准口径的一部分**（报告头部写明，且 `pivots` 列等于上限的实例就是在那里停下的）：
   上限不同的两份报告是两场实验，不能互相比较—— 这条以前只靠人记，现在写在报告里。
-  当前这份由 `-Relax -MaxRows 1000 -MaxIterations 20000 -Presolve` 生成（**上限现在是实测定的**：
-  它与同一份清单里 MIP 报告给每个松弛的上限一致；早先那个 1200 的口径下同一清单只有 18 个最优、
-  3 个到上限 —— 两场实验的数字都留在 `docs/history.md` 里）：
-  **32 个实例全覆盖、20 最优、11 因行数上限跳过、`refused` 归零、1 到上限（`fast0507`）**，
-  21 个实例经过化简、20 个重建解全部通过三项检查、0 次需要 Bland 恢复；总枢轴 12 336、
-  最大已解模型 664 行。两个从"上限挡住的"变成"解完的"实例是 `danoint`（1907 枢轴、
-  `62.637280418466226`）与 `mod010`（3455 枢轴）：它们在 1200 上限下一直报 `iteration-limit`。
-  `fast0507`（内核 489 行）需要的不止 20 000 枢轴，仍停在上限上——它那一行报的是内核自己测得的进度
-  （Phase I 人工和 / Phase II 内核目标值），不是答案。
+  当前这份由 `-Relax -MaxRows 2200 -MaxIterations 20000 -Presolve` 生成（**两个上限现在都是实测定的**：
+  枢轴上限 20 000 与同一份清单里 MIP 报告给每个松弛的上限一致——早先那个 1200 的口径下同一清单只有
+  18 个最优、3 个到上限；行上限 2200 是"最小覆盖已测最大可解模型"的值——稀疏 LU 之后内核不再分配稠密基逆，
+  实测 `cap6000`（**2176 行**）都能在枢轴上限内解完，而 `core2536-691`（2539 行）把整段 20 000 枢轴预算
+  花在 Phase I 上，所以 2200 把"解得了"和"解不了"的那条线画在两场实验的实测值之间。三场实验的数字都留在
+  `docs/history.md` 里）：
+  **32 个实例全覆盖、27 最优、4 因行数上限跳过、`refused` 归零、1 到上限（`fast0507`）**，
+  28 个实例经过化简、27 个重建解全部通过三项检查、0 次需要 Bland 恢复；总枢轴 **25 918**、
+  最大已解模型 **2176 行**。从"上限挡住的"变成"解完的"一共 9 个实例：`danoint`（1907 枢轴）与
+  `mod010`（3455 枢轴）是 1200→20000 枢轴那场解放出来的，`qiu` / `blp-ar98` / `dsbmip` / `aflow40b` /
+  `bc1` / `mitre` / `cap6000`（1128~2176 行）是 1000→2200 行这场解放出来的。
   **`refused` 归零与两个实例从"上限挡住"变成"解完"是稀疏 LU 与增益定价的直接结果**：`30n20b8`
   （presolve 后 11591 行）16 秒求到最优并进入对拍表；`bienst1` / `bienst2` 需要约 2130 次枢轴，
   在 1200 上限下一直报 `iteration-limit`，改按实测增益选列后各 582 次枢轴解完。

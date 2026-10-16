@@ -4,9 +4,11 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1
 #
 # Instances whose row count exceeds -MaxRows are reported as skipped rather than
-# attempted: the kernel keeps a dense basis inverse, so a large model needs the
-# sparse factorization that is the next milestone, and a ten minute hang would
-# look like a defect instead of a boundary.
+# attempted. The ceiling is measured, not arbitrary: the basis is factored sparsely
+# now, so the kernel does not allocate a dense inverse, and it solves every manifest
+# entry up to cap6000 (2176 rows) inside the pivot limit; core2536-691 (2539 rows)
+# spends its whole 20000-pivot budget in Phase I, which is exactly the kind of run a
+# ceiling exists to keep out of a report.
 #
 # The script refuses to write a report it cannot stand behind: a non-zero exit
 # from the kernel, or a run that did not cover every manifest entry, is an error.
@@ -159,7 +161,7 @@ $build += "| --- | --- |"
 $build += "| instances in manifest | $($rows.Count) |"
 $build += "| solved to optimality | $($optimal.Count) |"
 $build += "| skipped (row count over the limit) | $($skipped.Count) |"
-$build += "| refused (kernel problem over the dense-inverse row limit) | $($refused.Count) |"
+$build += "| refused (kernel problem over the sparse-LU row limit) | $($refused.Count) |"
 $build += "| other outcomes | $($other.Count) |"
 if ($Presolve) {
   $build += "| solved instances run through the reduction | $($reduced.Count) |"

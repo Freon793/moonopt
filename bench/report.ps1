@@ -49,10 +49,10 @@ $reports = @(
   },
   @{
     File = "bench/solve-report.md"
-    Scope = "continuous kernel (LP relaxation, presolve, certificates)"
+    Scope = "continuous kernel (LP relaxation, presolve, certificates), 2200-row budget over the whole manifest"
     Metrics = @("instances in manifest", "solved to optimality", "skipped (row count over the limit)", "other outcomes")
     Paths = @("simplex", "presolve", "verify", "core", "model", "format", "cmd/parse")
-    Command = "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 1000 -MaxIterations 20000 -Presolve"
+    Command = "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 2200 -MaxIterations 20000 -Presolve"
     Backs = "the kernel's answer quality on real models: optima found, size refusals, numerical failures"
   },
   @{
@@ -230,7 +230,7 @@ $build += ""
 $build += "``````powershell"
 $build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/fetch-instances.ps1"
 $build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-parse.ps1"
-$build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 1000 -MaxIterations 20000 -Presolve"
+$build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 2200 -MaxIterations 20000 -Presolve"
 $build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-relaxation-bounds.ps1"
 $build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -MaxRows 300 -MaxNodes 600 -MaxIterations 5000"
 $build += "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -Manifest bench/data/instances/small.txt -MaxRows 300 -MaxNodes 30000 -MaxIterations 20000 -Output bench/mip-report-small.md"
