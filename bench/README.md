@@ -169,7 +169,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-mip-objectives.p
 都给出一个可判定不等式；一旦松弛值超过官方最优值，就说明内核错了。
 
 下表是较早口径（1200 枢轴上限、16 个实例）下的一次快照，方向性结论不变。**当前口径的完整对拍就是这条
-命令的输出**（`checked 20, violations 0, not in the table 0`，口径见 `solve-report.md` 头部）：
+命令的输出**（`checked 27, violations 0, not in the table 0`，口径见 `solve-report.md` 头部）：
 
 | 实例 | 松弛目标值 | 官方最优值 | 结论 |
 | --- | ---: | ---: | --- |

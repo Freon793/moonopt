@@ -51,7 +51,7 @@
   **207/207**。
 - **结果能与 MIPLIB、GLPK / HiGHS 等外部工具和公开基准直接对拍**：输入输出是 MPS / LP，`bench/fetch-instances.ps1`
   取 MIPLIB 2017 实例，`bench/check-mip-objectives.ps1` 与官方最优值取等，`bench/check-relaxation-bounds.ps1`
-  把松弛界与官方最优值对拍（本机 `checked 20 / violations 0 / not in the table 0`）。
+  把松弛界与官方最优值对拍（本机 `checked 27 / violations 0 / not in the table 0`）。
 - **"上层启发式产出方案 → 用 moonopt 解 LP 松弛得到下界 → 给出 gap ≤ X%"**（申报书"预期使用场景"的第一条）：
   由 `relaxation`（顶层包）+ `solve` + `presolve::objective_value` / `max_row_violation` 三个公开函数组成，
   `examples/schedule_bound` 是可运行的一整条链路（本机实测：界 7.5、最优 11、手上方案 12 ⇒ gap ≤ 4.5；
