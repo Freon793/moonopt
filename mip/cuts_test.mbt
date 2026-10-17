@@ -68,6 +68,7 @@ fn cut_status_name(status : @mip.MipStatus) -> String {
     @mip.MipStatus::Infeasible => "infeasible"
     @mip.MipStatus::NodeLimit => "node-limit"
     @mip.MipStatus::UnboundedRelaxation => "unbounded-relaxation"
+    @mip.MipStatus::Unbounded => "unbounded"
     @mip.MipStatus::Unverified => "unverified"
     @mip.MipStatus::Invalid => "invalid"
   }

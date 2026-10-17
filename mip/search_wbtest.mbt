@@ -101,6 +101,27 @@ test "the dive size counts fractional integers and only those" {
 }
 
 ///|
+/// The integrality half of an unboundedness proof: only integer variables have to be whole,
+/// a value within the tolerance of a whole number counts as whole, and the continuous
+/// variables are never the reason. The same routine reads the point and the ray, so a
+/// fractional continuous coordinate cannot fail the proof and a fractional integer one
+/// cannot pass it.
+test "integral_on_integers reads only the integer variables, against the tolerance" {
+  let model = @model.Model::new(@model.Sense::Maximize)
+  model.add_var("x", lb=0.0, is_int=true) |> ignore
+  model.add_var("y", lb=0.0, is_int=false) |> ignore
+  // A whole integer next to a fractional continuous value: integral.
+  assert_true(integral_on_integers(model, [2.0, 0.5], 1.0e-7))
+  // A hair off the whole number is still whole at this tolerance.
+  assert_true(integral_on_integers(model, [2.0 + 1.0e-9, 0.5], 1.0e-7))
+  // The continuous coordinate is fractional both times and never changes the answer.
+  assert_true(integral_on_integers(model, [3.0, 0.25], 1.0e-7))
+  // A fractional integer value is not integral, whatever the continuous value does.
+  assert_false(integral_on_integers(model, [2.5, 0.0], 1.0e-7))
+  assert_false(integral_on_integers(model, [2.0 + 1.0e-4, 0.0], 1.0e-7))
+}
+
+///|
 /// The dive is what a relaxation with no whole point is offered, and its step budget is
 /// what keeps it from being a way of not searching. Two properties hold whatever the budget
 /// is: the walk never spends more than the budget, and whatever it hands back is a whole

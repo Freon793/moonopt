@@ -19,7 +19,9 @@
 /// model goes to the branch and bound, whose statuses map onto `Optimal`,
 /// `Infeasible`, and — when the node budget runs out with work left — `NodeLimit`,
 /// where `values` is a feasible integer point that is *not* proven optimal and
-/// `bound`/`gap` say how much room is left.
+/// `bound`/`gap` say how much room is left; an unbounded relaxation whose point and
+/// ray are integral on every integer variable maps onto `Unbounded`, and any other
+/// unbounded relaxation stays `NotSolved`.
 ///
 /// With presolve on — the default — the model is reduced first and the kernel's
 /// solution is mapped back to the original variables. The way back is *verified*,
@@ -46,9 +48,11 @@ pub(all) enum SolveStatus {
   /// No feasible point exists, and that is proven — a Farkas ray for a linear model, an
   /// exhausted tree with no integer point for one with integer variables.
   Infeasible
-  /// The objective has no bound on the feasible set (a linear model; for an integer
-  /// model an unbounded *relaxation* is reported as `NotSolved`, because an improving
-  /// ray of the relaxation need not carry any lattice points).
+  /// The objective has no bound on the feasible set. For a linear model that is the
+  /// kernel's own verdict; for an integer model it is reported only when the relaxation's
+  /// point and improving ray are integral on every integer variable — otherwise the
+  /// relaxation is `NotSolved`, because an improving ray need not carry any lattice
+  /// points.
   Unbounded
   /// The search stopped at the node budget with work left. `values` is a feasible
   /// integer point that is **not** proven optimal, and `bound` and `gap` are the two
@@ -232,11 +236,13 @@ fn from_simplex(result : @simplex.SimplexResult) -> Solution {
 /// proven" would throw away the two numbers that say how much is left.
 ///
 /// The three statuses that are *not* an answer to the question all come back as
-/// `NotSolved`, each with the search's own words: an unbounded relaxation (an improving
-/// ray of the relaxation carries no integrality of its own), a certificate the
-/// independent checker refused (the kernel is wrong somewhere, which is not a statement
-/// about this model), and a model that failed validation. None of them may be reported
-/// as `Unbounded`, `Optimal` or `Infeasible`, because none of them proves any of those.
+/// `NotSolved`, each with the search's own words: an unbounded relaxation whose ray
+/// carries no integrality (an improving ray of the relaxation need not carry lattice
+/// points), a certificate the independent checker refused (the kernel is wrong
+/// somewhere, which is not a statement about this model), and a model that failed
+/// validation. None of them may be reported as `Unbounded`, `Optimal` or `Infeasible`,
+/// because none of them proves any of those — only the search's own `Unbounded`, an
+/// integral point and ray, maps onto the public `Unbounded`.
 fn from_mip(result : @mip.MipResult) -> Solution {
   match result.status {
     @mip.MipStatus::Optimal =>
@@ -281,6 +287,21 @@ fn from_mip(result : @mip.MipResult) -> Solution {
         nodes: result.nodes,
         bound: result.bound,
         gap: result.gap,
+        message: result.message,
+      }
+    @mip.MipStatus::Unbounded =>
+      {
+        // The search proved the integer model unbounded with an integral point and an
+        // integral ray (both carried on `result`), so this is the same verdict as a linear
+        // solve: `Unbounded`, with no values in the public result — the point and ray are
+        // the proof, and they live on `MipResult` the way the kernel's do on `SimplexResult`.
+        status: Unbounded,
+        values: [],
+        objective: 0.0,
+        iterations: 0,
+        nodes: result.nodes,
+        bound: 0.0,
+        gap: 0.0,
         message: result.message,
       }
     @mip.MipStatus::Unverified =>

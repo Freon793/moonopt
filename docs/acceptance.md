@@ -14,13 +14,13 @@
 
 | # | 验收要求 | 证据 | 复核方式 |
 | --- | --- | --- | --- |
-| 1 | 以 MoonBit 为主要实现语言（`moonc` 不低于 0.10.14） | 非测试 MoonBit 实现 **46 个文件 / 16 991 行**（测试另 28 文件 / 7 377 行，合计 74 文件 / 24 368 行）；仓库里**没有**任何非 MoonBit 的实现文件；零 FFI、零第三方运行期依赖（库包不引任何第三方包，仅 `cmd/parse` 引官方 `moonbitlang/x` 的 `fs`/`sys`）；工具链 **moonc v0.10.15+943464bfa**（本机 `moon version --all` 与 CI 当次日志逐字一致） | `moon check --deny-warn`；`moon version --all`；`git ls-files '*.mbt'` 后按 `_(wb)?test\.mbt$` 分流、用 `[IO.File]::ReadAllLines` 计行（**不能用 `Measure-Object -Line`：它不数空行**，会少算约 800 行；本行数字随每次代码改动重算）；`simplex/moon.pkg` 等包配置 |
+| 1 | 以 MoonBit 为主要实现语言（`moonc` 不低于 0.10.14） | 非测试 MoonBit 实现 **46 个文件 / 17 270 行**（测试另 28 文件 / 7 714 行，合计 74 文件 / 24 984 行）；仓库里**没有**任何非 MoonBit 的实现文件；零 FFI、零第三方运行期依赖（库包不引任何第三方包，仅 `cmd/parse` 引官方 `moonbitlang/x` 的 `fs`/`sys`）；工具链 **moonc v0.10.15+943464bfa**（本机 `moon version --all` 与 CI 当次日志逐字一致） | `moon check --deny-warn`；`moon version --all`；`git ls-files '*.mbt'` 后按 `_(wb)?test\.mbt$` 分流、用 `[IO.File]::ReadAllLines` 计行（**不能用 `Measure-Object -Line`：它不数空行**，会少算约 800 行；本行数字随每次代码改动重算）；`simplex/moon.pkg` 等包配置 |
 | 2 | GitHub 仓库公开可访问、提交记录清晰 | 公开仓库 `Freon793/moonopt`（默认分支 `main`，Apache-2.0 被 GitHub 识别）；**159 个提交**，唯一作者与仓库所有者一致，全部落在 2026-09-14 ~ 10-15；其中 **143 个提交信息带正文**（写明"做了什么 / 为什么 / 证据"） | `git log --oneline`；GitHub 仓库页；`git rev-list --count HEAD` |
 | 3 | 源代码结构清晰，能完成声明的核心功能 | 10 个包各司其职（`core`/`model`/`format`/`simplex`/`presolve`/`verify`/`mip`/`oracle`/`cmd/*`），包边界与依赖规则写在 [`design.md`](design.md)；核心功能有基准报告 | [`design.md`](design.md)；`bench/parse-report.md`、`bench/solve-report.md`、`bench/mip-report.md`、`bench/mip-report-small.md` |
 | 4 | 提供 README，说明目标 / 安装 / 使用 / 示例，且可复现 | [`../README.md`](../README.md) 的四要素齐备（定位与"为什么需要它"、`moon add` 安装、CLI 与 API 用法、可运行示例）；本文件第 2 节给出评审可执行的最短复现路径 | 见下方"五分钟复现" |
 | 5 | 使用持续集成工具并覆盖**检查、构建、测试**流程 | [`.github/workflows/check.yml`](../.github/workflows/check.yml)：`check` 任务在 Linux / macOS / Windows 上按序跑 `moon check --deny-warn` → `moon build` → `format diff` → `info check` → `moon test --deny-warn` → 报告陈旧性；`targets` 任务在 wasm-gc / js 上跑 `moon build --target <t>` → `moon test --target <t>`。发布 `0.2.0` 的那次运行五个任务全绿，日志里 `Total tests: 198, passed: 198, failed: 0` 与 `4 report(s), 0 stale` | GitHub Actions 运行页；每个任务都在注解里写出本次使用的工具链版本 |
 | 6 | 提供至少一个可运行示例或最小使用样例 | `examples/production_plan`（最优 21）、`examples/transportation`（最优 11）、**`examples/schedule_bound`（手上已有一份方案时算它的 gap：LP 界 7.5、最优 11、这份方案 12 ⇒ gap ≤ 4.5）**、`cmd/main`（含一个"当前不支持"的诚实案例），README 另给最小 API 片段 | `moon run examples/production_plan` / `examples/transportation` / `examples/schedule_bound` |
-| 7 | 提供完整测试，覆盖核心功能路径 | **207 个测试 / 28 个测试文件**在 native / wasm-gc / js 三目标全绿（本机 207/207；CI 下一次运行会显示同样的数），覆盖：与 `oracle` 的随机 LP 差分、presolve/postsolve 还原一致性、证书"故意做坏必须被拒"、无效割必须被拒、`verified == nodes` 不变量、CLI 文本与 JSON 两条路径、"不可行主张必须能被人工和解释"这条内核自检判据、cutoff 收紧节点盒子的四种情形、`box_minimum` 在真实实例量级上的带内行为与"内核量与校验器量是同一个数"、变量界自检、Farkas 射线的三条测量与无界射线的四条测量都与校验器同尺（含"零向量与走错方向"两种失败模式）、整数行强化"原模型与强化后的模型在整个盒子上接受完全相同的整点"（含变量界与向下的界）、`relaxation` "两种优化方向下都是合法界且调用方的点仍在同一空间"、以及"没有结论的节点仍把它的界留在开集里" | `moon test`（及 `--target wasm-gc` / `--target js`） |
+| 7 | 提供完整测试，覆盖核心功能路径 | **210 个测试 / 28 个测试文件**在 native / wasm-gc / js 三目标全绿（本机 210/210；CI 下一次运行会显示同样的数），覆盖：与 `oracle` 的随机 LP 差分、presolve/postsolve 还原一致性、证书"故意做坏必须被拒"、无效割必须被拒、`verified == nodes` 不变量、CLI 文本与 JSON 两条路径、"不可行主张必须能被人工和解释"这条内核自检判据、cutoff 收紧节点盒子的四种情形、`box_minimum` 在真实实例量级上的带内行为与"内核量与校验器量是同一个数"、变量界自检、Farkas 射线的三条测量与无界射线的四条测量都与校验器同尺（含"零向量与走错方向"两种失败模式）、整数行强化"原模型与强化后的模型在整个盒子上接受完全相同的整点"（含变量界与向下的界）、`relaxation` "两种优化方向下都是合法界且调用方的点仍在同一空间"、整数无界性的两条路径（点与射线都整数时报 `Unbounded`；点或射线分数时保守回退 `UnboundedRelaxation`）、以及"没有结论的节点仍把它的界留在开集里" | `moon test`（及 `--target wasm-gc` / `--target js`） |
 | 8 | 发布到 mooncakes.io | `Freon793/moonopt` 已发布（`0.1.0`、`0.1.1`、`0.1.2`、`0.2.0`、**`0.3.0`**），注册表可解析、可安装；发布物自包含且不含第三方数据。**最新一版 `0.3.0` 的发布动作与消费都实测过**：`moon publish` 返回 `Server status: 200 OK`；空白工程里 `moon add Freon793/moonopt@0.3.0` 下载成功、`moon check --deny-warn` 退出 0、**七项公开契约实测 `FAILURES: 0`**（`0.2.0` 当时是四项）。`0.3.0` 补齐的正是申报书核心清单里 `0.2.0` 缺的那几项（Devex 定价、对偶固定、整数行强化、`relaxation`），所以"从注册表装的这一版有没有申报书列的能力"这件事现在是**可核对**的 | `moon add Freon793/moonopt@0.3.0`（见下方第 3 节） |
 | 9 | 采用 OSI 认可的开源许可证；参考/移植需符合原项目许可证 | **Apache-2.0**（`LICENSE` + `moon.mod` 的 `license`）；项目为**原创实现**，未移植任何第三方代码；基准数据（MIPLIB 2017）只下载、不入库、且被 `.moonignore` 排除在发布归档之外 | `LICENSE`；`bench/README.md` 的数据政策；`.moonignore` |
 
@@ -48,7 +48,7 @@
 - **库包零第三方依赖、可编译到 native / wasm-gc / js**：每个库包的 `moon.pkg` 只 import `moonbitlang/core/*`，
   唯一引第三方的是 CLI `cmd/parse`（官方 `moonbitlang/x` 的 `fs` / `sys`）；CI 的 `targets` job 在
   wasm-gc / js 上 build + test，本机 `moon test --target wasm` / `--target wasm-gc` / `--target js` 各
-  **207/207**。
+  **210/210**。
 - **结果能与 MIPLIB、GLPK / HiGHS 等外部工具和公开基准直接对拍**：输入输出是 MPS / LP，`bench/fetch-instances.ps1`
   取 MIPLIB 2017 实例，`bench/check-mip-objectives.ps1` 与官方最优值取等，`bench/check-relaxation-bounds.ps1`
   把松弛界与官方最优值对拍（本机 `checked 27 / violations 0 / not in the table 0`）。
@@ -66,7 +66,7 @@ git clone https://github.com/Freon793/moonopt && cd moonopt
 # ① 检查 / 构建 / 测试（与 CI 相同的三步）
 moon check --deny-warn
 moon build
-moon test                             # 207 个测试
+moon test                             # 210 个测试
 
 # ② 可运行示例
 moon run examples/production_plan     # 最优 21 at (3, 1.5)
@@ -133,7 +133,11 @@ moon add Freon793/moonopt
   另加一条关于算术自洽的代理判据（人工和必须能吸收它要解释的违反量）；任一不成立就**不发证书**、
   报 `NumericalFailure`，搜索按"没有结论的松弛"继续。限度：射线的**构造**仍是 Phase I 的最优对偶解，
   不是显式导出的射线；
-- 整数无界性（整数射线）未证明；`fast0507` 在报告的枢轴上限（20 000）内跑不完；
+- **整数无界性已能证明，但只覆盖"点与射线在整数变量上都取整数值"的情形**：内核报松弛无界时，若证书里的点与
+  改善射线在整数变量上都是整数，`x⁰ + k·d` 对每个整数 `k ≥ 0` 保持整数且可行，于是报 `MipStatus::Unbounded`
+  （`MipResult::values` + `ray` 是证明的两半）；任一不是整数则仍报 `UnboundedRelaxation`（松弛无界、模型未知）。
+  没覆盖的是"内核射线本身是分数"的情形——把它按分母缩放到整数需要额外一步；而"找整数可行点"那半边仍归搜索。
+  `fast0507` 在报告的枢轴上限（20 000）内跑不完；
   精确 steepest-edge 与行 / 列的支配检测等 presolve 归约未做（Dantzig / 实测增益 / Devex 三条定价规则、
   对偶固定、整数路径的**隐含整数界**都已落地并附实测；整数路径的另一半——**系数抬高**——在本语料上一次也不
   触发，原因与那次被回退的放宽实验见 [`algorithms.md`](algorithms.md#4-presolve-与-postsolve)）；

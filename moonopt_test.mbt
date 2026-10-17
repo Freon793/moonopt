@@ -275,18 +275,20 @@ test "an integer model with no integer point is proved infeasible" {
 }
 
 ///|
-/// An unbounded *relaxation* is not an unbounded model. The improving ray of the
-/// relaxation carries no integrality of its own, so this comes back as `NotSolved` with
-/// the search's own words — never as `Unbounded`, which would be a claim about a model
-/// nothing has proven anything about.
-test "an unbounded relaxation is not reported as an unbounded integer model" {
+/// An unbounded relaxation whose point and ray are integral on the integer variable IS an
+/// unbounded model, and the public status says so: `max x + y  s.t.  x - y <= 3` with `x`
+/// integer and no upper bound on either variable has the integral ray `(1, 1)` from the
+/// integral point `(0, 0)`. The public `Solution` carries no values — a point and a ray are
+/// the proof, and they live on the low-level `MipResult` the way the kernel's do — so the
+/// status and the message are what the caller reads.
+test "an integer model an integral ray proves unbounded is reported unbounded" {
   let m = @model.Model::new(@model.Sense::Maximize)
   let x = m.add_var("x", is_int=true)
   let y = m.add_var("y")
   m.set_objective([(x, 1.0), (y, 1.0)])
   m.add_constraint([(x, 1.0), (y, -1.0)], @model.Rel::LessEqual, 3.0)
   let sol = @moonopt.solve(m)
-  assert_eq(sol.status, @moonopt.SolveStatus::NotSolved)
+  assert_eq(sol.status, @moonopt.SolveStatus::Unbounded)
   assert_eq(sol.values.length(), 0)
   assert_true(sol.message.length() > 0)
 }

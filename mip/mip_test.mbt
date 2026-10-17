@@ -59,6 +59,7 @@ fn status_name(status : @mip.MipStatus) -> String {
     @mip.MipStatus::Infeasible => "infeasible"
     @mip.MipStatus::NodeLimit => "node limit"
     @mip.MipStatus::UnboundedRelaxation => "unbounded relaxation"
+    @mip.MipStatus::Unbounded => "unbounded"
     @mip.MipStatus::Unverified => "unverified"
     @mip.MipStatus::Invalid => "invalid"
   }
@@ -358,16 +359,57 @@ test "a model with no integer point is proved infeasible" {
 }
 
 ///|
-/// An unbounded relaxation is reported as exactly that: the run does not claim the model
-/// is unbounded, because an improving ray carries no integrality of its own.
-test "an unbounded relaxation is not reported as an unbounded model" {
+/// An unbounded relaxation whose point and ray are integral is an unbounded *model*:
+/// `max x + y  s.t.  x - y <= 3` has `x` integer and no upper bound on either variable, so
+/// the ray `x⁰ + k·d` stays integral and feasible for every `k >= 0`. The run reports
+/// `Unbounded` with the point (`values`) and the direction (`ray`) as the two halves of
+/// the proof.
+test "an unbounded relaxation with an integral ray is an unbounded model" {
   let model = unbounded_relaxation_mip()
   let result = @mip.solve_mip(model, @mip.MipOptions::default())
-  assert_eq(result.status, @mip.MipStatus::UnboundedRelaxation)
-  assert_eq(result.values.length(), 0)
+  assert_eq(result.status, @mip.MipStatus::Unbounded)
   assert_eq(result.nodes, 1)
   assert_eq(result.verified, 1)
   assert_true(result.message.length() > 0)
+  // Both halves are integral on the integer variable, which is what turns the relaxation's
+  // unboundedness into the model's: the point it leaves from and the direction it improves
+  // along must stay whole for the ray to carry lattice points.
+  for j = 0; j < model.num_vars(); j = j + 1 {
+    if model.get_var(j).is_int {
+      assert_true(
+        @core.approx_eq(
+          result.values[j],
+          nearest_int(result.values[j]),
+          rel=0.0,
+          abs=1.0e-7,
+        ),
+      )
+      assert_true(
+        @core.approx_eq(
+          result.ray[j],
+          nearest_int(result.ray[j]),
+          rel=0.0,
+          abs=1.0e-7,
+        ),
+      )
+    }
+  }
+}
+
+///|
+/// The conservative half of the check: an unbounded relaxation whose point is not integral
+/// stays `UnboundedRelaxation`. `2x = 1` forces every feasible `x` to `0.5`, so there is no
+/// integer point to start an integral ray from, and the run says exactly that instead of
+/// claiming an unbounded model it cannot prove.
+test "an unbounded relaxation with a fractional point stays unbounded-relaxation" {
+  let model = @model.Model::new(@model.Sense::Maximize)
+  let x = model.add_var("x", lb=0.0, is_int=true)
+  let y = model.add_var("y", lb=0.0, is_int=false)
+  model.set_objective([(y, 1.0)])
+  model.add_constraint([(x, 2.0)], @model.Rel::Equal, 1.0)
+  let result = @mip.solve_mip(model, @mip.MipOptions::default())
+  assert_eq(result.status, @mip.MipStatus::UnboundedRelaxation)
+  assert_eq(result.ray.length(), 0)
 }
 
 ///|

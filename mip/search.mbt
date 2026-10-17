@@ -427,6 +427,27 @@ fn most_fractional(
 }
 
 ///|
+/// `true` when `x` is within `tolerance` of a whole number on every integer variable.
+///
+/// This is the integrality half of an unboundedness proof: an integral point plus an
+/// integral recession direction stays integral along the whole ray (`x + k·d`), so the two
+/// together turn the relaxation's unboundedness — already a checked certificate — into the
+/// integer model's. Continuous variables are not consulted: only the integer ones have to
+/// be whole for the ray to carry lattice points.
+fn integral_on_integers(
+  model : @model.Model,
+  x : Array[Double],
+  tolerance : Double,
+) -> Bool {
+  for j = 0; j < model.num_vars() && j < x.length(); j = j + 1 {
+    if model.get_var(j).is_int && @core.fabs(x[j] - round_of(x[j])) > tolerance {
+      return false
+    }
+  }
+  true
+}
+
+///|
 /// `true` when the repair left the multipliers exactly as they were.
 ///
 /// Written out rather than compared with `==`: what is being asked is whether the repair
@@ -830,6 +851,7 @@ fn solve_mip_unchanged(
       verified: 0,
       cuts: 0,
       strengthening: stats,
+      ray: [],
       message: "model is not well formed: " + issues[0],
     }
   }
@@ -949,6 +971,7 @@ fn solve_mip_unchanged(
           verified,
           cuts: cuts_added,
           strengthening: stats,
+          ray: [],
           message: "a relaxation's certificate was refused at node " +
           index.to_string() +
           " (depth " +
@@ -1001,6 +1024,7 @@ fn solve_mip_unchanged(
                   verified,
                   cuts: cuts_added,
                   strengthening: stats,
+                  ray: [],
                   message: reason,
                 }
               Ok(cuts) => cuts
@@ -1056,6 +1080,7 @@ fn solve_mip_unchanged(
                   verified,
                   cuts: cuts_added,
                   strengthening: stats,
+                  ray: [],
                   message: "the relaxation of the cut root was refused: " +
                   refused,
                 }
@@ -1113,7 +1138,29 @@ fn solve_mip_unchanged(
     }
     match solution.status {
       NodeStatus::Infeasible => ()
-      NodeStatus::Unbounded =>
+      NodeStatus::Unbounded => {
+        // An unbounded relaxation is not an unbounded model unless the improving ray carries
+        // lattice points. The relaxation's own certificate — already accepted by `@verify`
+        // above — proves `solution.values` feasible and `solution.ray` a recession direction
+        // the objective improves along forever. What integrality adds is that
+        // `values + k·ray` stays integral for every integer `k >= 0`: an integral point plus
+        // an integral ray is an unbounded integer model, and the two are the proof.
+        if integral_on_integers(problem, solution.values, options.tolerance) &&
+          integral_on_integers(problem, solution.ray, options.tolerance) {
+          return {
+            status: MipStatus::Unbounded,
+            values: solution.values,
+            objective: solution.objective,
+            bound: 0.0,
+            gap: 0.0,
+            nodes: solved,
+            verified,
+            cuts: cuts_added,
+            strengthening: stats,
+            ray: solution.ray,
+            message: "the relaxation is unbounded and its point and ray are integral, so the integer model is unbounded",
+          }
+        }
         return {
           status: MipStatus::UnboundedRelaxation,
           values: incumbent,
@@ -1128,8 +1175,10 @@ fn solve_mip_unchanged(
           verified,
           cuts: cuts_added,
           strengthening: stats,
+          ray: [],
           message: "a relaxation is unbounded, which does not prove the integer problem is",
         }
+      }
       NodeStatus::Unfinished => {
         // The node could not be judged, so the tree cannot be called exhausted. Recorded
         // and counted, not silently pruned — and its bound stays open with it: the node is not
@@ -1253,6 +1302,7 @@ fn solve_mip_unchanged(
                 verified,
                 cuts: cuts_added,
                 strengthening: stats,
+                ray: [],
                 message: "a certificate was refused while the primal heuristic repaired a rounding of node " +
                 index.to_string() +
                 ": " +
@@ -1325,6 +1375,7 @@ fn solve_mip_unchanged(
                 verified,
                 cuts: cuts_added,
                 strengthening: stats,
+                ray: [],
                 message: "a certificate was refused while the primal heuristic pumped node " +
                 index.to_string() +
                 ": " +
@@ -1459,6 +1510,7 @@ fn solve_mip_unchanged(
                   verified,
                   cuts: cuts_added,
                   strengthening: stats,
+                  ray: [],
                   message: "a certificate was refused while the primal heuristic walked node " +
                   index.to_string() +
                   " down to a whole point: " +
@@ -1541,6 +1593,7 @@ fn solve_mip_unchanged(
       verified,
       cuts: cuts_added,
       strengthening: stats,
+      ray: [],
       message: unfinished_nodes.to_string() +
       " node relaxation(s) did not finish, so the tree is not exhausted",
     }
@@ -1556,6 +1609,7 @@ fn solve_mip_unchanged(
       verified,
       cuts: cuts_added,
       strengthening: stats,
+      ray: [],
       message: "every node was pruned without an integer point, so none exists",
     }
   }
@@ -1569,6 +1623,7 @@ fn solve_mip_unchanged(
     verified,
     cuts: cuts_added,
     strengthening: stats,
+    ray: [],
     message: "",
   }
 }
@@ -1608,6 +1663,7 @@ fn limit_result(
     verified,
     cuts: cuts_added,
     strengthening: stats,
+    ray: [],
     message: "relaxation budget of " +
     options.max_nodes.to_string() +
     " reached with " +

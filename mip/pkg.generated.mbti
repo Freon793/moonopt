@@ -47,6 +47,7 @@ pub struct MipResult {
   verified : Int
   cuts : Int
   strengthening : @presolve.StrengthenStats
+  ray : Array[Double]
   message : String
 } derive(@debug.Debug)
 
@@ -55,6 +56,7 @@ pub(all) enum MipStatus {
   Infeasible
   NodeLimit
   UnboundedRelaxation
+  Unbounded
   Unverified
   Invalid
 } derive(Eq, @debug.Debug)

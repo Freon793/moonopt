@@ -20,11 +20,16 @@
 /// refuses stops the run with `Unverified` and the verifier's own measurements, rather
 /// than branching on an answer nothing can justify.
 ///
-/// **An unbounded relaxation is not reported as an unbounded model.** An LP that is
-/// unbounded above does not imply the integer problem is: the improving ray may carry no
-/// lattice points. Proving a MIP unbounded needs an *integral* ray from an integral
-/// feasible point, which this round does not build, so the run says
-/// `UnboundedRelaxation` and leaves the question where it is.
+/// **An unbounded relaxation is not reported as an unbounded model unless it proves it.**
+/// An LP that is unbounded above does not imply the integer problem is: the improving ray
+/// may carry no lattice points. Proving a MIP unbounded needs an *integral* ray from an
+/// *integral* feasible point, and the relaxation's own certificate supplies both — a point
+/// `x⁰` and a recession direction `d` with the objective improving along it, each already
+/// checked by `@verify`. When `x⁰` and `d` are also integral on every integer variable,
+/// `x⁰ + k·d` stays integral and feasible for every integer `k ≥ 0`, so the run reports
+/// `Unbounded` with those two halves as the proof. Otherwise it says
+/// `UnboundedRelaxation` and leaves the question where it is: the relaxation is unbounded,
+/// and the integer model may or may not be.
 ///
 /// **A bound is worth nothing without a point to compare it to.** Best-bound branching
 /// searches for a bound and can spend a whole budget without ever standing on an integer
@@ -51,6 +56,11 @@ pub(all) enum MipStatus {
   /// A relaxation came back unbounded. The model may or may not be unbounded; see the
   /// package doc.
   UnboundedRelaxation
+  /// The relaxation is unbounded and its point and improving ray are integral on every
+  /// integer variable, so the integer model is unbounded. `values` and `ray` are the two
+  /// halves of that proof: `values + k·ray` stays integral and feasible for every integer
+  /// `k ≥ 0` and the objective improves without limit along `ray`.
+  Unbounded
   /// A node's certificate was refused by the verifier. The run stops rather than
   /// branching on it.
   Unverified
@@ -64,7 +74,9 @@ pub(all) enum MipStatus {
 /// What a branch and bound run produced.
 pub struct MipResult {
   status : MipStatus
-  /// Best integer point found, empty when the run proved infeasibility or found none.
+  /// Best integer point found, empty when the run proved infeasibility or found none. For
+  /// `Unbounded` it is the integral feasible point the ray leaves from — not a "best"
+  /// point, since the model has no bound — and it is not empty.
   values : Array[Double]
   /// Its objective in the model's own sense. Only meaningful when `values` is not empty.
   objective : Double
@@ -96,8 +108,14 @@ pub struct MipResult {
   /// whether a reduction fired at all is otherwise invisible to a caller, and a reduction that
   /// fires on nothing while being documented as firing is a claim with no evidence.
   strengthening : @presolve.StrengthenStats
+  /// Recession direction of an `Unbounded` claim: an integral direction along which the
+  /// objective improves without limit from `values`, so `values[j] + k·ray[j]` stays
+  /// integral and feasible for every integer `k ≥ 0`. Empty unless the run proved the
+  /// model unbounded.
+  ray : Array[Double]
   /// The verifier's account of the first refusal, when the run ended `Unverified`; the
-  /// reason a run ended otherwise (an invalid model, a limit, an unbounded relaxation).
+  /// reason a run ended otherwise (an invalid model, a limit, an unbounded relaxation), or
+  /// the note that the run proved the model unbounded.
   message : String
 } derive(Debug)
 

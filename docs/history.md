@@ -13,6 +13,31 @@
 
 （当时在此累积下一轮开发。）
 
+### 整数无界性的证明（保守版）—— 落地
+
+**为什么现在做**：[`roadmap.md`](roadmap.md)「下一步」第 6 项是四个明示缺口里最后一个"便宜"的：它不改报告数字
+（清单里没有实例报无界），但补上了公开入口的一块能力——此前整数模型永远到不了 `SolveStatus::Unbounded`。
+
+**判据与数学**：内核报松弛无界时，证书里有**可行点 `x⁰`** 与**改善射线 `d`**（两者都已由 `@verify` 接受：点
+的行与变量界、射线的四项）。分支定界再看这两者在**每个整数变量**上是否取整数值（`integral_on_integers`，
+只读整数变量、按容差读）。两者都整数 ⇒ `x⁰ + k·d` 对每个整数 `k ≥ 0` 都整数且可行（`d` 是回收方向、`x⁰`
+可行），目标沿 `d` 无界改善 ⇒ 整数模型无界，报 `MipStatus::Unbounded`，`MipResult::values` 与新增的
+`MipResult::ray` 就是证明的两半。任一不是整数则仍报 `UnboundedRelaxation`——内核给出的射线可能带分数，按
+分母缩放到整数是另一步，本轮未做；而"找整数可行点"那半边本来归搜索。
+
+**公开面**：`MipStatus` 新增 `Unbounded`；`MipResult` 新增 `ray` 字段（`.mbti` 因此 +2 行）。根包 `from_mip`
+把它映射为 `SolveStatus::Unbounded`（公开 `Solution` 不带这两个数组，与 `from_simplex` 的无界路径一致：证明
+在低层结果上）。三处 status 名字映射（`cmd/parse/main.mbt`、`mip/mip_test.mbt`、`mip/cuts_test.mbt`）同步加臂。
+
+**测试**：白盒 `integral_on_integers`（只读整数变量、容差内算整数、分数连续变量不影响）；黑盒
+`an unbounded relaxation with an integral ray is an unbounded model`（点 `(0,0)`、射线 `(1,1)`，报
+`Unbounded` 且两半都整数）与新的"分数点必须保守回退"（`2x = 1` 只有 `x = 0.5`，报 `UnboundedRelaxation`）；
+根包测试改为断言 `SolveStatus::Unbounded`。测试总数 208 → 210。
+
+**为什么这不算"改口径"**：`from_mip` 的契约一直是"只有搜索证明过的结论才映射成肯定状态"——现在搜索多证明了
+一种情形（整数无界），映射自然跟上；没被证明的松弛无界仍走 `NotSolved`，与旧行为逐字相同。报告口径下没有
+实例报无界，所以四份报告数字不变（除 `mip` 的报告 scope 触发重生成）。
+
 ### Reverted — M5：覆盖型 cover 割是"行 + 界"的外推，恒 LP 冗余（探索轮，量完即回退）
 
 **为什么试它**：`gt2`（当前解已是公开最优 21166、界停在 21099.98，差 0.31%）的 demand 行是**一般整数覆盖背包**

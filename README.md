@@ -90,7 +90,7 @@ moon run cmd/parse -- bench --manifest instances.txt --mip --max-nodes 300
 | `min` / `max`；`≤` / `≥` / `=` 任意混合（含负右端项） | MPS 的 `SC` / `SI` 半连续界、完整的 `SOS` / `MARKER` 语义 |
 | 任意有限上下界、自由变量 | 行 / 列的支配检测、更强的整体 presolve 归约（现有：空行空列、冗余行、singleton 转界、隐式界收紧、对偶固定、固定变量消元 + 解还原） |
 | 三种定价规则：Dantzig、实测增益（默认）、**Devex**（`SimplexOptions::with_pricing`，CLI `--pricing`） | 精确 steepest-edge（只做 Devex 近似） |
-| 整数与 0-1 变量（分支定界；整点松弛上的**系数强化**、cutoff 收紧节点盒子） | **节点上的割**；整数无界性的证明（松弛无界只报 `NotSolved` / `UnboundedRelaxation`） |
+| 整数与 0-1 变量（分支定界；整点松弛上的**系数强化**、cutoff 收紧节点盒子；松弛无界且点 / 射线整数时证 `Unbounded`） | **节点上的割**；射线本身是分数时的整数缩放（现在仍报 `UnboundedRelaxation`） |
 | 证书复核（最优性 / Farkas / 无界射线） | 化简模型的乘子回映（证书只对内核收到的模型成立，故校验路径不化简） |
 | 内核行数上限 200 000（稀疏 LU，内存 `O(nnz + fill)`） | 非线性 / 半定规划、并行、网络单纯形专用路径、Python / JS 绑定 |
 

@@ -24,8 +24,10 @@ You can browse and install extra skills here:
     must not depend on what a reduction happened to fix) and go to `mip` instead of the
     kernel, because a relaxation is not an answer to an integer model. Their statuses map
     onto `Optimal` / `Infeasible` / `NodeLimit` (a budget that ran out, with the incumbent
-    and the open bound); an unbounded relaxation, a refused certificate and an invalid
-    model all stay `NotSolved`, since none of them proves anything.
+    and the open bound) and `Unbounded` (the relaxation's point *and* its improving ray are
+    integral on every integer variable, so the model is unbounded); an unbounded relaxation
+    whose ray carries no integrality, a refused certificate and an invalid model all stay
+    `NotSolved`, since none of them proves anything.
   - `core/`: numeric and sparse infrastructure (tolerances, compensated
     summation, CSC sparse matrix). Must not depend on other packages here.
   - `model/`: variables, linear expressions, constraints, objective, validation.
@@ -114,8 +116,10 @@ You can browse and install extra skills here:
     closed against the incumbent) is reported `Optimal`; a node budget ends the run
     as `NodeLimit` with the incumbent and the bound still open, a relaxation that
     reached no verdict is counted as open work rather than as a refused claim, and
-    an unbounded relaxation is `UnboundedRelaxation` because an improving ray of the
-    relaxation carries no integrality of its own. A model that fails validation is
+    an unbounded relaxation is `Unbounded` only when its point and improving ray are
+    integral on every integer variable (`x⁰ + k·d` stays integral and feasible, and the
+    objective improves without limit) — otherwise it is `UnboundedRelaxation`, because an
+    improving ray need not carry lattice points. A model that fails validation is
     `Invalid`, never `Infeasible`. A fractional relaxation is also offered to a **primal
     heuristic** before it is branched on (`dive_for_incumbent`): the walk follows the
     nearer whole side of the most fractional variable and re-solves, which lands on a
