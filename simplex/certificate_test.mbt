@@ -203,6 +203,93 @@ test "an infeasible model carries a farkas ray the verifier accepts" {
 }
 
 ///|
+/// The Farkas ray is the Phase I optimum's dual solution, mapped back to the model's rows
+/// through `row_dual_factor` (which undoes the relation's own sign and the row's negation).
+/// "Why that construction is right" is a claim about *every* shape the mapping has to meet,
+/// not about one pair of rows: a `≤` row, a `≥` row, an equality, a negated right hand
+/// side, a variable the kernel splits in two, and an infeasibility that is only visible
+/// against the variables' own bounds. Each case below solves and hands the emitted ray to
+/// the independent verifier, which is the judge of whether the construction produced a ray
+/// that proves anything.
+fn assert_infeasible_certificate(model : @model.Model) -> Unit raise {
+  let result = match try_solve(model) {
+    Some(result) => result
+    None => fail("kernel refused the model")
+  }
+  assert_eq(result.status, @simplex.SimplexStatus::Infeasible)
+  assert_eq(result.values.length(), 0)
+  assert_eq(result.ray.length(), 0)
+  assert_eq(result.duals.length(), model.num_constraints())
+  let problem = certificate_problem(model, result)
+  if problem != "" {
+    fail(problem)
+  }
+}
+
+///|
+/// The six shapes of the Farkas construction, each accepted by the independent verifier.
+test "the farkas ray construction holds for every row shape it can meet" {
+  // A `≤` row and a `≥` row over one variable: the two relations contribute opposite
+  // signs, and the mapping has to reproduce them.
+  let opposite = @model.Model::new(@model.Sense::Minimize)
+  let o = opposite.add_var("o", lb=0.0)
+  opposite.set_objective([(o, 1.0)])
+  opposite.add_constraint([(o, 1.0)], @model.Rel::LessEqual, 1.0)
+  opposite.add_constraint([(o, 1.0)], @model.Rel::GreaterEqual, 2.0)
+  assert_infeasible_certificate(opposite)
+  // Two equalities that cannot both hold: the ray is free on both rows, which is its own
+  // sign case (no non-negativity is asked of an equality's multiplier).
+  let equalities = @model.Model::new(@model.Sense::Minimize)
+  let e = equalities.add_var("e", lb=0.0)
+  equalities.set_objective([(e, 1.0)])
+  equalities.add_constraint([(e, 1.0)], @model.Rel::Equal, 1.0)
+  equalities.add_constraint([(e, 1.0)], @model.Rel::Equal, 2.0)
+  assert_infeasible_certificate(equalities)
+  // A negative right hand side: the kernel negates the row, and the ray has to undo that
+  // negation or the verifier reads a multiplier with the wrong sign.
+  let negated = @model.Model::new(@model.Sense::Minimize)
+  let n = negated.add_var("n", lb=0.0)
+  negated.set_objective([(n, 1.0)])
+  negated.add_constraint([(n, -1.0)], @model.Rel::LessEqual, -2.0)
+  negated.add_constraint([(n, 1.0)], @model.Rel::LessEqual, 1.0)
+  assert_infeasible_certificate(negated)
+  // A `≥` row whose contradiction is with the variables' own upper bounds, not another
+  // row: `x + y ≥ 5` cannot hold inside `[0, 1]²`.
+  let against_bounds = @model.Model::new(@model.Sense::Minimize)
+  let b1 = against_bounds.add_var("b1", lb=0.0, ub=1.0)
+  let b2 = against_bounds.add_var("b2", lb=0.0, ub=1.0)
+  against_bounds.set_objective([(b1, 1.0), (b2, 1.0)])
+  against_bounds.add_constraint(
+    [(b1, 1.0), (b2, 1.0)],
+    @model.Rel::GreaterEqual,
+    5.0,
+  )
+  assert_infeasible_certificate(against_bounds)
+  // A free variable the kernel splits into two columns, inside an infeasible pair of
+  // equalities: the ray is stated over the model's one variable, not the two columns.
+  let split = @model.Model::new(@model.Sense::Minimize)
+  let f = split.add_var(
+    "f",
+    lb=-@model.infinite_bound,
+    ub=@model.infinite_bound,
+  )
+  let g = split.add_var("g", lb=0.0)
+  split.set_objective([(f, 1.0), (g, 1.0)])
+  split.add_constraint([(f, 1.0), (g, 1.0)], @model.Rel::Equal, 1.0)
+  split.add_constraint([(f, 1.0), (g, 1.0)], @model.Rel::Equal, 2.0)
+  assert_infeasible_certificate(split)
+  // A degenerate vertex: a third, implied row alongside the contradiction. The Phase I
+  // optimum is a whole face, and the dual it lands on still has to be a valid ray.
+  let degenerate = @model.Model::new(@model.Sense::Minimize)
+  let d = degenerate.add_var("d", lb=0.0)
+  degenerate.set_objective([(d, 1.0)])
+  degenerate.add_constraint([(d, 1.0)], @model.Rel::LessEqual, 1.0)
+  degenerate.add_constraint([(d, 1.0)], @model.Rel::GreaterEqual, 2.0)
+  degenerate.add_constraint([(d, 1.0)], @model.Rel::LessEqual, 0.0)
+  assert_infeasible_certificate(degenerate)
+}
+
+///|
 test "an unbounded model carries a recession direction the verifier accepts" {
   // min −x  s.t.  x ≥ 1,  x ≥ 0.
   let model = @model.Model::new(@model.Sense::Minimize)
