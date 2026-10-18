@@ -448,6 +448,107 @@ fn integral_on_integers(
 }
 
 ///|
+/// The largest integer factor the run will try when scaling a fractional improving ray so
+/// that every integer variable's component becomes whole. The ray's components are rational
+/// with denominators dividing the basis determinant, so a factor exists; the bound is a
+/// resource limit, and a ray that needs a larger factor is reported as an unbounded
+/// relaxation rather than searched past it.
+let integer_ray_scale_limit : Int32 = 10000
+
+///|
+/// The minimal positive multiple of `ray` whose integer-variable components are whole, or
+/// `None` when there is none within `limit`.
+///
+/// A positive multiple of a recession direction along which the objective improves is still
+/// one — scaling changes neither the sign of `a·d` on a row nor the sign of `c·d` — so when
+/// the point is already whole and only the ray is fractional, this is what turns the
+/// relaxation's unboundedness into the model's. Only the components that are not whole at
+/// factor one can be fixed by scaling, so the search ranges over those.
+fn scaled_integer_ray(
+  model : @model.Model,
+  ray : Array[Double],
+  tolerance : Double,
+  limit : Int32,
+) -> Array[Double]? {
+  let needs : Array[Int32] = []
+  for j = 0; j < model.num_vars() && j < ray.length(); j = j + 1 {
+    if model.get_var(j).is_int &&
+      @core.fabs(ray[j] - round_of(ray[j])) > tolerance {
+      needs.push(j)
+    }
+  }
+  for k = 1; k <= limit; k = k + 1 {
+    let scale = Double::from_int(k)
+    let mut ok = true
+    for j in needs {
+      let scaled = scale * ray[j]
+      if @core.fabs(scaled - round_of(scaled)) > tolerance {
+        ok = false
+        break
+      }
+    }
+    if ok {
+      let out : Array[Double] = []
+      for j = 0; j < ray.length(); j = j + 1 {
+        out.push(scale * ray[j])
+      }
+      return Some(out)
+    }
+  }
+  None
+}
+
+///|
+/// The improving ray that turns an unbounded relaxation into an unbounded model, or `None`
+/// when the run cannot prove the model is unbounded.
+///
+/// The point has to be whole already: a fractional point is not a lattice point to start the
+/// ray from, and nothing here can mend that half. The ray is used as it came when it is
+/// whole, and scaled by its smallest integer factor when it is not — `(0.5, 1)` becomes
+/// `(1, 2)` at factor two, still a recession direction and still improving. A scaled ray is a
+/// positive multiple of the verified one, but the run's contract is that every claim it
+/// reports was checked, so the scaled certificate goes through `@verify` again under the same
+/// `verify_nodes` gate.
+fn integral_unbounded_ray(
+  model : @model.Model,
+  solution : NodeSolution,
+  options : MipOptions,
+) -> Array[Double]? {
+  if !integral_on_integers(model, solution.values, options.tolerance) {
+    return None
+  }
+  if integral_on_integers(model, solution.ray, options.tolerance) {
+    return Some(solution.ray)
+  }
+  match
+    scaled_integer_ray(
+      model,
+      solution.ray,
+      options.tolerance,
+      integer_ray_scale_limit,
+    ) {
+    None => None
+    Some(ray) =>
+      if !options.verify_nodes {
+        Some(ray)
+      } else {
+        let claim : @verify.Certificate = {
+          claim: @verify.Claim::Unbounded,
+          values: solution.values,
+          duals: solution.duals,
+          ray,
+          objective: solution.objective,
+        }
+        if @verify.verify(model, claim, tolerance=options.tolerance).accepted {
+          Some(ray)
+        } else {
+          None
+        }
+      }
+  }
+}
+
+///|
 /// `true` when the repair left the multipliers exactly as they were.
 ///
 /// Written out rather than compared with `==`: what is being asked is whether the repair
@@ -1145,21 +1246,22 @@ fn solve_mip_unchanged(
         // the objective improves along forever. What integrality adds is that
         // `values + k·ray` stays integral for every integer `k >= 0`: an integral point plus
         // an integral ray is an unbounded integer model, and the two are the proof.
-        if integral_on_integers(problem, solution.values, options.tolerance) &&
-          integral_on_integers(problem, solution.ray, options.tolerance) {
-          return {
-            status: MipStatus::Unbounded,
-            values: solution.values,
-            objective: solution.objective,
-            bound: 0.0,
-            gap: 0.0,
-            nodes: solved,
-            verified,
-            cuts: cuts_added,
-            strengthening: stats,
-            ray: solution.ray,
-            message: "the relaxation is unbounded and its point and ray are integral, so the integer model is unbounded",
-          }
+        match integral_unbounded_ray(problem, solution, options) {
+          Some(ray) =>
+            return {
+              status: MipStatus::Unbounded,
+              values: solution.values,
+              objective: solution.objective,
+              bound: 0.0,
+              gap: 0.0,
+              nodes: solved,
+              verified,
+              cuts: cuts_added,
+              strengthening: stats,
+              ray,
+              message: "the relaxation is unbounded and its point and improving ray are integral on the integer variables, so the integer model is unbounded",
+            }
+          None => ()
         }
         return {
           status: MipStatus::UnboundedRelaxation,

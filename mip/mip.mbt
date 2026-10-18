@@ -27,9 +27,13 @@
 /// `x⁰` and a recession direction `d` with the objective improving along it, each already
 /// checked by `@verify`. When `x⁰` and `d` are also integral on every integer variable,
 /// `x⁰ + k·d` stays integral and feasible for every integer `k ≥ 0`, so the run reports
-/// `Unbounded` with those two halves as the proof. Otherwise it says
-/// `UnboundedRelaxation` and leaves the question where it is: the relaxation is unbounded,
-/// and the integer model may or may not be.
+/// `Unbounded` with those two halves as the proof. A ray whose integer components are not
+/// whole is scaled by its smallest integer factor first — a positive multiple of a recession
+/// direction still is one, and `(0.5, 1)` becomes `(1, 2)` at factor two — because the
+/// multiple the ratio test picked need not be whole. When neither the ray nor a scaled copy
+/// of it is whole, or the point itself is fractional, the run says `UnboundedRelaxation` and
+/// leaves the question where it is: the relaxation is unbounded, and the integer model may or
+/// may not be.
 ///
 /// **A bound is worth nothing without a point to compare it to.** Best-bound branching
 /// searches for a bound and can spend a whole budget without ever standing on an integer

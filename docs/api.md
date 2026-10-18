@@ -166,7 +166,7 @@ pub(all) struct MipOptions { max_nodes, max_iterations, tolerance, verify_nodes,
 | --- | --- |
 | 每个节点的松弛都过 `verify` | `verified` 是这件事的计数；开启校验时 `nodes − verified` 恰好是"无结论的松弛"数 |
 | 证书被拒**停整轮**为 `Unverified` | 不拿一个没人能复核的答案去分支；消息带校验器原话 |
-| 松弛无界 ≠ 模型无界 | 只有点与射线在整数变量上都是整数时报 `Unbounded`（`MipResult::values` + `ray` 是证明的两半，公开 `SolveStatus::Unbounded` 不带这两个数组，与线性路径一致）；否则报 `UnboundedRelaxation`，因为改善射线不含整数性 |
+| 松弛无界 ≠ 模型无界 | 点与射线（或其最小整数倍）在整数变量上都是整数时报 `Unbounded`（`MipResult::values` + `ray` 是证明的两半，公开 `SolveStatus::Unbounded` 不带这两个数组，与线性路径一致）；否则报 `UnboundedRelaxation`，因为改善射线不含整数性 |
 | 模型非法 ≠ 不可行 | 报 `Invalid` |
 | `NodeLimit` 给出当前整数点与仍在开的界 | 两者一起才是调用方需要的（"能到多好"与"已经多好"）。界取自**全部开着的活**：队列里的节点，以及松弛到达不了结论、因此不再入队的那些节点所在的子树 |
 | 割必须能被独立再推导 | 每条割带"由哪一行舍入而来"的证明，`verify_cut` 复核后才进模型 |

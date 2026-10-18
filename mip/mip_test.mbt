@@ -815,3 +815,48 @@ test "the search agrees with enumeration on a random corpus" {
   assert_true(optimal > 0)
   assert_true(infeasible > 0)
 }
+
+///|
+/// `max x` over `3x - 2y <= 1, 2x - y <= 0` with `x` integer: the relaxation is unbounded
+/// and the kernel's improving ray is `(0.5, 1)` — whole on `y` but fractional on `x`.
+fn fractional_ray_mip() -> @model.Model {
+  let m = @model.Model::new(@model.Sense::Maximize)
+  let x = m.add_var("x", lb=0.0, is_int=true)
+  let y = m.add_var("y", lb=0.0, is_int=false)
+  m.set_objective([(x, 1.0)])
+  m.add_constraint([(x, 3.0), (y, -2.0)], @model.Rel::LessEqual, 1.0)
+  m.add_constraint([(x, 2.0), (y, -1.0)], @model.Rel::LessEqual, 0.0)
+  m
+}
+
+///|
+/// A fractional improving ray is scaled to whole components rather than given up on:
+/// the kernel's `(0.5, 1)` becomes `(1, 2)` at the factor two, still a recession direction
+/// and still improving, so the model is unbounded.
+test "a fractional improving ray is scaled to whole components" {
+  let model = fractional_ray_mip()
+  let result = @mip.solve_mip(model, @mip.MipOptions::default())
+  assert_eq(result.status, @mip.MipStatus::Unbounded)
+  assert_true(result.values.length() > 0)
+  assert_true(result.ray.length() > 0)
+  for j = 0; j < model.num_vars(); j = j + 1 {
+    if model.get_var(j).is_int {
+      assert_true(
+        @core.approx_eq(
+          result.values[j],
+          nearest_int(result.values[j]),
+          rel=0.0,
+          abs=1.0e-6,
+        ),
+      )
+      assert_true(
+        @core.approx_eq(
+          result.ray[j],
+          nearest_int(result.ray[j]),
+          rel=0.0,
+          abs=1.0e-6,
+        ),
+      )
+    }
+  }
+}
