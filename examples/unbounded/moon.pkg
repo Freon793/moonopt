@@ -1,0 +1,7 @@
+import {
+  "Freon793/moonopt",
+  "Freon793/moonopt/mip",
+  "Freon793/moonopt/model",
+}
+
+pkgtype(kind: "executable")
