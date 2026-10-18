@@ -1,11 +1,12 @@
 ///|
 /// `moonopt` command line interface.
 ///
-/// It runs the built-in demos and prints a report for each one, including the model
-/// whose answer is "not solved" — a CLI that only ever shows successes would be
-/// hiding the boundary the library documents. Model files, certificates and the
-/// benchmark entry point live in the `parse` command (`cmd/parse`); this one stays a
-/// runnable entry point that needs no arguments or data files.
+/// It runs the built-in demos and prints a report for each one, covering every status the
+/// public entry point can return — `Optimal`, `NodeLimit`, `Unbounded`, and the `NotSolved`
+/// boundary, where the run cannot prove an answer and says so instead. A CLI that only ever
+/// shows successes would be hiding the boundary the library documents. Model files,
+/// certificates and the benchmark entry point live in the `parse` command (`cmd/parse`);
+/// this one stays a runnable entry point that needs no arguments or data files.
 ///
 /// Run with: `moon run cmd/main`
 
@@ -160,6 +161,42 @@ fn integer_plan_on_a_budget() -> Unit {
 }
 
 ///|
+/// Demo 5: an integer model whose objective has no bound, and the proof of it.
+///
+/// `max x + y` with `x - y <= 3` over a whole `x` and a continuous `y`: nothing stops `y`
+/// from growing. The relaxation is unbounded, and that alone proves nothing — but the
+/// branch and bound holds an integral point `(0, 0)` and an integral improving ray
+/// `(0, 1)`, so the run reports `Unbounded` rather than a relaxation's optimism.
+fn unbounded_plan() -> Unit {
+  let m = @model.Model::new(@model.Sense::Maximize)
+  let x = m.add_var("x", lb=0.0, is_int=true)
+  let y = m.add_var("y", lb=0.0)
+  m.set_objective([(x, 1.0), (y, 1.0)])
+  m.add_constraint([(x, 1.0), (y, -1.0)], @model.Rel::LessEqual, 3.0)
+  report("unbounded plan", ["x", "y"], @moonopt.solve(m))
+}
+
+///|
+/// Demo 6: the boundary — a relaxation that is unbounded but whose point is not whole.
+///
+/// `2x = 1` forces every feasible `x` to `0.5`, so there is no lattice point to start an
+/// integral ray from. With `y` free in the objective the *relaxation* is unbounded, and the
+/// run reports `NotSolved` rather than claiming the integer model is: an improving ray of
+/// the relaxation need not carry lattice points, and this is the case that says so.
+fn unbounded_relaxation_is_not_an_answer() -> Unit {
+  let m = @model.Model::new(@model.Sense::Maximize)
+  let x = m.add_var("x", lb=0.0, is_int=true)
+  let y = m.add_var("y", lb=0.0)
+  m.set_objective([(y, 1.0)])
+  m.add_constraint([(x, 2.0)], @model.Rel::Equal, 1.0)
+  report(
+    "unbounded relaxation, not an unbounded model",
+    ["x", "y"],
+    @moonopt.solve(m),
+  )
+}
+
+///|
 /// CLI entry point.
 fn main {
   println("moonopt " + version)
@@ -168,4 +205,6 @@ fn main {
   transportation()
   integer_plan()
   integer_plan_on_a_budget()
+  unbounded_plan()
+  unbounded_relaxation_is_not_an_answer()
 }

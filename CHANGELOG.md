@@ -17,7 +17,9 @@
   或射线在限定的倍数内缩放不出整数时，仍报 `UnboundedRelaxation`（松弛无界、模型未知）。公开入口
   `SolveStatus::Unbounded` 因此对整数模型可达（之前永远到不了它），而公开 `Solution` 不带这两个数组
   （与线性路径一致：证明在低层结果上）。这是 [`docs/roadmap.md`](docs/roadmap.md) "下一步"第 6 项的收口；
-  报告口径下没有实例报无界，所以四份报告的数字不变，变化在能力与公开面上。
+  报告口径下没有实例报无界，所以四份报告的数字不变，变化在能力与公开面上。配套：`examples/unbounded` 是可
+  运行的示例，`moon run cmd/main` 的六个演示现在覆盖全部四种公开状态（`Optimal` / `NodeLimit` / `Unbounded` /
+  `NotSolved`）——模块注释此前声称含一个 "not solved" 演示、实际没有。
 
 ### Changed
 
