@@ -200,7 +200,18 @@ foreach ($row in $rows) {
   $build += "| $($row.Instance) | $($row.Vars) | $($row.Cons) | $($row.Nonzeros) | $($row.Integers) | $($row.Solve) | $($row.Objective) | $($row.Iterations) | $($row.Presolve) | $($row.Check) | $($row.Note) |"
 }
 $build += ""
-[IO.File]::WriteAllLines($Output, $build)
+# [IO.File] resolves a relative path against the process working directory, which is not
+# what "relative to the tree" means: a relative -Output used to land outside the repository,
+# or nowhere, and the exception the write raised still left the script exiting zero - so it
+# printed "wrote <path>" for a report no one could open. Resolve it first, and turn a failed
+# write into an error instead of a line of output.
+if (-not [IO.Path]::IsPathRooted($Output)) { $Output = Join-Path $root $Output }
+try {
+  [IO.File]::WriteAllLines($Output, $build)
+} catch {
+  Write-Error ("cannot write {0}: {1}" -f $Output, $_.Exception.Message)
+  exit 2
+}
 Write-Host ("wrote {0}: optimal={1} skipped={2} refused={3} other={4} reduced={5} checked={6} recovered={7}" -f $Output, $optimal.Count, $skipped.Count, $refused.Count, $other.Count, $reduced.Count, $checked.Count, $recovered.Count)
 foreach ($row in $other) {
   Write-Host ("  {0}: {1} {2}" -f $row.Instance, $row.Solve, $row.Note)

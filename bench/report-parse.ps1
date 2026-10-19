@@ -101,7 +101,18 @@ if ($failures.Count -eq 0) {
   }
 }
 $build += ""
-[IO.File]::WriteAllLines($Output, $build)
+# [IO.File] resolves a relative path against the process working directory, which is not
+# what "relative to the tree" means: a relative -Output used to land outside the repository,
+# or nowhere, and the exception the write raised still left the script exiting zero - so it
+# printed "wrote <path>" for a report no one could open. Resolve it first, and turn a failed
+# write into an error instead of a line of output.
+if (-not [IO.Path]::IsPathRooted($Output)) { $Output = Join-Path $root $Output }
+try {
+  [IO.File]::WriteAllLines($Output, $build)
+} catch {
+  Write-Error ("cannot write {0}: {1}" -f $Output, $_.Exception.Message)
+  exit 2
+}
 Write-Host ("wrote {0}: {1} parsed, {2} failed" -f $Output, $rows.Count, $failures.Count)
 if ($failures.Count -gt 0) {
   $failures | ForEach-Object { Write-Host ("  FAIL {0}: {1}" -f $_.Instance, $_.Reason) }

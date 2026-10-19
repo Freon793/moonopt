@@ -248,7 +248,18 @@ if ($stale.Count -gt 0) {
   $build += ""
 }
 
-[IO.File]::WriteAllLines($Output, $build)
+# [IO.File] resolves a relative path against the process working directory, which is not
+# what "relative to the tree" means: a relative -Output used to land outside the repository,
+# or nowhere, and the exception the write raised still left the script exiting zero - so it
+# printed "wrote <path>" for an index no one could open. Resolve it first, and turn a failed
+# write into an error instead of a line of output.
+if (-not [IO.Path]::IsPathRooted($Output)) { $Output = Join-Path $Root $Output }
+try {
+  [IO.File]::WriteAllLines($Output, $build)
+} catch {
+  Write-Error ("cannot write {0}: {1}" -f $Output, $_.Exception.Message)
+  exit 2
+}
 Write-Host ("wrote {0}: {1} report(s), {2} stale" -f $Output, $rows.Count, $stale.Count)
 foreach ($line in $stale) {
   Write-Host ("  {0}" -f $line)
