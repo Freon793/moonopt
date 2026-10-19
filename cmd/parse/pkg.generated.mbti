@@ -14,14 +14,14 @@ pub(all) struct SolveFlags {
   enabled : Bool
   relax : Bool
   presolve : Bool
-  max_rows : Int
-  max_iterations : Int
+  max_rows : Int32
+  max_iterations : Int32
   verify : Bool
   certificate_path : String
   reoptimize : Bool
   mip : Bool
-  max_nodes : Int
-  cut_rounds : Int
+  max_nodes : Int32
+  cut_rounds : Int32
   pricing : @simplex.Pricing
 }
 

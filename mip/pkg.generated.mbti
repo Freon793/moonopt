@@ -15,21 +15,21 @@ pub fn solve_mip(@model.Model, MipOptions) -> MipResult
 
 // Types and methods
 pub(all) struct MipOptions {
-  max_nodes : Int
-  max_iterations : Int
+  max_nodes : Int32
+  max_iterations : Int32
   tolerance : Double
   verify_nodes : Bool
   row_strengthening : Bool
-  dive_steps : Int
-  dive_attempts : Int
-  cut_rounds : Int
+  dive_steps : Int32
+  dive_attempts : Int32
+  cut_rounds : Int32
   primal_rounding : Bool
   node_solver : ((@model.Model) -> NodeSolution)?
   cut_hook : ((@verify.CutRow) -> @verify.CutRow)?
 }
 pub fn MipOptions::default() -> Self
 pub fn MipOptions::with_cut_hook(Self, (@verify.CutRow) -> @verify.CutRow) -> Self
-pub fn MipOptions::with_max_nodes(Int) -> Self
+pub fn MipOptions::with_max_nodes(Int32) -> Self
 pub fn MipOptions::with_node_solver(Self, (@model.Model) -> NodeSolution) -> Self
 pub fn MipOptions::without_cuts(Self) -> Self
 pub fn MipOptions::without_primal_dive(Self) -> Self
@@ -43,9 +43,9 @@ pub struct MipResult {
   objective : Double
   bound : Double
   gap : Double
-  nodes : Int
-  verified : Int
-  cuts : Int
+  nodes : Int32
+  verified : Int32
+  cuts : Int32
   strengthening : @presolve.StrengthenStats
   ray : Array[Double]
   message : String

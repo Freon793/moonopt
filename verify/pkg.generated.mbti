@@ -41,14 +41,14 @@ pub(all) enum Claim {
 } derive(Eq, @debug.Debug)
 
 pub(all) struct CutCertificate {
-  basic : Int
+  basic : Int32
   multipliers : Array[Double]
   rhs : Double
   from_lower : Array[Bool]
 } derive(@debug.Debug)
 
 pub(all) struct CutRow {
-  terms : Array[(Int, Double)]
+  terms : Array[(Int32, Double)]
   rel : @model.Rel
   rhs : Double
 } derive(@debug.Debug)

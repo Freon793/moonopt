@@ -16,11 +16,11 @@ pub fn solve_model_with(@model.Model, SimplexOptions) -> Result[SimplexResult, S
 
 pub fn solve_model_with_basis(@model.Model, SimplexOptions, SimplexBasis) -> Result[SimplexResult, String]
 
-pub fn solve_standard(Int, Array[Double], Array[(Array[Double], @model.Rel, Double)]) -> SimplexResult
+pub fn solve_standard(Int32, Array[Double], Array[(Array[Double], @model.Rel, Double)]) -> SimplexResult
 
-pub fn solve_standard_with(Int, Array[Double], Array[(Array[Double], @model.Rel, Double)], SimplexOptions) -> SimplexResult
+pub fn solve_standard_with(Int32, Array[Double], Array[(Array[Double], @model.Rel, Double)], SimplexOptions) -> SimplexResult
 
-pub fn solve_standard_with_basis(Int, Array[Double], Array[(Array[Double], @model.Rel, Double)], SimplexOptions, SimplexBasis) -> SimplexResult
+pub fn solve_standard_with_basis(Int32, Array[Double], Array[(Array[Double], @model.Rel, Double)], SimplexOptions, SimplexBasis) -> SimplexResult
 
 pub fn tableau_rows(@model.Model, SimplexOptions, SimplexBasis) -> Result[Array[TableauRow], String]
 
@@ -28,20 +28,20 @@ pub fn tableau_rows(@model.Model, SimplexOptions, SimplexBasis) -> Result[Array[
 
 // Types and methods
 pub struct KernelProblem {
-  nrows : Int
-  ncols : Int
-  structural : Int
+  nrows : Int32
+  ncols : Int32
+  structural : Int32
   matrix : @core.SparseMatrix
   rhs : Array[Double]
   upper : Array[Double]
   cost : Array[Double]
   is_artificial : Array[Bool]
-  var_columns : Array[Array[(Int, Double)]]
+  var_columns : Array[Array[(Int32, Double)]]
   var_offset : Array[Double]
   objective_constant : Double
   model_sign : Double
-  initial_basis : Array[Int]
-  row_source : Array[Int]
+  initial_basis : Array[Int32]
+  row_source : Array[Int32]
   row_dual_factor : Array[Double]
   row_sign : Array[Double]
   row_relation : Array[@model.Rel]
@@ -51,8 +51,8 @@ pub struct KernelProblem {
   model_rhs : Array[Double]
 } derive(@debug.Debug)
 pub fn KernelProblem::from_model(@model.Model) -> Result[Self, String]
-pub fn KernelProblem::from_standard(Int, Array[Double], Array[(Array[Double], @model.Rel, Double)]) -> Self
-pub fn KernelProblem::slack_row_map(Self) -> Array[Int]
+pub fn KernelProblem::from_standard(Int32, Array[Double], Array[(Array[Double], @model.Rel, Double)]) -> Self
+pub fn KernelProblem::slack_row_map(Self) -> Array[Int32]
 pub fn KernelProblem::solution(Self, Array[Double]) -> Array[Double]
 
 pub(all) enum Pricing {
@@ -62,42 +62,42 @@ pub(all) enum Pricing {
 } derive(Eq, @debug.Debug)
 
 pub struct SimplexBasis {
-  nrows : Int
-  ncols : Int
-  basis : Array[Int]
+  nrows : Int32
+  ncols : Int32
+  basis : Array[Int32]
   at_upper : Array[Bool]
 } derive(@debug.Debug)
 
 pub(all) struct SimplexOptions {
-  max_iterations : Int
-  refactorize_every : Int
+  max_iterations : Int32
+  refactorize_every : Int32
   feasibility_tolerance : Double
   pivot_tolerance : Double
   pivot_relative_tolerance : Double
   start_with_bland : Bool
-  stall_window : Int
-  gain_candidates : Int
+  stall_window : Int32
+  gain_candidates : Int32
   pricing : Pricing
   degeneracy_perturbation : Double
-  max_factor_entries : Int
+  max_factor_entries : Int32
   reduced_cost_tolerance : Double
   relax_integrality : Bool
-  max_kernel_rows : Int
+  max_kernel_rows : Int32
 } derive(@debug.Debug)
 pub fn SimplexOptions::default() -> Self
-pub fn SimplexOptions::limit_iterations(Self, Int) -> Self
+pub fn SimplexOptions::limit_iterations(Self, Int32) -> Self
 pub fn SimplexOptions::relaxed() -> Self
-pub fn SimplexOptions::with_gain_candidates(Int) -> Self
-pub fn SimplexOptions::with_max_iterations(Int) -> Self
-pub fn SimplexOptions::with_max_kernel_rows(Int) -> Self
+pub fn SimplexOptions::with_gain_candidates(Int32) -> Self
+pub fn SimplexOptions::with_max_iterations(Int32) -> Self
+pub fn SimplexOptions::with_max_kernel_rows(Int32) -> Self
 pub fn SimplexOptions::with_pricing(Self, Pricing) -> Self
-pub fn SimplexOptions::with_stall_window(Int) -> Self
+pub fn SimplexOptions::with_stall_window(Int32) -> Self
 
 pub struct SimplexResult {
   status : SimplexStatus
   values : Array[Double]
   objective : Double
-  iterations : Int
+  iterations : Int32
   message : String
   duals : Array[Double]
   ray : Array[Double]
@@ -114,7 +114,7 @@ pub(all) enum SimplexStatus {
 } derive(Eq, @debug.Debug)
 
 pub(all) struct TableauRow {
-  basic : Int
+  basic : Int32
   value : Double
   multipliers : Array[Double]
 } derive(@debug.Debug)

@@ -24,11 +24,11 @@ pub fn fabs(Double) -> Double
 
 pub fn fmax(Double, Double) -> Double
 
-pub fn fmax_int(Int, Int) -> Int
+pub fn fmax_int(Int32, Int32) -> Int32
 
 pub fn fmin(Double, Double) -> Double
 
-pub fn fmin_int(Int, Int) -> Int
+pub fn fmin_int(Int32, Int32) -> Int32
 
 pub fn is_finite(Double) -> Bool
 
@@ -48,26 +48,26 @@ pub fn CompensatedSum::new() -> Self
 pub fn CompensatedSum::value(Self) -> Double
 
 pub struct SparseMatrix {
-  nrows : Int
-  ncols : Int
-  col_ptr : Array[Int]
-  row_idx : Array[Int]
+  nrows : Int32
+  ncols : Int32
+  col_ptr : Array[Int32]
+  row_idx : Array[Int32]
   values : Array[Double]
 } derive(@debug.Debug)
-pub fn SparseMatrix::col_nnz(Self, Int) -> Int
-pub fn SparseMatrix::col_pointers(Self) -> ArrayView[Int]
-pub fn SparseMatrix::column(Self, Int) -> Array[(Int, Double)]
-pub fn SparseMatrix::from_columns(Int, Array[Array[(Int, Double)]]) -> Self
-pub fn SparseMatrix::get(Self, Int, Int) -> Double
+pub fn SparseMatrix::col_nnz(Self, Int32) -> Int32
+pub fn SparseMatrix::col_pointers(Self) -> ArrayView[Int32]
+pub fn SparseMatrix::column(Self, Int32) -> Array[(Int32, Double)]
+pub fn SparseMatrix::from_columns(Int32, Array[Array[(Int32, Double)]]) -> Self
+pub fn SparseMatrix::get(Self, Int32, Int32) -> Double
 pub fn SparseMatrix::mul_vec(Self, Array[Double]) -> Array[Double]
-pub fn SparseMatrix::ncols(Self) -> Int
-pub fn SparseMatrix::nnz(Self) -> Int
-pub fn SparseMatrix::nrows(Self) -> Int
-pub fn SparseMatrix::row_indices(Self) -> ArrayView[Int]
+pub fn SparseMatrix::ncols(Self) -> Int32
+pub fn SparseMatrix::nnz(Self) -> Int32
+pub fn SparseMatrix::nrows(Self) -> Int32
+pub fn SparseMatrix::row_indices(Self) -> ArrayView[Int32]
 pub fn SparseMatrix::to_dense(Self) -> Array[Array[Double]]
 pub fn SparseMatrix::transpose(Self) -> Self
 pub fn SparseMatrix::values_view(Self) -> ArrayView[Double]
-pub fn SparseMatrix::zeros(Int, Int) -> Self
+pub fn SparseMatrix::zeros(Int32, Int32) -> Self
 
 // Type aliases
 

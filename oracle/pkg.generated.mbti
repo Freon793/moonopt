@@ -7,7 +7,7 @@ import {
 }
 
 // Values
-pub fn solve_standard(Int, Array[Double], Array[(Array[Double], @model.Rel, Double)], max_iterations? : Int) -> OracleResult
+pub fn solve_standard(Int32, Array[Double], Array[(Array[Double], @model.Rel, Double)], max_iterations? : Int32) -> OracleResult
 
 // Errors
 
@@ -16,7 +16,7 @@ pub struct OracleResult {
   status : OracleStatus
   values : Array[Double]
   objective : Double
-  iterations : Int
+  iterations : Int32
 } derive(@debug.Debug)
 
 pub(all) enum OracleStatus {

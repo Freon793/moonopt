@@ -21,15 +21,15 @@ pub fn strengthen_integer_rows(@model.Model) -> (@model.Model, StrengthenStats)
 
 // Types and methods
 pub(all) struct PresolveStats {
-  rows_removed_empty : Int
-  rows_removed_redundant : Int
-  rows_removed_singleton : Int
-  bounds_tightened : Int
-  variables_fixed : Int
-  variables_fixed_dual : Int
-  rows_strengthened : Int
-  columns_removed_empty : Int
-  rounds : Int
+  rows_removed_empty : Int32
+  rows_removed_redundant : Int32
+  rows_removed_singleton : Int32
+  bounds_tightened : Int32
+  variables_fixed : Int32
+  variables_fixed_dual : Int32
+  rows_strengthened : Int32
+  columns_removed_empty : Int32
+  rounds : Int32
 } derive(@debug.Debug)
 
 pub(all) enum PresolveVerdict {
@@ -46,7 +46,7 @@ pub struct ReducedModel {
   verdict : PresolveVerdict
   reason : String
 }
-pub fn ReducedModel::num_original_vars(Self) -> Int
+pub fn ReducedModel::num_original_vars(Self) -> Int32
 pub fn ReducedModel::objective(Self, Double) -> Double
 pub fn ReducedModel::objective_offset(Self) -> Double
 pub fn ReducedModel::reason(Self) -> String
@@ -56,13 +56,13 @@ pub fn ReducedModel::stats(Self) -> PresolveStats
 pub fn ReducedModel::verdict(Self) -> PresolveVerdict
 
 pub(all) struct StrengthenStats {
-  rows_rewritten : Int
-  bounds_tightened : Int
+  rows_rewritten : Int32
+  bounds_tightened : Int32
 } derive(Eq, @debug.Debug)
 
 pub(all) enum VarForm {
   Fixed(Double)
-  Linear(Double, Array[(Int, Double)])
+  Linear(Double, Array[(Int32, Double)])
 } derive(@debug.Debug)
 
 // Type aliases

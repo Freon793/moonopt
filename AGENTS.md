@@ -202,6 +202,17 @@ You can browse and install extra skills here:
   own `moon fmt` output *is* the answer, and the four reports need regenerating
   afterwards because their scope paths cover the files that change.
 
+  The next release moved the **generated interfaces** too: `moonc v0.10.16`
+  writes `Int32` where `0.10.15` wrote `Int` in every `.mbti` (99 lines across
+  the 10 interface files), so `moon fmt` on a clean tree changes files nobody
+  edited. Two traps around this, both measured. `moon fmt` with a `_build` left
+  by the previous toolchain prints `no work to do` and leaves the `.mbti` files
+  alone - the local gate passes and CI fails on its clean checkout - so a
+  toolchain bump has to be checked after deleting `_build`. And a `.mbti` diff of
+  exactly `Int` -> `Int32` is not a change of the public surface (an integer type
+  is the same type under both names): confirm it by normalising the removed and
+  added lines before believing a re-export happened.
+
 - `moon ide` provides project navigation helpers like `peek-def`, `outline`, and
   `find-references`. See $moonbit-agent-guide for details.
 

@@ -9,7 +9,7 @@ import {
 // Values
 pub fn format_number(Double) -> String
 
-pub fn parse_index(String) -> Int?
+pub fn parse_index(String) -> Int32?
 
 pub fn parse_mps(String) -> Result[@model.Model, ParseIssue]
 
@@ -17,7 +17,7 @@ pub fn parse_number(String) -> Double?
 
 pub fn read_lp(String) -> Result[@model.Model, ParseIssue]
 
-pub fn split_tokens(String) -> Array[(String, Int)]
+pub fn split_tokens(String) -> Array[(String, Int32)]
 
 pub fn write_lp(@model.Model) -> String
 
@@ -27,12 +27,12 @@ pub fn write_mps(@model.Model) -> String
 
 // Types and methods
 pub(all) struct ParseIssue {
-  line : Int
-  column : Int
+  line : Int32
+  column : Int32
   token : String
   message : String
 } derive(Eq, @debug.Debug)
-pub fn ParseIssue::new(Int, Int, String, String) -> Self
+pub fn ParseIssue::new(Int32, Int32, String, String) -> Self
 pub fn ParseIssue::to_text(Self) -> String
 
 // Type aliases
