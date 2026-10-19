@@ -22,10 +22,11 @@ MoonBit 的线性与整数规划求解器：读标准模型文件，用稀疏修
 moon add Freon793/moonopt
 ```
 
-需要 **moonc v0.10.15** 或更新版本（`moon version --all`）。本仓库在 **moonc v0.10.15** 上开发与验证，
+需要 **moonc v0.10.15** 或更新版本（`moon version --all`）。本仓库在 **moonc v0.10.16** 上开发与验证，
 CI 的每一条日志里都记着它实际用的那一套。源码按当前工具链的写法书写：类型标注用 `Int32`，
 默认参数用 `name~`（`moon fmt` 会把旧的 `Int` / `name?` 改写过来）——因此 v0.10.14 编译不了这棵树，
-实测它报 `The type Int32 is undefined`。
+实测它报 `The type Int32 is undefined`。`.mbti` 由 v0.10.16 生成：v0.10.15 也能构建这棵树，但它的
+`moon fmt` / `moon info` 会把接口文件里的 `Int32` 写回 `Int`，于是这两个命令会显示一份 `.mbti` 差异。
 
 ## 快速开始
 
