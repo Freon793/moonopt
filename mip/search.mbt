@@ -404,6 +404,193 @@ fn fractional_count(
 }
 
 ///|
+/// How deep the search evaluates both sides of a branch before choosing which one to take.
+///
+/// Measured on `gt2`, and it is the reason that instance's tree never moved: at its root,
+/// with the thirty root cuts in place, ten of the most fractional integer variables have
+/// children that come back at the parent's own bound to ten digits, while one of them
+/// (`x82`) has a down child whose bound is **21 668.24** — above the model's optimum of
+/// 21 166, so that side is pruned outright. The default rule (the most fractional integer)
+/// picked the former, every time, so 20 000 nodes moved the bound by 7e-10. Strong
+/// branching at the top of the tree finds the latter.
+///
+/// The cost is `2 × strong_branching_candidates` extra relaxations per node above this
+/// depth, and they are charged to the node budget like any other relaxation, so the depth
+/// is where a wrong branch is expensive and a right one is cheap: the first decisions.
+let strong_branching_depth : Int32 = 2
+
+///|
+/// How many candidates a strong-branching node may evaluate, and how much room the node
+/// budget must have before it is worth starting.
+let strong_branching_candidates : Int32 = 4
+
+///|
+/// The smallest node budget the measurement may be spent from.
+///
+/// Two relaxation solves for the default candidate is the floor of the measurement, and a
+/// run whose remaining budget is this small has no room for it: on a budget of three, the
+/// measurement would consume the whole budget and the primal walk would never get to run
+/// (measured: it turned "the walk finds a point" into "no point at all"). Eight is the same
+/// order as one node's worth of work on the instances here, so a run that cannot spare it is
+/// a run whose tree the measurement cannot help.
+let strong_branching_budget_floor : Int32 = 8
+
+///|
+/// One candidate's strong-branching score: the *worse* of its two children's bounds.
+///
+/// `(score, relaxations spent, verified)`. A score of `-1.0e300` means the candidate cannot
+/// be judged — a child reached no verdict — and the caller must not read it as a value.
+/// A branch is worth taking when both sides are expensive, since the side that is cheap is
+/// one the search still has to work through; for a minimisation `sign` is `1` and a bigger
+/// bound is a better branch, so the score is `min(sign·down, sign·up)` and the best
+/// candidate maximises it.
+fn strong_branch_score(
+  problem : @model.Model,
+  solution : NodeSolution,
+  options : MipOptions,
+  basis : @simplex.SimplexBasis?,
+  sign : Double,
+  j : Int32,
+) -> (Double, Int32, Int32) {
+  let variable = problem.get_var(j)
+  let value = solution.values[j]
+  let down = floor_of(value)
+  let up = ceil_of(value)
+  let down_ub = if down < variable.lb { variable.lb } else { down }
+  let up_lb = if up > variable.ub { variable.ub } else { up }
+  let mut worse = 1.0e300
+  let mut spent = 0
+  let mut verified = 0
+  for side = 0; side < 2; side = side + 1 {
+    let child = problem.clone()
+    if side == 0 {
+      child.set_var_bounds(j, variable.lb, down_ub)
+    } else {
+      child.set_var_bounds(j, up_lb, variable.ub)
+    }
+    let (child_solution, _) = kernel_node(child, options, basis)
+    spent = spent + 1
+    let bound = match child_solution.status {
+      NodeStatus::Optimal =>
+        if options.verify_nodes {
+          if node_refusal(child, child_solution, options.tolerance) != "" {
+            return (-1.0e300, spent, verified)
+          } else {
+            verified = verified + 1
+            child_solution.objective
+          }
+        } else {
+          verified = verified + 1
+          child_solution.objective
+        }
+      NodeStatus::Infeasible =>
+        if options.verify_nodes {
+          if node_refusal(child, child_solution, options.tolerance) != "" {
+            return (-1.0e300, spent, verified)
+          } else {
+            verified = verified + 1
+            1.0e30
+          }
+        } else {
+          verified = verified + 1
+          1.0e30
+        }
+      _ => return (-1.0e300, spent, verified)
+    }
+    if sign * bound < worse {
+      worse = sign * bound
+    }
+  }
+  (sign * worse, spent, verified)
+}
+
+///|
+/// A node's branch choice by strong branching: `(variable, relaxations spent, verified)`.
+///
+/// The measurement is *gated by its own cheap case*: the caller's default candidate (the
+/// most fractional integer) is evaluated first, and when branching on it already lifts its
+/// worse side above the node's own bound the search takes it and stops there — two extra
+/// relaxations, no search for a better branch. Only when that branch is worthless (both
+/// sides come back at the parent's bound, which is what `gt2`'s root did for ten candidates
+/// in a row) does the measurement widen to the other fractional candidates, up to
+/// `strong_branching_candidates`.
+///
+/// That gate is the difference between "strong branching" and "pay for strong branching
+/// everywhere": measured on the corpus, doing the full `2 × candidates` at every node of the
+/// top of the tree took `gt2` from node-limit to proved and **cost `p0201` its proof** (555
+/// relaxations before, over 600 after) — coverage unchanged, work up. Gating it on the
+/// default branch being worthless keeps the first and drops the second.
+///
+/// `variable` is `-1` when the measurement found nothing better than the default, which is
+/// also what happens when a child cannot be judged: an unverified relaxation is not evidence
+/// about which branch is better (a certificate that does not check is not a bound). What is
+/// charged to the budget is the relaxations that came back verified; a child that reached no
+/// verdict costs the run time and is not counted, because counting it would make `nodes` say
+/// "a relaxation with no verdict" about a solve whose only purpose was choosing a branch.
+fn strong_branching_choice(
+  problem : @model.Model,
+  solution : NodeSolution,
+  options : MipOptions,
+  basis : @simplex.SimplexBasis?,
+  sign : Double,
+  budget_left : Int32,
+  default_candidate : Int32,
+) -> (Int32, Int32, Int32) {
+  if default_candidate < 0 || budget_left < 2 {
+    return (-1, 0, 0)
+  }
+  let parent = sign * solution.objective
+  let threshold = options.tolerance * (1.0 + @core.fabs(parent))
+  // The cheap case first: if the caller's own branch already separates the node's bound,
+  // there is nothing to look for.
+  let (default_score, spent_default, checked_default) = strong_branch_score(
+    problem, solution, options, basis, sign, default_candidate,
+  )
+  let mut spent = spent_default
+  let mut verified = checked_default
+  if default_score > parent + threshold {
+    return (-1, spent, verified)
+  }
+  // The default branch is worthless here, so widen the measurement.
+  let mut chosen = -1
+  let mut chosen_score = parent
+  let mut examined = 0
+  let mut j = 0
+  while j < problem.num_vars() &&
+        j < solution.values.length() &&
+        examined < strong_branching_candidates {
+    if j == default_candidate || !problem.get_var(j).is_int {
+      j = j + 1
+      continue
+    }
+    let value = solution.values[j]
+    if @core.fabs(value - round_of(value)) <= options.tolerance {
+      j = j + 1
+      continue
+    }
+    if budget_left < spent + 2 {
+      break
+    }
+    examined = examined + 1
+    let (score, spent_here, checked_here) = strong_branch_score(
+      problem, solution, options, basis, sign, j,
+    )
+    spent = spent + spent_here
+    verified = verified + checked_here
+    if score < -1.0e299 {
+      // A child without a verdict: the measurement stops rather than reading it.
+      break
+    }
+    if score > chosen_score + threshold {
+      chosen = j
+      chosen_score = score
+    }
+    j = j + 1
+  }
+  (chosen, spent, verified)
+}
+
+///|
 /// The integer variable furthest from a whole number, or `-1` when the point is integral.
 fn most_fractional(
   model : @model.Model,
@@ -1499,11 +1686,42 @@ fn solve_mip_unchanged(
             }
           }
         }
-        let fractional = most_fractional(
+        let mut fractional = most_fractional(
           problem,
           solution.values,
           options.tolerance,
         )
+        // Strong branching at the top of the tree: the default rule can pick a branch whose
+        // children both come back at the parent's own bound, and on `gt2` that is exactly
+        // what happened at every node (see `strong_branching_depth`). The measurement is
+        // charged to the node budget like any other relaxation, it is not taken when the
+        // caller supplies its own node solver (that seam replaces the relaxation solver, and
+        // the measurement would be solving models the caller did not ask for), and it is not
+        // started on a budget too small to afford it.
+        let own_node_solver = match options.node_solver {
+          None => true
+          Some(_) => false
+        }
+        if fractional >= 0 &&
+          strong_branching_depth > 0 &&
+          node.depth < strong_branching_depth &&
+          own_node_solver &&
+          options.max_nodes - solved >= strong_branching_budget_floor {
+          let (chosen, spent, checked) = strong_branching_choice(
+            problem,
+            solution,
+            options,
+            node_basis,
+            sign,
+            options.max_nodes - solved,
+            fractional,
+          )
+          solved = solved + spent
+          verified = verified + checked
+          if chosen >= 0 {
+            fractional = chosen
+          }
+        }
         if fractional < 0 {
           if !has_incumbent ||
             sign * solution.objective <

@@ -518,3 +518,84 @@ test "a cut round's re-solve gets a longer cap than an ordinary relaxation" {
   assert_eq(cut_round_iteration_cap(20000), 80000)
   assert_true(cut_round_iteration_cap(1) > 1)
 }
+
+///|
+/// Strong branching picks the branch that costs the search something, not the most
+/// fractional variable.
+///
+/// The model is built so the two rules disagree: `min −y` with `y ≤ 1.5` and `x ≥ 0.5`,
+/// `x` and `y` integers in `[0, 2]`. The relaxation stands at `(0.5, 1.5)` — both variables
+/// half-way — so the default rule takes the first one, `x`, whose sides are *nothing*: the
+/// down side is the row `x ≥ 0.5` contradicting itself, and the up side is the same
+/// relaxation as the parent. Branching on `y` instead cuts the objective down to `−1`. The
+/// measured difference is the whole point of the rule, and it is the same shape as `gt2`'s
+/// root, where ten of the most fractional variables came back at the parent's own bound.
+test "strong branching prefers the branch whose worse side is better" {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let x = model.add_var("x", ub=2.0, is_int=true)
+  let y = model.add_var("y", ub=2.0, is_int=true)
+  model.set_objective([(y, -1.0)])
+  model.add_constraint([(y, 1.0)], @model.Rel::LessEqual, 1.5)
+  model.add_constraint([(x, 1.0)], @model.Rel::GreaterEqual, 0.5)
+  let options = MipOptions::default()
+  let (solution, basis) = kernel_node(model, options, None)
+  assert_eq(solution.status, NodeStatus::Optimal)
+  // The default rule takes `x`: it is the first integer variable a half away from a whole
+  // number, and taking it changes nothing about the relaxation.
+  assert_eq(most_fractional(model, solution.values, options.tolerance), x)
+  let (chosen, spent, verified) = strong_branching_choice(
+    model, solution, options, basis, 1.0, 600, x,
+  )
+  assert_eq(chosen, y)
+  // The default candidate is measured first and the widening stops as soon as a better one
+  // is found: two relaxations for the default branch, two for `y`, all four judged. What the
+  // measurement costs is what it reports, so a caller can charge it to the budget without
+  // guessing.
+  assert_eq(spent, 4)
+  assert_eq(verified, 4)
+}
+
+///|
+/// The cheap case of the measurement: when the caller's own branch already separates the
+/// node's bound, the search takes it and spends exactly two relaxations finding that out.
+///
+/// This is the gate that keeps strong branching affordable, and it is why the rule does not
+/// cost `p0201` its proof (see `strong_branching_choice`): `min −x` with `x ≤ 1.5` stands at
+/// `x = 1.5`, and branching down gives `−1` against the parent's `−1.5`, so nothing needs to
+/// be searched for.
+test "strong branching stops at the default branch when it separates the bound" {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let x = model.add_var("x", ub=2.0, is_int=true)
+  model.set_objective([(x, -1.0)])
+  model.add_constraint([(x, 1.0)], @model.Rel::LessEqual, 1.5)
+  let options = MipOptions::default()
+  let (solution, basis) = kernel_node(model, options, None)
+  assert_eq(solution.status, NodeStatus::Optimal)
+  assert_eq(most_fractional(model, solution.values, options.tolerance), x)
+  let (chosen, spent, verified) = strong_branching_choice(
+    model, solution, options, basis, 1.0, 600, x,
+  )
+  // `-1` means "keep the caller's choice", which is the branch that was just measured good.
+  assert_eq(chosen, -1)
+  assert_eq(spent, 2)
+  assert_eq(verified, 2)
+}
+
+///|
+/// The measurement refuses to start when the budget cannot pay for two relaxations, and says
+/// so with the same `-1` a node with nothing to gain gets: an unaffordable measurement is not
+/// a branch.
+test "strong branching is not started on a budget that cannot pay for it" {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let x = model.add_var("x", ub=2.0, is_int=true)
+  model.set_objective([(x, -1.0)])
+  model.add_constraint([(x, 1.0)], @model.Rel::LessEqual, 1.5)
+  let options = MipOptions::default()
+  let (solution, basis) = kernel_node(model, options, None)
+  let (chosen, spent, verified) = strong_branching_choice(
+    model, solution, options, basis, 1.0, 1, x,
+  )
+  assert_eq(chosen, -1)
+  assert_eq(spent, 0)
+  assert_eq(verified, 0)
+}
