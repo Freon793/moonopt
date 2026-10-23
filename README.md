@@ -107,8 +107,8 @@ moon run cmd/parse -- bench --manifest instances.txt --mip --max-nodes 300
 | --- | --- | --- |
 | [`bench/parse-report.md`](bench/parse-report.md) | 全清单解析 | 32 个实例全部解析成功 |
 | [`bench/solve-report.md`](bench/solve-report.md) | 32 个实例、2200 行上限、20000 枢轴上限、presolve | 27 个求到最优、4 个超行数上限跳过、1 个到枢轴上限（被跳过的 4 个抬到 20000 行后实测都解不完；撞上限的那个抬到 60000 枢轴也仍未收敛，见 [`bench/README.md`](bench/README.md)） |
-| [`bench/mip-report.md`](bench/mip-report.md) | 32 个实例、600 节点 | 4 个证到最优、11 个到节点预算、17 个跳过 |
-| [`bench/mip-report-small.md`](bench/mip-report-small.md) | 10 个实例、30000 节点 | 5 个证到公开已知最优值、5 个到节点预算 |
+| [`bench/mip-report.md`](bench/mip-report.md) | 32 个实例、600 节点 | 5 个证到最优、10 个到节点预算、17 个跳过 |
+| [`bench/mip-report-small.md`](bench/mip-report-small.md) | 10 个实例、30000 节点 | 6 个证到公开已知最优值、4 个到节点预算 |
 
 上限是结果的一部分：报告头部逐字记录行数上限、枢轴上限与节点预算，不同上限下的计数不能互相比较。
 [`bench/report.md`](bench/report.md) 是索引，同时判定每份报告描述的还是不是当前代码里的那份。

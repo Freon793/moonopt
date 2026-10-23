@@ -211,9 +211,9 @@ _build/native/release/build/cmd/parse/parse.exe bench/data/instances/<name> `
   出现被拒证书或点没通过复核时**拒绝写报告**。
 - `mip-report-small.md`：**小规模实例的满预算口径**（清单 `bench/data/instances/small.txt`、行数上限 300、
   节点预算 **30000**、迭代上限 20000、开根割）。它是完成标准"M5 ①：小规模实例求到公开已知最优值"的证据：
-  **10 个实例里 5 个证到公开已知最优值**（`22433` 33 节点 / `khb05250` 107 / `p0201` 609 /
-  `flugpl` 13806 / **`blend2` 24934**），`check-mip-objectives.ps1 -Report bench/mip-report-small.md`
-  对 5 项**取等**通过。**节点预算 30000 是实测定的**：清单里最深的证明（`blend2`）落在 25 230 个松弛上，
+  **10 个实例里 6 个证到公开已知最优值**（`22433` 39 节点 / `khb05250` 113 / `p0201` 577 /
+  `gt2` 432 / `flugpl` 13812 / **`blend2` 24940**），`check-mip-objectives.ps1 -Report bench/mip-report-small.md`
+  对 6 项**取等**通过。**节点预算 30000 是实测定的**：清单里最深的证明（`blend2`）落在 24 940 个松弛上，
   30000 是最小的整千覆盖值；早先 20000 的口径下同一实例报 `node-limit`（两场实验，旧数字留在 `docs/history.md`）。
   清单文件本身也是证据：它把每个实例**实测的每节点成本**与排除理由写在里面（`rout` 391 ms/节点、
   `misc07` 1000 节点超过 8 分钟 → 满预算的臂跑不起）。
