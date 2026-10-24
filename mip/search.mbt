@@ -454,11 +454,13 @@ let neighbourhood_free : Int32 = 20
 ///
 /// The share, not a count, because the pass has to mean the same thing at 600 nodes
 /// and at 30 000: on the small manifest the reserved 3 750 is what a 20-integer
-/// neighbourhood of `markshare1` needs to find (and nearly to prove) its 94, and on
-/// the wide manifest's 600-node budget the same rule reserves 75. A run that proves
-/// before the tail never reaches the trigger at all — the proofs the reports show all
-/// land well inside their budgets — and a run whose gap is already small is kept out
-/// by the same "far from the open bound" line the dive's launch condition reads.
+/// neighbourhood of `markshare1` needs to find (and nearly to prove) its 94 — and the
+/// same instance's wide-calibre run, with 75, takes its incumbent from 257 to 105,
+/// which is the pass paying for itself at a twentieth of the budget. A run that
+/// proves before the tail never reaches the trigger at all — the proofs the reports
+/// show all land well inside their budgets — and a run whose gap is already small is
+/// kept out by the same "far from the open bound" line the dive's launch condition
+/// reads.
 let neighbourhood_budget_share : Int32 = 8
 
 ///|
@@ -1361,6 +1363,12 @@ fn solve_mip_unchanged(
         incumbent_objective = inner.objective
         has_incumbent = true
       }
+      // The tail is spent: this iteration must not go on to pop and solve another
+      // node on top of it. Continuing the loop hands the decision to the budget
+      // check at its top, which ends the run when nothing is left and goes on when
+      // the sub-search proved early — measured as the reverse of a formality: the
+      // extra pop made wide-calibre runs report one relaxation past their budget.
+      continue
     }
     let index = queue.pop()
     let node = nodes[index]
