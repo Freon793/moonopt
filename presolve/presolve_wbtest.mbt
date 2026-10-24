@@ -367,3 +367,94 @@ test "presolve finds an upper bound through a negative coefficient" {
   assert_true(max_row_violation(model, values) <= 1.0e-9)
   assert_true(max_bound_violation(model, values) <= 1.0e-9)
 }
+
+///|
+/// A negative slope flips which of the eliminated variable's bounds lands on
+/// which side of the survivor: eliminating `x` from `2x + y = 3` with
+/// `x ∈ [0, 10]` writes `x = 1.5 − 0.5·y`, which forces `y ∈ [−17, 3]` —
+/// tighter than `y`'s own box of `[−20, 20]` on both ends. The survivor is kept
+/// alive by a second row that binds, so the tightened box is what the reduced
+/// model actually carries.
+test "a doubleton substitution with a negative slope tightens both bounds" {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let x = model.add_var("x", lb=0.0, ub=10.0)
+  let y = model.add_var("y", lb=-20.0, ub=20.0)
+  let w = model.add_var("w", lb=0.0, ub=5.0)
+  model.set_objective([(x, 1.0), (w, -1.0)])
+  model.add_named_constraint(
+    [(x, 2.0), (y, 1.0)],
+    @model.Rel::Equal,
+    3.0,
+    "def",
+  )
+  model.add_named_constraint(
+    [(y, 1.0), (w, 1.0)],
+    @model.Rel::LessEqual,
+    0.5,
+    "other",
+  )
+  let reduced = presolve(model)
+  assert_eq(reduced.verdict(), Reduced)
+  assert_eq(reduced.stats().rows_substituted, 1)
+  let survivor = reduced.reduced()
+  // x is gone (it appeared only in the doubleton); y survives through "other".
+  assert_eq(survivor.num_vars(), 2)
+  // The transported interval: x = 1.5 − 0.5·y with x ∈ [0, 10] gives
+  // y ∈ [−17, 3], and the second row's own implied bound caps it at 0.5.
+  assert_true(
+    @core.approx_eq(survivor.get_var(0).lb, -17.0, rel=1.0e-9, abs=1.0e-9),
+  )
+  assert_true(
+    @core.approx_eq(survivor.get_var(0).ub, 0.5, rel=1.0e-9, abs=1.0e-9),
+  )
+  // Reconstruct at the reduced optimum y = −4.5: x = 1.5 − 0.5·(−4.5) = 3.75.
+  let values = reduced.reconstruct([-4.5, 5.0])
+  assert_true(@core.approx_eq(values[0], 3.75, rel=1.0e-9, abs=1.0e-9))
+  assert_true(
+    @core.approx_eq(values[1] + values[2], 0.5, rel=1.0e-9, abs=1.0e-9),
+  )
+}
+
+///|
+/// Substitutions chain: eliminating `x` through `y`, then `y` through `z`,
+/// leaves `x`'s form pointing at a form. Here the cascade runs to the end — `z`
+/// is fixed at its transported bound and the reduced model is empty — so the
+/// reconstruction composes the whole chain from no variables at all.
+test "doubleton substitutions chain and the reconstruction composes" {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let x = model.add_var("x", lb=0.0, ub=6.0)
+  let y = model.add_var("y", lb=0.0, ub=10.0)
+  let z = model.add_var("z", lb=0.0, ub=5.0)
+  model.set_objective([(z, 1.0)])
+  model.add_named_constraint([(x, 1.0), (y, 1.0)], @model.Rel::Equal, 5.0, "xy")
+  model.add_named_constraint([(y, 1.0), (z, 1.0)], @model.Rel::Equal, 7.0, "yz")
+  let reduced = presolve(model)
+  assert_eq(reduced.verdict(), Reduced)
+  assert_eq(reduced.stats().rows_substituted, 2)
+  assert_eq(reduced.reduced().num_vars(), 0)
+  // z = 2 walks back to y = 5 and x = 0.
+  let values = reduced.reconstruct([])
+  assert_true(@core.approx_eq(values[2], 2.0, rel=1.0e-9, abs=1.0e-9))
+  assert_true(@core.approx_eq(values[1], 5.0, rel=1.0e-9, abs=1.0e-9))
+  assert_true(@core.approx_eq(values[0], 0.0, rel=1.0e-9, abs=1.0e-9))
+}
+
+///|
+/// The transported interval can be empty: the row says the eliminated variable
+/// fits an interval the survivor's own box does not reach, and the reduction
+/// proves infeasibility rather than silently dropping the variable.
+test "a doubleton whose transported interval is empty proves infeasibility" {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let x = model.add_var("x", lb=0.0, ub=1.0)
+  let y = model.add_var("y", lb=0.0, ub=1.0)
+  model.set_objective([(x, 1.0)])
+  model.add_named_constraint(
+    [(x, 1.0), (y, 1.0)],
+    @model.Rel::Equal,
+    5.0,
+    "def",
+  )
+  let reduced = presolve(model)
+  assert_eq(reduced.verdict(), Infeasible)
+  assert_true(reduced.reason().length() > 0)
+}

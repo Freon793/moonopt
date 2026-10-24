@@ -137,6 +137,7 @@ test "presolve and the direct solve agree on random models" {
     if stats.rows_removed_empty > 0 ||
       stats.rows_removed_redundant > 0 ||
       stats.rows_removed_singleton > 0 ||
+      stats.rows_substituted > 0 ||
       stats.variables_fixed > 0 ||
       stats.columns_removed_empty > 0 ||
       stats.bounds_tightened > 0 {
@@ -199,4 +200,84 @@ test "presolve and the direct solve agree on random models" {
   // above would be vacuous.
   assert_true(reduction_fired > 40)
   assert_true(eliminated > 0)
+}
+
+///|
+/// The equality doubleton: `a·x + b·y = r` lets one variable leave the model
+/// entirely — its other entries spliced onto the other, its bounds becoming an
+/// interval for the other, the row gone. Here the spliced variable also appears
+/// in a second row together with the survivor, so the splice exercises the merge
+/// of the two contributions, and a third variable keeps the reduced model alive
+/// for the kernel.
+test "presolve substitutes an equality doubleton and reconstructs through it" {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let x = model.add_var("x", lb=0.0, ub=10.0)
+  let y = model.add_var("y", lb=0.0, ub=3.0)
+  let z = model.add_var("z", lb=0.0, ub=4.0)
+  model.set_objective([(x, 1.0), (y, 2.0), (z, -3.0)])
+  model.add_named_constraint(
+    [(x, 1.0), (y, 1.0)],
+    @model.Rel::Equal,
+    5.0,
+    "def",
+  )
+  model.add_named_constraint(
+    [(x, 2.0), (y, 1.0), (z, 1.0)],
+    @model.Rel::LessEqual,
+    12.0,
+    "mix",
+  )
+  let reduced = @presolve.presolve(model)
+  assert_eq(reduced.verdict(), @presolve.PresolveVerdict::Reduced)
+  assert_eq(reduced.stats().rows_substituted, 1)
+  // x (the sparser column, at the tie) is gone; y and z survive on the spliced row.
+  assert_eq(reduced.reduced().num_vars(), 2)
+  assert_eq(reduced.reduced().num_constraints(), 1)
+  // The reduced solve has to land on the original's own optimum, and the
+  // reconstruction has to give a point the original accepts. The optimum here is
+  // -5 at (x, y, z) = (3, 2, 4): driving z to its bound is worth more than the
+  // two y it costs through the row.
+  let kernel = @simplex.solve_model_with(
+    reduced.reduced(),
+    @simplex.SimplexOptions::relaxed(),
+  )
+  let solved = match kernel {
+    Err(reason) => fail("kernel refused the reduced model: " + reason)
+    Ok(result) => result
+  }
+  assert_eq(solved.status, @simplex.SimplexStatus::Optimal)
+  let direct = match @simplex.solve_model(model) {
+    Err(reason) => fail("kernel refused the original model: " + reason)
+    Ok(result) => result
+  }
+  assert_eq(direct.status, @simplex.SimplexStatus::Optimal)
+  assert_true(
+    @core.approx_eq(
+      reduced.objective(solved.objective),
+      direct.objective,
+      rel=1.0e-9,
+      abs=1.0e-9,
+    ),
+  )
+  assert_true(
+    @core.approx_eq(
+      reduced.objective(solved.objective),
+      -5.0,
+      rel=1.0e-9,
+      abs=1.0e-9,
+    ),
+  )
+  let values = reduced.reconstruct(solved.values)
+  assert_true(
+    @core.approx_eq(values[0] + values[1], 5.0, rel=1.0e-9, abs=1.0e-9),
+  )
+  assert_true(2.0 * values[0] + values[1] + values[2] <= 12.0 + 1.0e-9)
+  assert_true(
+    @core.approx_eq(
+      @presolve.objective_value(model, values),
+      -5.0,
+      rel=1.0e-9,
+      abs=1.0e-9,
+    ),
+  )
 }

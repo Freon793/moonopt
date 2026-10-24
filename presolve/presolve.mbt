@@ -52,6 +52,9 @@ pub(all) struct PresolveStats {
   rows_removed_empty : Int32
   rows_removed_redundant : Int32
   rows_removed_singleton : Int32
+  /// Rows whose equality doubleton let one variable be substituted out entirely
+  /// (`a·x + b·y = r` becomes `y`'s form over `x`, the row disappears).
+  rows_substituted : Int32
   bounds_tightened : Int32
   variables_fixed : Int32
   /// How many of `variables_fixed` were fixed by dual fixing — a variable whose
@@ -146,6 +149,20 @@ priv struct WorkRow {
 }
 
 ///|
+/// What an equality doubleton replaced a variable with: `y = constant + coefficient · base`,
+/// with `base` a variable index in the *original* numbering.
+///
+/// The base can itself be substituted later, which chains the forms; `build` resolves
+/// the chain to whatever the reduced model still holds (an alive variable or a fixed
+/// value). A chain cannot cycle: a substitution's base is alive when the form is
+/// written, and a variable dies only once.
+priv struct LinearForm {
+  constant : Double
+  coefficient : Double
+  base : Int32
+}
+
+///|
 /// What a row's activity range proves about that row.
 priv enum RowVerdict {
   /// Every point inside the current bounds satisfies it.
@@ -181,11 +198,18 @@ priv struct Reduction {
   rows : Array[WorkRow]
   mut offset : Double
   fixed_values : Array[Double]
+  /// The substitution a doubleton equality replaced a variable with, or `None`. The
+  /// index is the original variable numbering, parallel to `fixed_values`.
+  substitutions : Array[LinearForm?]
+  /// How much splicing the substitutions have added to the rows so far — the budget
+  /// guard's memory, not a statistic the caller sees.
+  mut fill_used : Int32
   mut infeasible : String
   mut unbounded : String
   mut rows_removed_empty : Int32
   mut rows_removed_redundant : Int32
   mut rows_removed_singleton : Int32
+  mut rows_substituted : Int32
   mut bounds_tightened : Int32
   mut variables_fixed : Int32
   mut variables_fixed_dual : Int32
@@ -232,11 +256,14 @@ fn Reduction::new(model : @model.Model) -> Reduction {
     rows,
     offset: 0.0,
     fixed_values: Array::make(n, 0.0),
+    substitutions: Array::make(n, None),
+    fill_used: 0,
     infeasible: "",
     unbounded: "",
     rows_removed_empty: 0,
     rows_removed_redundant: 0,
     rows_removed_singleton: 0,
+    rows_substituted: 0,
     bounds_tightened: 0,
     variables_fixed: 0,
     variables_fixed_dual: 0,
@@ -666,6 +693,199 @@ fn Reduction::fix_variable(
 }
 
 ///|
+/// How much splicing the doubleton substitutions may add to the rows in total.
+///
+/// Substituting `y = c₀ + c₁·x` into a row rewrites `y`'s entry onto `x`, and a row
+/// gains a nonzero exactly where it had `y` but not `x` — fill, the one quantity a
+/// substitution cannot predict from the row it came from. The corpus measured first:
+/// the most any instance needs is `mod011`'s 1 568 against 2 077 substitutions (a net
+/// *reduction* of nonzeros, since every substituted row drops two), so ten thousand is
+/// six times the measured maximum while still bounding a model built to explode.
+let substitution_fill_budget : Int32 = 10000
+
+///|
+/// Substitutes the variables of equality doubleton rows.
+///
+/// A live row `a·x + b·y = r` with `b ≠ 0` says `y = r/b − (a/b)·x` everywhere, so
+/// `y` can leave the model: its every other entry is spliced onto `x`, its objective
+/// term becomes an offset plus a term on `x`, its bounds become an interval for `x`
+/// (intersected with `x`'s own box, which is what the reduction is worth: the
+/// projected box is tighter than the original), and the row itself is gone. The form
+/// is recorded for `reconstruct`.
+///
+/// Only equalities: an inequality doubleton pins one *side* of `y` on `x`, and the
+/// implied-bound reduction already reads that (`tighten_from_row`). Only rows whose
+/// two variables are both alive, and only one substitution per row — the fixpoint
+/// loop revisits whatever the splicing turns into new doubletons or singletons.
+///
+/// The eliminated variable is the one appearing in fewer live rows: every one of its
+/// rows needs the splice, so that side is the cheaper one to move. Integrality is
+/// deliberately not consulted — this reduction runs on the linear path and never sees
+/// an integer model, the same contract every other reduction here already rests on.
+fn Reduction::eliminate_doubleton_rows(self : Reduction) -> Int32 {
+  let mut changed = 0
+  for i = 0; i < self.rows.length(); i = i + 1 {
+    let row = self.rows[i]
+    if !row.alive || row.rel != @model.Rel::Equal || row.terms.length() != 2 {
+      continue
+    }
+    let (ja, ba) = row.terms[0]
+    let (jb, bb) = row.terms[1]
+    if ja == jb {
+      continue
+    }
+    if !self.vars[ja].alive || !self.vars[jb].alive {
+      continue
+    }
+    // The eliminated variable: the sparser column is the cheaper one to move.
+    let mut occurrences_a = 0
+    let mut occurrences_b = 0
+    for k = 0; k < self.rows.length(); k = k + 1 {
+      if !self.rows[k].alive {
+        continue
+      }
+      for term in self.rows[k].terms {
+        let (j, _) = term
+        if j == ja {
+          occurrences_a = occurrences_a + 1
+        } else if j == jb {
+          occurrences_b = occurrences_b + 1
+        }
+      }
+    }
+    let (y, x, coefficient_y, coefficient_x) = if occurrences_a <= occurrences_b {
+      (ja, jb, ba, bb)
+    } else {
+      (jb, ja, bb, ba)
+    }
+    if @core.approx_zero(coefficient_y, abs=1.0e-12) {
+      continue
+    }
+    // The fill budget: each of `y`'s rows other than this one may gain a nonzero.
+    if self.fill_used + occurrences_a + occurrences_b - 2 >
+      substitution_fill_budget {
+      continue
+    }
+    // y = r/by − (bx/by)·x, and the interval that y's box forces x into.
+    let constant = row.rhs / coefficient_y
+    let slope = -coefficient_x / coefficient_y
+    // The slope's sign decides which of y's bounds lands on which side of x.
+    let lower_for_x = if slope >= 0.0 {
+      if is_sentinel(self.vars[y].lb) {
+        None
+      } else {
+        Some((self.vars[y].lb - constant) / slope)
+      }
+    } else if is_sentinel(self.vars[y].ub) {
+      None
+    } else {
+      Some((self.vars[y].ub - constant) / slope)
+    }
+    let upper_for_x = if slope >= 0.0 {
+      if is_sentinel(self.vars[y].ub) {
+        None
+      } else {
+        Some((self.vars[y].ub - constant) / slope)
+      }
+    } else if is_sentinel(self.vars[y].lb) {
+      None
+    } else {
+      Some((self.vars[y].lb - constant) / slope)
+    }
+    match (lower_for_x, upper_for_x) {
+      (Some(low), Some(high)) => {
+        if low > high + scale_tolerance(high) {
+          self.prove_infeasible(
+            "substituting row " +
+            row.name +
+            " leaves variable " +
+            self.vars[x].name +
+            " an empty interval",
+          )
+          continue
+        }
+        if !is_sentinel(low) &&
+          (is_sentinel(self.vars[x].lb) || low > self.vars[x].lb) {
+          self.vars[x].lb = low
+          self.bounds_tightened = self.bounds_tightened + 1
+        }
+        if !is_sentinel(high) &&
+          (is_sentinel(self.vars[x].ub) || high < self.vars[x].ub) {
+          self.vars[x].ub = high
+          self.bounds_tightened = self.bounds_tightened + 1
+        }
+      }
+      _ => ()
+    }
+    if self.vars[x].lb > self.vars[x].ub + scale_tolerance(self.vars[x].ub) {
+      self.prove_infeasible(
+        "substituting row " +
+        row.name +
+        " conflicts with variable " +
+        self.vars[x].name +
+        "'s own bounds",
+      )
+      continue
+    }
+    // Splice y out of every other live row, onto x.
+    let mut spent = 0
+    for k = 0; k < self.rows.length(); k = k + 1 {
+      if k == i || !self.rows[k].alive {
+        continue
+      }
+      let other = self.rows[k]
+      // y appears at most once (terms are normalized), and so does x.
+      let mut from_y = 0.0
+      let mut touched = false
+      let kept : Array[(Int32, Double)] = []
+      for term in other.terms {
+        let (j, coefficient) = term
+        if j == y {
+          other.rhs = other.rhs - coefficient * constant
+          from_y = coefficient * slope
+          touched = true
+        } else {
+          kept.push(term)
+        }
+      }
+      if touched {
+        // x may already be in the row; the merge is why a splice can shrink it.
+        let merged : Array[(Int32, Double)] = []
+        let mut x_total = from_y
+        for term in kept {
+          let (j, coefficient) = term
+          if j == x {
+            x_total = x_total + coefficient
+          } else {
+            merged.push(term)
+          }
+        }
+        if !@core.approx_zero(x_total, abs=1.0e-12) {
+          merged.push((x, x_total))
+        }
+        other.terms = @model.normalize_terms(merged)
+        spent = spent + 1
+      }
+    }
+    self.fill_used = self.fill_used + spent
+    // The objective: y's cost becomes an offset plus a term on x.
+    let cost_y = self.vars[y].cost
+    self.offset = self.offset + cost_y * constant
+    self.vars[x].cost = self.vars[x].cost + cost_y * slope
+    // Record the form and retire both the variable and the row.
+    self.substitutions[y] = Some({ constant, coefficient: slope, base: x, })
+    self.vars[y].alive = false
+    row.alive = false
+    self.rows_substituted = self.rows_substituted + 1
+    changed = changed + 1
+    if self.stopped() {
+      return changed
+    }
+  }
+  changed
+}
+
+///|
 /// Eliminates every variable whose bounds meet, and every variable whose bounds
 /// were proved to meet by a singleton equality.
 fn Reduction::eliminate_fixed(self : Reduction) -> Int32 {
@@ -893,6 +1113,7 @@ fn Reduction::run(self : Reduction) -> Unit {
       }
     }
     changed = changed + self.consume_singleton_rows()
+    changed = changed + self.eliminate_doubleton_rows()
     changed = changed + self.eliminate_fixed()
     changed = changed + self.eliminate_empty_columns()
     // Dual fixing runs last on purpose: an empty column and a variable whose bounds have
@@ -953,7 +1174,38 @@ fn Reduction::build(self : Reduction) -> (Array[VarForm], @model.Model) {
     if self.vars[k].alive {
       forms.push(Linear(0.0, [(new_index[k], 1.0)]))
     } else {
-      forms.push(Fixed(self.fixed_values[k]))
+      match self.substitutions[k] {
+        None => forms.push(Fixed(self.fixed_values[k]))
+        Some(form) => {
+          // Follow the chain to whatever the reduced model still holds: the base is
+          // alive, fixed, or itself substituted (and that link's base was alive when
+          // it was written, so the chain ends — a variable dies only once).
+          let mut constant = form.constant
+          let mut coefficient = form.coefficient
+          let mut base = form.base
+          let mut resolved = false
+          while !resolved {
+            if self.vars[base].alive {
+              forms.push(Linear(constant, [(new_index[base], coefficient)]))
+              resolved = true
+            } else {
+              match self.substitutions[base] {
+                Some(link) => {
+                  constant = constant + coefficient * link.constant
+                  coefficient = coefficient * link.coefficient
+                  base = link.base
+                }
+                None => {
+                  forms.push(
+                    Fixed(constant + coefficient * self.fixed_values[base]),
+                  )
+                  resolved = true
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
   (forms, out)
@@ -989,6 +1241,7 @@ pub fn presolve(model : @model.Model) -> ReducedModel {
       rows_removed_empty: reduction.rows_removed_empty,
       rows_removed_redundant: reduction.rows_removed_redundant,
       rows_removed_singleton: reduction.rows_removed_singleton,
+      rows_substituted: reduction.rows_substituted,
       bounds_tightened: reduction.bounds_tightened,
       variables_fixed: reduction.variables_fixed,
       variables_fixed_dual: reduction.variables_fixed_dual,

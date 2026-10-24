@@ -24,6 +24,7 @@ pub(all) struct PresolveStats {
   rows_removed_empty : Int32
   rows_removed_redundant : Int32
   rows_removed_singleton : Int32
+  rows_substituted : Int32
   bounds_tightened : Int32
   variables_fixed : Int32
   variables_fixed_dual : Int32
