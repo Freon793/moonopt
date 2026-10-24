@@ -20,11 +20,27 @@ pub(all) enum SimplexStatus {
 /// column counts travel with it because a basis only means anything for the problem it
 /// came from: a warm start whose shape does not match is refused and the run falls back
 /// to a cold start, rather than pivoting on columns that are not there.
+///
+/// `layout` is the finer contract the counts cannot express: **which** columns the
+/// indices refer to. The kernel's column set is decided per solve from the model's
+/// bounds — a row's right hand side is the model's own minus `Σ aⱼ·lⱼ`, so tightening a
+/// lower bound moves it, and a right hand side that crosses zero turns the row's
+/// normalisation over (`≤` with a negative side becomes `≥`), which replaces its slack
+/// with a surplus and an artificial and renumbers every extra column after it. Two such
+/// layouts can agree on both counts, and the shape check alone would load a basis whose
+/// indices now name *different columns*. Measured on MIPLIB's `noswot`, one 30 000-node
+/// run handed 155 such bases to `new_with_basis`: every one of them contained two unit
+/// columns of the same row — a basis that is exactly singular, which is what a column
+/// set reinterpreted against a different numbering looks like. The fingerprint is taken
+/// from everything that decides the layout (the starting column of each row, each
+/// variable's column split, the rows' relations and normalisation signs) and a mismatch
+/// refuses the warm start exactly as a shape mismatch does.
 pub struct SimplexBasis {
   nrows : Int32
   ncols : Int32
   basis : Array[Int32]
   at_upper : Array[Bool]
+  layout : String
 } derive(Debug)
 
 ///|

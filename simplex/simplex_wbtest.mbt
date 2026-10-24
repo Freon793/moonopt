@@ -912,3 +912,92 @@ test "devex weights stay finite, are moved by pivots and are re-derived" {
     assert_eq(state.devex_weight[j], 1.0)
   }
 }
+
+///|
+/// A warm basis may only be loaded into the layout it was factored in. The kernel's
+/// column set is decided per solve from the model's bounds: a row's right hand side is
+/// the model's own minus `Σ aⱼ·lⱼ`, so tightening a lower bound moves it, and one that
+/// crosses zero turns the row's normalisation over — a `≥` row becomes a `≤` row, its
+/// surplus and artificial collapse into one slack, and every extra column after it is
+/// renumbered. Two such layouts can agree on both counts, which is why the counts alone
+/// are not the contract: measured on MIPLIB's `noswot`, one 30 000-node run handed 155
+/// bases to `new_with_basis` whose indices named a different column set, and every one
+/// of those bases held two unit columns of the same row — exactly singular, the shape
+/// a reinterpreted column set takes.
+test "a warm basis is refused when a bound change renumbers the kernel columns" {
+  // Row 1 (`x ≥ −5`) flips its normalisation when `x`'s lower bound rises past −5;
+  // row 2 (`−y ≤ 1`) flips when `y`'s lower bound drops past −1. Layout A has a
+  // surplus and an artificial for row 1 and a slack for row 2; layout B is the other
+  // way round. Both have two rows and five columns — the shape check cannot tell them
+  // apart, the fingerprint can.
+  let build = fn(lbx : Double, lby : Double) -> @model.Model {
+    let model = @model.Model::new(@model.Sense::Minimize)
+    let x = model.add_var("x", lb=lbx, ub=10.0)
+    let y = model.add_var("y", lb=lby, ub=10.0)
+    model.set_objective([(x, 1.0), (y, 1.0)])
+    model.add_constraint([(x, 1.0)], @model.Rel::GreaterEqual, -5.0)
+    model.add_constraint([(y, -1.0)], @model.Rel::LessEqual, 1.0)
+    model
+  }
+  let a = match from_model_with(build(-10.0, 0.0), true) {
+    Ok(p) => p
+    Err(reason) => fail("from_model_with refused a test model: " + reason)
+  }
+  let b = match from_model_with(build(-2.0, -3.0), true) {
+    Ok(p) => p
+    Err(reason) => fail("from_model_with refused a test model: " + reason)
+  }
+  // The two layouts agree on both counts — this is the case the shape check passes.
+  assert_eq(a.nrows, b.nrows)
+  assert_eq(a.ncols, b.ncols)
+  assert_true(a.layout_fingerprint() != b.layout_fingerprint())
+  // A lower bound that does not move any row's right hand side across zero leaves the
+  // layout alone, whatever else it moves: `x` from −10 to −6 keeps row 1's side at +1.
+  let stable = match from_model_with(build(-6.0, 0.0), true) {
+    Ok(p) => p
+    Err(reason) => fail("from_model_with refused a test model: " + reason)
+  }
+  assert_eq(stable.layout_fingerprint(), a.layout_fingerprint())
+  let options = SimplexOptions::relaxed()
+  let snapshot = State::new(a, options).basis_snapshot()
+  assert_eq(snapshot.layout, a.layout_fingerprint())
+  // The renumbered layout refuses the basis before reading anything from it; the
+  // unchanged layout loads it.
+  assert_false(State::new_with_basis(b, options, snapshot).factorized)
+  assert_true(State::new_with_basis(stable, options, snapshot).factorized)
+}
+
+///|
+/// Refusing a mismatched basis is a detour, not a dead end: the warm entry point falls
+/// back to the cold path, and the answer the caller gets is the model's own.
+test "a warm start across a layout flip falls back to the cold path and still answers" {
+  let build = fn(lbx : Double, lby : Double) -> @model.Model {
+    let model = @model.Model::new(@model.Sense::Minimize)
+    let x = model.add_var("x", lb=lbx, ub=10.0)
+    let y = model.add_var("y", lb=lby, ub=10.0)
+    model.set_objective([(x, 1.0), (y, 1.0)])
+    model.add_constraint([(x, 1.0)], @model.Rel::GreaterEqual, -5.0)
+    model.add_constraint([(y, -1.0)], @model.Rel::LessEqual, 1.0)
+    model
+  }
+  let options = SimplexOptions::relaxed()
+  // Layout A: x ∈ [−10, 10] caps the minimum at x = −5; layout B tightens both lower
+  // bounds past their rows' flip points and the optimum moves to (−2, −1).
+  let first = match solve_model_with(build(-10.0, 0.0), options) {
+    Err(reason) => fail("solve_model_with refused a test model: " + reason)
+    Ok(result) => result
+  }
+  assert_eq(first.status, Optimal)
+  assert_true(@core.approx_eq(first.objective, -5.0, rel=1.0e-9, abs=1.0e-9))
+  let basis = match first.basis {
+    Some(basis) => basis
+    None => fail("an optimal run carries its basis")
+  }
+  let second = match solve_model_with_basis(build(-2.0, -3.0), options, basis) {
+    Err(reason) =>
+      fail("solve_model_with_basis refused a test model: " + reason)
+    Ok(result) => result
+  }
+  assert_eq(second.status, Optimal)
+  assert_true(@core.approx_eq(second.objective, -3.0, rel=1.0e-9, abs=1.0e-9))
+}

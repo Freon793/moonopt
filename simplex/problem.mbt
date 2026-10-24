@@ -586,3 +586,40 @@ pub fn KernelProblem::slack_row_map(self : KernelProblem) -> Array[Int32] {
   }
   map
 }
+
+///|
+/// Identifies the kernel layout: everything about a problem that decides which column
+/// an index names — the starting column of each row (which pins where the extra columns
+/// fell), each variable's column split, the rows' relations and their normalisation
+/// signs. Two problems built from models that differ only in bounds can differ here
+/// (see `SimplexBasis::layout` for the measurement), and a basis may only be loaded
+/// into the problem whose fingerprint it carries.
+fn KernelProblem::layout_fingerprint(self : KernelProblem) -> String {
+  let mut text = ""
+  text = text +
+    self.nrows.to_string() +
+    ";" +
+    self.ncols.to_string() +
+    ";" +
+    self.structural.to_string() +
+    ";"
+  for i = 0; i < self.nrows; i = i + 1 {
+    text = text + self.initial_basis[i].to_string() + ","
+  }
+  text = text + ";"
+  for j = 0; j < self.var_columns.length(); j = j + 1 {
+    text = text + self.var_columns[j].length().to_string() + ","
+  }
+  text = text + ";"
+  for i = 0; i < self.nrows; i = i + 1 {
+    let rel = if self.row_relation[i] == @model.Rel::LessEqual {
+      "L"
+    } else if self.row_relation[i] == @model.Rel::GreaterEqual {
+      "G"
+    } else {
+      "E"
+    }
+    text = text + rel + (if self.row_sign[i] < 0.0 { "-" } else { "+" }) + ","
+  }
+  text
+}

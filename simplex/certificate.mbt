@@ -21,6 +21,7 @@ fn State::basis_snapshot(self : State) -> SimplexBasis {
     ncols: self.n,
     basis: self.basis.copy(),
     at_upper: self.at_upper.copy(),
+    layout: self.problem.layout_fingerprint(),
   }
 }
 

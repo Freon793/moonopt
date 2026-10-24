@@ -66,6 +66,7 @@ pub struct SimplexBasis {
   ncols : Int32
   basis : Array[Int32]
   at_upper : Array[Bool]
+  layout : String
 } derive(@debug.Debug)
 
 pub(all) struct SimplexOptions {

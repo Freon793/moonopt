@@ -278,6 +278,16 @@ fn State::new_with_basis(
   basis : SimplexBasis,
 ) -> State {
   let state = State::new(problem, options)
+  // The layout check is the shape check's finer half: the counts can agree while the
+  // indices name different columns, because a bound change moves a row's right hand
+  // side across zero and renumbers the extra columns after it (`SimplexBasis::layout`
+  // carries the measurement). A basis from another layout is not this problem's basis,
+  // and loading it is pivoting on columns that are not the ones it means — so the warm
+  // start is refused before anything is read from it, exactly as a shape mismatch is.
+  if basis.layout != problem.layout_fingerprint() {
+    state.factorized = false
+    return state
+  }
   // The starting state marks the cold basis (slacks and artificials) as basic, and every
   // one of those flags has to come off before the warm basis goes in. Leaving them on
   // makes columns that are *not* in this basis invisible to pricing and to the dual
