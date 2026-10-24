@@ -860,3 +860,58 @@ test "a fractional improving ray is scaled to whole components" {
     }
   }
 }
+
+///|
+/// The neighbourhood pass has two gates that keep it away from runs it cannot help,
+/// and both are observable. A model with fewer integer variables than the pass frees
+/// never fires it (there is nothing to fix), so the run is identical with the pass on
+/// and off — same status, same objective, same relaxations.
+test "a model with too few integers never runs a neighbourhood pass" {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let row : Array[(Int32, Double)] = []
+  for j = 0; j < 3; j = j + 1 {
+    let x = model.add_var("n\{j}", ub=2.0, is_int=true)
+    row.push((x, 1.0))
+  }
+  model.set_objective(row)
+  model.add_constraint(row, @model.Rel::GreaterEqual, 2.0)
+  let base = @mip.MipOptions::with_max_nodes(300)
+  let on = @mip.solve_mip(model, base)
+  let off = @mip.solve_mip(model, base.without_neighbourhood())
+  assert_eq(on.status, @mip.MipStatus::Optimal)
+  assert_true(@core.approx_eq(on.objective, 2.0, rel=1.0e-9, abs=1.0e-9))
+  assert_eq(off.status, on.status)
+  assert_eq(off.objective, on.objective)
+  assert_eq(off.nodes, on.nodes)
+}
+
+///|
+/// A run that closes its gap never pays for the pass: the trigger sits at the tail of
+/// the budget behind a "far from the open bound" gate, so a model whose optimum the
+/// root machinery can state runs identically with the pass on and off — same status,
+/// same objective, same relaxations. This is the protection the reports rely on: every
+/// proof in them lands well inside its budget, and none of them may lose relaxations
+/// to a tail pass.
+test "a run that closes its gap never pays for the neighbourhood pass" {
+  // 40 integers in [0,1] and one continuous variable the row pins:
+  //   min s  s.t.  Σⱼ xⱼ + s = 20.5
+  // Every integer point leaves the row half a unit short, so the optimum is 0.5 — and
+  // the root's integer reasoning states that at once, which is exactly the point.
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let s = model.add_var("s")
+  let row : Array[(Int32, Double)] = [(s, 1.0)]
+  for j = 0; j < 40; j = j + 1 {
+    let x = model.add_var("m\{j}", ub=1.0, is_int=true)
+    row.push((x, 1.0))
+  }
+  model.set_objective([(s, 1.0)])
+  model.add_constraint(row, @model.Rel::Equal, 20.5)
+  let base = @mip.MipOptions::with_max_nodes(150)
+  let passed = @mip.solve_mip(model, base)
+  let plain = @mip.solve_mip(model, base.without_neighbourhood())
+  assert_eq(passed.status, @mip.MipStatus::Optimal)
+  assert_eq(plain.status, @mip.MipStatus::Optimal)
+  assert_true(@core.approx_eq(passed.objective, 0.5, rel=1.0e-9, abs=1.0e-9))
+  assert_eq(passed.nodes, plain.nodes)
+  assert_eq(passed.verified, passed.nodes)
+}

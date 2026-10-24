@@ -23,6 +23,7 @@ pub(all) struct MipOptions {
   dive_steps : Int32
   dive_attempts : Int32
   cut_rounds : Int32
+  neighbourhood_passes : Int32
   primal_rounding : Bool
   node_solver : ((@model.Model) -> NodeSolution)?
   cut_hook : ((@verify.CutRow) -> @verify.CutRow)?
@@ -32,6 +33,7 @@ pub fn MipOptions::with_cut_hook(Self, (@verify.CutRow) -> @verify.CutRow) -> Se
 pub fn MipOptions::with_max_nodes(Int32) -> Self
 pub fn MipOptions::with_node_solver(Self, (@model.Model) -> NodeSolution) -> Self
 pub fn MipOptions::without_cuts(Self) -> Self
+pub fn MipOptions::without_neighbourhood(Self) -> Self
 pub fn MipOptions::without_primal_dive(Self) -> Self
 pub fn MipOptions::without_primal_rounding(Self) -> Self
 pub fn MipOptions::without_row_strengthening(Self) -> Self

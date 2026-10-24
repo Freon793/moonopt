@@ -599,3 +599,48 @@ test "strong branching is not started on a budget that cannot pay for it" {
   assert_eq(spent, 0)
   assert_eq(verified, 0)
 }
+
+///|
+/// The neighbourhood pass frees the first `neighbourhood_free` integers and fixes the
+/// rest at the incumbent's rounded values, then hands the sub-problem to an ordinary
+/// search. Here the sub-problem is easy enough to prove: fixing the last two integers
+/// at 1 leaves `min Σx s.t. Σx ≥ 2` with its root relaxation already integral at
+/// objective 2, so the pass answers with a proof and not a guess.
+test "a neighbourhood pass fixes every integer past the first twenty and proves its sub-problem" {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let row : Array[(Int32, Double)] = []
+  for j = 0; j < 22; j = j + 1 {
+    let x = model.add_var("x\{j}", ub=1.0, is_int=true)
+    row.push((x, 1.0))
+  }
+  model.set_objective(row)
+  model.add_constraint(row, @model.Rel::GreaterEqual, 2.0)
+  // An incumbent with the two fixed integers (x20, x21 by index) at 1 and everything
+  // else at 1 as well: the pass frees x0..x19, the sub-search sets them to 0.
+  let incumbent : Array[Double] = Array::make(22, 1.0)
+  let result = neighbourhood_pass(model, incumbent, 200, MipOptions::default())
+  assert_eq(result.status, MipStatus::Optimal)
+  assert_true(@core.approx_eq(result.objective, 2.0, rel=1.0e-9, abs=1.0e-9))
+  // The sub-search ran on the caller's budget and did not spend more than it had.
+  assert_true(result.nodes > 0)
+  assert_true(result.nodes <= 200)
+}
+
+///|
+/// The pass never nestles: the options it hands the sub-search carry
+/// `neighbourhood_passes = 0`, so a sub-search of a sub-search cannot happen. The
+/// observable contract on a budget of one relaxation is the strongest form: the
+/// sub-search starts, spends its single relaxation, and stops.
+test "a neighbourhood pass cannot nest" {
+  let model = @model.Model::new(@model.Sense::Minimize)
+  let row : Array[(Int32, Double)] = []
+  for j = 0; j < 22; j = j + 1 {
+    let x = model.add_var("y\{j}", ub=1.0, is_int=true)
+    row.push((x, 1.0))
+  }
+  model.set_objective(row)
+  model.add_constraint(row, @model.Rel::GreaterEqual, 2.0)
+  let incumbent : Array[Double] = Array::make(22, 1.0)
+  let result = neighbourhood_pass(model, incumbent, 1, MipOptions::default())
+  assert_true(result.nodes <= 1)
+}

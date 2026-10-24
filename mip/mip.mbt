@@ -230,6 +230,24 @@ pub(all) struct MipOptions {
   /// rest on). A cap of two is therefore "two rounds, as it always was"; a larger cap gives the
   /// rounds to the instances whose cuts keep paying.
   cut_rounds : Int32
+  /// How many times the search may re-solve a neighbourhood of its own incumbent —
+  /// every integer variable except the first `20` fixed at the incumbent's values,
+  /// the rest free — spending the tail of the node budget on it. `0` switches it off.
+  ///
+  /// This is the one primal mechanism left after its premise was measured: on
+  /// `markshare1` the run's incumbent (99 against a published optimum of 1) is
+  /// **locally optimal** in a 10-integer neighbourhood — the sub-problem with the
+  /// other 40 integers fixed proves it, in 73 relaxations — while a 20-integer
+  /// neighbourhood contains a point at **94**, proved in 3 970 relaxations
+  /// (`docs/history.md` carries both measurements). The pass fires once, at the tail
+  /// of the budget (`max_nodes / 8` reserved), and only where the incumbent is far
+  /// from what the run could still prove — the same "far" the dive's launch condition
+  /// reads — so a run about to close its gap never pays for it.
+  ///
+  /// The sub-search runs with this option at `0` (it cannot nest), counts its
+  /// relaxations in `nodes` / `verified` like any other, and only ever *offers* its
+  /// incumbent to the outer run when it is strictly better.
+  neighbourhood_passes : Int32
   /// Whether a relaxation may be rounded into a whole point and offered as the incumbent.
   ///
   /// On by default. It costs one pass over the model per solved relaxation and no solve at all,
@@ -264,6 +282,7 @@ pub fn MipOptions::default() -> MipOptions {
     dive_steps: 150,
     dive_attempts: 2,
     cut_rounds: 4,
+    neighbourhood_passes: 1,
     primal_rounding: true,
     row_strengthening: true,
     node_solver: None,
@@ -283,6 +302,7 @@ pub fn MipOptions::with_max_nodes(max_nodes : Int32) -> MipOptions {
     dive_steps: base.dive_steps,
     dive_attempts: base.dive_attempts,
     cut_rounds: base.cut_rounds,
+    neighbourhood_passes: base.neighbourhood_passes,
     primal_rounding: base.primal_rounding,
     row_strengthening: base.row_strengthening,
     node_solver: base.node_solver,
@@ -302,6 +322,7 @@ pub fn MipOptions::without_cuts(self : MipOptions) -> MipOptions {
     dive_steps: self.dive_steps,
     dive_attempts: self.dive_attempts,
     cut_rounds: 0,
+    neighbourhood_passes: self.neighbourhood_passes,
     primal_rounding: self.primal_rounding,
     row_strengthening: self.row_strengthening,
     node_solver: self.node_solver,
@@ -325,6 +346,7 @@ pub fn MipOptions::with_cut_hook(
     dive_steps: self.dive_steps,
     dive_attempts: self.dive_attempts,
     cut_rounds: self.cut_rounds,
+    neighbourhood_passes: self.neighbourhood_passes,
     primal_rounding: self.primal_rounding,
     row_strengthening: self.row_strengthening,
     node_solver: self.node_solver,
@@ -344,6 +366,7 @@ pub fn MipOptions::without_verification(self : MipOptions) -> MipOptions {
     dive_steps: self.dive_steps,
     dive_attempts: self.dive_attempts,
     cut_rounds: self.cut_rounds,
+    neighbourhood_passes: self.neighbourhood_passes,
     primal_rounding: self.primal_rounding,
     row_strengthening: self.row_strengthening,
     node_solver: self.node_solver,
@@ -363,6 +386,7 @@ pub fn MipOptions::without_primal_dive(self : MipOptions) -> MipOptions {
     dive_steps: 0,
     dive_attempts: 0,
     cut_rounds: self.cut_rounds,
+    neighbourhood_passes: self.neighbourhood_passes,
     primal_rounding: self.primal_rounding,
     row_strengthening: self.row_strengthening,
     node_solver: self.node_solver,
@@ -382,6 +406,7 @@ pub fn MipOptions::without_primal_rounding(self : MipOptions) -> MipOptions {
     dive_steps: self.dive_steps,
     dive_attempts: self.dive_attempts,
     cut_rounds: self.cut_rounds,
+    neighbourhood_passes: self.neighbourhood_passes,
     primal_rounding: false,
     row_strengthening: self.row_strengthening,
     node_solver: self.node_solver,
@@ -401,8 +426,29 @@ pub fn MipOptions::without_row_strengthening(self : MipOptions) -> MipOptions {
     dive_steps: self.dive_steps,
     dive_attempts: self.dive_attempts,
     cut_rounds: self.cut_rounds,
+    neighbourhood_passes: self.neighbourhood_passes,
     primal_rounding: self.primal_rounding,
     row_strengthening: false,
+    node_solver: self.node_solver,
+    cut_hook: self.cut_hook,
+  }
+}
+
+///|
+/// The same options with the neighbourhood pass switched off, for the test that asks
+/// what the pass itself is worth on the same model and budget.
+pub fn MipOptions::without_neighbourhood(self : MipOptions) -> MipOptions {
+  {
+    max_nodes: self.max_nodes,
+    max_iterations: self.max_iterations,
+    tolerance: self.tolerance,
+    verify_nodes: self.verify_nodes,
+    dive_steps: self.dive_steps,
+    dive_attempts: self.dive_attempts,
+    cut_rounds: self.cut_rounds,
+    neighbourhood_passes: 0,
+    primal_rounding: self.primal_rounding,
+    row_strengthening: self.row_strengthening,
     node_solver: self.node_solver,
     cut_hook: self.cut_hook,
   }
@@ -423,6 +469,7 @@ pub fn MipOptions::with_node_solver(
     dive_steps: self.dive_steps,
     dive_attempts: self.dive_attempts,
     cut_rounds: self.cut_rounds,
+    neighbourhood_passes: self.neighbourhood_passes,
     primal_rounding: self.primal_rounding,
     row_strengthening: self.row_strengthening,
     node_solver: Some(solver),

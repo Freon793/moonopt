@@ -196,6 +196,7 @@ fn branch_options(flags : SolveFlags) -> @mip.MipOptions {
       base.cut_rounds
     },
     primal_rounding: base.primal_rounding,
+    neighbourhood_passes: base.neighbourhood_passes,
     row_strengthening: base.row_strengthening,
     node_solver: base.node_solver,
     cut_hook: base.cut_hook,

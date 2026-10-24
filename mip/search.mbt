@@ -436,6 +436,32 @@ let strong_branching_candidates : Int32 = 4
 let strong_branching_budget_floor : Int32 = 8
 
 ///|
+/// How many of the model's integer variables a neighbourhood pass leaves free; every
+/// other integer is fixed at the incumbent's values.
+///
+/// Both ends of this number are measured on `markshare1` (whose run reports an
+/// incumbent of 99 against a published optimum of 1): the incumbent is **locally
+/// optimal** in a 10-integer neighbourhood — the sub-problem with the other 40 fixed
+/// proves it in 73 relaxations — while a 20-integer neighbourhood contains a point at
+/// **94**, proved in 3 970. Twenty is the width that has prey; ten is the width that
+/// does not, and the measurements are in `docs/history.md`.
+let neighbourhood_free : Int32 = 20
+
+///|
+/// The share of the node budget a neighbourhood pass may spend: the pass fires when
+/// no more than `max_nodes / 8` relaxations remain, and the sub-search is capped by
+/// what is left.
+///
+/// The share, not a count, because the pass has to mean the same thing at 600 nodes
+/// and at 30 000: on the small manifest the reserved 3 750 is what a 20-integer
+/// neighbourhood of `markshare1` needs to find (and nearly to prove) its 94, and on
+/// the wide manifest's 600-node budget the same rule reserves 75. A run that proves
+/// before the tail never reaches the trigger at all — the proofs the reports show all
+/// land well inside their budgets — and a run whose gap is already small is kept out
+/// by the same "far from the open bound" line the dive's launch condition reads.
+let neighbourhood_budget_share : Int32 = 8
+
+///|
 /// One candidate's strong-branching score: the *worse* of its two children's bounds.
 ///
 /// `(score, relaxations spent, verified)`. A score of `-1.0e300` means the candidate cannot
@@ -1042,6 +1068,55 @@ fn propagate_cutoff(
 ///|
 /// Solves one node's relaxation. `iterations` overrides the run's per-relaxation cap, which the
 /// cut round's retry uses.
+
+///|
+/// One neighbourhood pass: every integer variable except the first `neighbourhood_free`
+/// fixed at the incumbent's (rounded) values, the rest left to a sub-search with the
+/// budget it is given.
+///
+/// The model is the tree's own root (the caller's model plus the cuts the root earned),
+/// so the sub-search inherits every row the outer search believes in and its answer is
+/// a point of the same problem — and the point it offers back has been through the same
+/// `verify` discipline, because the sub-search is an ordinary `solve_mip` whose
+/// `neighbourhood_passes` is zero: a pass never nests. The sub-search re-strengthens
+/// its own copy of the model; those rewrites are not the caller's, and the caller keeps
+/// its own `strengthening` counters.
+fn neighbourhood_pass(
+  root : @model.Model,
+  incumbent : Array[Double],
+  budget : Int32,
+  options : MipOptions,
+) -> MipResult {
+  let hood = root.clone()
+  let mut freed = 0
+  for j = 0; j < hood.num_vars() && j < incumbent.length(); j = j + 1 {
+    if !hood.get_var(j).is_int {
+      continue
+    }
+    if freed < neighbourhood_free {
+      freed = freed + 1
+      continue
+    }
+    let value = round_of(incumbent[j])
+    hood.set_var_bounds(j, value, value)
+  }
+  solve_mip(hood, {
+    max_nodes: budget,
+    max_iterations: options.max_iterations,
+    tolerance: options.tolerance,
+    verify_nodes: options.verify_nodes,
+    dive_steps: options.dive_steps,
+    dive_attempts: options.dive_attempts,
+    cut_rounds: options.cut_rounds,
+    neighbourhood_passes: 0,
+    primal_rounding: options.primal_rounding,
+    row_strengthening: options.row_strengthening,
+    node_solver: options.node_solver,
+    cut_hook: options.cut_hook,
+  })
+}
+
+///|
 fn kernel_node(
   model : @model.Model,
   options : MipOptions,
@@ -1210,6 +1285,27 @@ fn solve_mip_unchanged(
   // Every node below the root is rebuilt from this one, so a cut added here is inherited
   // by the whole tree — which is exactly why it has to be checked before it lands.
   let mut root_model = model.clone()
+  // The neighbourhood pass: how much of the tail it may spend, and whether there is
+  // anything for it to do at all. It needs more integer variables than it frees
+  // (`neighbourhood_free`) — otherwise the "neighbourhood" is the whole model — and a
+  // share of the budget worth having.
+  let integer_count = {
+    let mut count = 0
+    for j = 0; j < model.num_vars(); j = j + 1 {
+      if model.get_var(j).is_int {
+        count = count + 1
+      }
+    }
+    count
+  }
+  let neighbourhood_reserve = if options.neighbourhood_passes > 0 &&
+    integer_count > neighbourhood_free &&
+    options.max_nodes / neighbourhood_budget_share > 0 {
+    options.max_nodes / neighbourhood_budget_share
+  } else {
+    0
+  }
+  let mut neighbourhood_done = neighbourhood_reserve <= 0
   // Where the pump's seed was solved: set together with the seed, never read before it.
   let mut pump_root = model
   let mut cuts_added = 0
@@ -1219,6 +1315,52 @@ fn solve_mip_unchanged(
         nodes, queue, unjudged, incumbent, incumbent_objective, has_incumbent, solved,
         verified, unfinished_nodes, cuts_added, sign, options, stats,
       )
+    }
+    // The neighbourhood pass, taken once at the tail of the budget. Every primal
+    // mechanism above (rounding, repair, dive, pump) offers points it meets *along*
+    // the search; this one spends the end of the budget looking *around* the point
+    // the search ended up with, because that point was measured to be locally
+    // optimal in a 10-integer neighbourhood while a 20-integer one holds something
+    // better (`neighbourhood_free` carries both numbers). The gates: the run has a
+    // point, that point is far from what the run could still prove — a run about to
+    // close its gap never pays for this — and there are relaxations left worth
+    // spending.
+    if !neighbourhood_done &&
+      has_incumbent &&
+      options.max_nodes - solved <= neighbourhood_reserve &&
+      run_point_is_far(
+        has_incumbent,
+        incumbent_objective,
+        best_open_key(queue, unjudged_min, sign),
+      ) {
+      neighbourhood_done = true
+      let remaining = options.max_nodes - solved
+      let inner = neighbourhood_pass(root_model, incumbent, remaining, options)
+      solved = solved + inner.nodes
+      verified = verified + inner.verified
+      unfinished_nodes = unfinished_nodes + (inner.nodes - inner.verified)
+      if inner.status is MipStatus::Unverified {
+        return {
+          status: MipStatus::Unverified,
+          values: [],
+          objective: 0.0,
+          bound: best_open_key(queue, unjudged_min, sign),
+          gap: 0.0,
+          nodes: solved,
+          verified,
+          cuts: cuts_added,
+          strengthening: stats,
+          ray: [],
+          message: "a certificate was refused inside the neighbourhood pass: " +
+          inner.message,
+        }
+      }
+      if inner.values.length() > 0 &&
+        sign * inner.objective < sign * incumbent_objective - options.tolerance {
+        incumbent = inner.values
+        incumbent_objective = inner.objective
+        has_incumbent = true
+      }
     }
     let index = queue.pop()
     let node = nodes[index]
