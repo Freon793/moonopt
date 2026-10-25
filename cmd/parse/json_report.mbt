@@ -452,17 +452,21 @@ fn run_solve(
   flags : SolveFlags,
 ) -> Unit {
   outcome.mode = "solve"
-  if model.num_constraints() > flags.max_rows {
-    outcome.skipped = true
-    return
-  }
   let options = kernel_options(flags)
+  // The row ceiling is measured where the kernel meets the problem: with presolve on,
+  // the reduction runs first and the *reduced* model is what gets checked. Measuring
+  // the caller's model would refuse a run the reduction makes affordable (the text
+  // path's `report_solution` carries the measurement).
   if !flags.presolve {
+    if model.num_constraints() > flags.max_rows {
+      outcome.skipped = true
+      return
+    }
     let result = match @simplex.solve_model_with(model, options) {
       Err(reason) => {
-        // A model the kernel does not accept is not a failed run: the text path reports the
-        // refusal and still exits zero, and failing here would make "not in the kernel's
-        // model class" look like a crash.
+        // A model the kernel does not accept is not a failed run: the text path reports
+        // the refusal and still exits zero, and failing here would make "not in the
+        // kernel's model class" look like a crash.
         outcome.status = "refused"
         outcome.message = reason
         return
@@ -472,62 +476,81 @@ fn run_solve(
     with_solve_result(outcome, result)
     return
   }
-  let presolved = @presolve.presolve(model)
-  outcome.presolved = true
-  outcome.presolve_verdict = presolve_verdict_name(presolved.verdict())
-  match presolved.verdict() {
-    @presolve.PresolveVerdict::Infeasible => {
-      outcome.status = "infeasible"
-      outcome.message = "from presolve: " + presolved.reason()
+  if flags.presolve {
+    let presolved = @presolve.presolve(model)
+    outcome.presolved = true
+    outcome.presolve_verdict = presolve_verdict_name(presolved.verdict())
+    let reduced = presolved.reduced()
+    outcome.rows_after = reduced.num_constraints()
+    outcome.vars_after = reduced.num_vars()
+    if reduced.num_constraints() > flags.max_rows {
+      outcome.skipped = true
+      outcome.message = "rows " +
+        reduced.num_constraints().to_string() +
+        " reduced from " +
+        model.num_constraints().to_string() +
+        " > " +
+        flags.max_rows.to_string()
+      return
     }
-    @presolve.PresolveVerdict::Unbounded => {
-      outcome.status = "unbounded"
-      outcome.message = "from presolve: " + presolved.reason()
-    }
-    @presolve.PresolveVerdict::Reduced => {
-      let reduced = presolved.reduced()
-      outcome.rows_after = reduced.num_constraints()
-      outcome.vars_after = reduced.num_vars()
-      if reduced.num_vars() == 0 {
-        // Everything was eliminated; the reduction's own answer is the answer.
-        outcome.status = "optimal"
-        outcome.has_objective = true
-        outcome.objective = presolved.objective(0.0)
-        outcome.message = "presolve eliminated every variable"
+    match presolved.verdict() {
+      @presolve.PresolveVerdict::Infeasible => {
+        outcome.status = "infeasible"
+        outcome.message = "from presolve: " + presolved.reason()
         return
       }
-      let result = match @simplex.solve_model_with(reduced, options) {
-        Err(reason) => {
-          outcome.status = "refused"
-          outcome.message = reason
+      @presolve.PresolveVerdict::Unbounded => {
+        outcome.status = "unbounded"
+        outcome.message = "from presolve: " + presolved.reason()
+        return
+      }
+      @presolve.PresolveVerdict::Reduced => {
+        if reduced.num_vars() == 0 {
+          // Everything was eliminated; the reduction's own answer is the answer.
+          outcome.status = "optimal"
+          outcome.has_objective = true
+          outcome.objective = presolved.objective(0.0)
+          outcome.message = "presolve eliminated every variable"
           return
         }
-        Ok(result) => result
-      }
-      with_solve_result(outcome, result)
-      outcome.objective = presolved.objective(result.objective)
-      if result.status != @simplex.SimplexStatus::Optimal {
-        return
-      }
-      // The reduced solve and the original model have to agree on the objective too: the
-      // offset is easy to get wrong, and a wrong offset leaves a solution that is perfectly
-      // feasible while the reported number is not the objective of anything.
-      let values = presolved.reconstruct(result.values)
-      let rows = @presolve.max_row_violation(model, values)
-      let bounds = @presolve.max_bound_violation(model, values)
-      let reported = presolved.objective(result.objective)
-      let recomputed = @presolve.objective_value(model, values)
-      let agrees = @core.approx_eq(reported, recomputed, rel=1.0e-9, abs=1.0e-6)
-      outcome.point_checked = true
-      outcome.row_violation = rows
-      outcome.bound_violation = bounds
-      outcome.message = if agrees {
-        "the reconstructed objective agrees with the reported one"
-      } else {
-        "the reconstructed objective DISAGREES with the reported one"
-      }
-      if !(rows <= 1.0e-7 && bounds <= 1.0e-7 && agrees) {
-        outcome.failed = true
+        let result = match @simplex.solve_model_with(reduced, options) {
+          Err(reason) => {
+            outcome.status = "refused"
+            outcome.message = reason
+            return
+          }
+          Ok(result) => result
+        }
+        with_solve_result(outcome, result)
+        outcome.objective = presolved.objective(result.objective)
+        if result.status != @simplex.SimplexStatus::Optimal {
+          return
+        }
+        // The reduced solve and the original model have to agree on the objective too:
+        // the offset is easy to get wrong, and a wrong offset leaves a solution that is
+        // perfectly feasible while the reported number is not the objective of anything.
+        let values = presolved.reconstruct(result.values)
+        let rows = @presolve.max_row_violation(model, values)
+        let bounds = @presolve.max_bound_violation(model, values)
+        let reported = presolved.objective(result.objective)
+        let recomputed = @presolve.objective_value(model, values)
+        let agrees = @core.approx_eq(
+          reported,
+          recomputed,
+          rel=1.0e-9,
+          abs=1.0e-6,
+        )
+        outcome.point_checked = true
+        outcome.row_violation = rows
+        outcome.bound_violation = bounds
+        outcome.message = if agrees {
+          "the reconstructed objective agrees with the reported one"
+        } else {
+          "the reconstructed objective DISAGREES with the reported one"
+        }
+        if !(rows <= 1.0e-7 && bounds <= 1.0e-7 && agrees) {
+          outcome.failed = true
+        }
       }
     }
   }

@@ -757,20 +757,28 @@ fn mip_report(model : @model.Model, flags : SolveFlags) -> Bool {
 ///|
 /// The plain solve path: report the kernel's outcome, with the reduction in front of
 /// it when `--presolve` is on.
+///
+/// The row ceiling is measured where the kernel meets the problem: with presolve on,
+/// the reduction runs first and the *reduced* model is what gets checked. Measuring
+/// the caller's model instead would refuse a run the reduction makes affordable —
+/// after the equality-doubleton substitution, `mod011` is 2 402 kernel rows against
+/// a caller model of 4 497, and the whole point of a row ceiling is "would this run
+/// have any chance of finishing", which is a question about the problem the kernel
+/// is actually handed.
 fn report_solution(model : @model.Model, flags : SolveFlags) -> Unit {
-  if model.num_constraints() > flags.max_rows {
-    println(
-      "       solve=skipped(rows=" +
-      model.num_constraints().to_string() +
-      " > " +
-      flags.max_rows.to_string() +
-      ")",
-    )
-    return
-  }
   let options = kernel_options(flags)
 
   if !flags.presolve {
+    if model.num_constraints() > flags.max_rows {
+      println(
+        "       solve=skipped(rows=" +
+        model.num_constraints().to_string() +
+        " > " +
+        flags.max_rows.to_string() +
+        ")",
+      )
+      return
+    }
     match @simplex.solve_model_with(model, options) {
       Err(reason) => println("       solve=refused(" + reason + ")")
       Ok(result) => report_solve_result(result)
@@ -778,6 +786,18 @@ fn report_solution(model : @model.Model, flags : SolveFlags) -> Unit {
     return
   }
   let presolved = @presolve.presolve(model)
+  if presolved.reduced().num_constraints() > flags.max_rows {
+    println(
+      "       solve=skipped(rows=" +
+      presolved.reduced().num_constraints().to_string() +
+      " reduced from " +
+      model.num_constraints().to_string() +
+      " > " +
+      flags.max_rows.to_string() +
+      ")",
+    )
+    return
+  }
   println(presolve_line(model.num_constraints(), presolved))
   match presolved.verdict() {
     @presolve.PresolveVerdict::Infeasible =>

@@ -32,7 +32,7 @@ MIPLIB 2017 —— 它提供同样性质的工业实例，但以纯 MPS（gzip �
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/fetch-instances.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-parse.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 2200 -MaxIterations 20000 -Presolve
+powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 2500 -MaxIterations 20000 -Presolve
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-relaxation-bounds.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-mip.ps1 -MaxRows 300 -MaxNodes 600 -MaxIterations 5000
 powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-mip-objectives.ps1
@@ -101,10 +101,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File bench/check-mip-objectives.p
 四个脚本只用 ASCII 字符：Windows PowerShell 5.1 读取**没有 BOM** 的 UTF-8 脚本时会按 ANSI 解码，
 非 ASCII 字符会变成乱码。新增脚本请遵守这一约定。
 
-### 行上限挡住的四个实例：抬高上限之后是什么样
+### 行上限挡住的实例：抬高上限之后是什么样
 
-`solve-report.md` 用的是 `--max-rows 2200`，清单里超过这条线的四个实例被记作 `skipped`。**这四个实例
-后来都抬到 `--max-rows 20000` 实测过，没有一个达到最优**（其余口径不变），而且失败原因不止一种 ——
+`solve-report.md` 用的是 `--max-rows 2500`（行上限的检查在 presolve **之后**，量的是归约后真正交给
+内核的行数），清单里超过这条线的三个实例被记作 `skipped`。**这些实例（含曾经的第四个 `mod011`，
+等式 doubleton 代入把它降到 2 402 行而进入报告）都抬到 `--max-rows 20000` 实测过；`mod011` 后来
+进入报告口径并解到最优，其余三个没有一个达到最优**（其余口径不变），而且失败原因不止一种 ——
 所以这条线排除的是"已知解不完的东西"，不是"没试过的东西"：
 
 | 实例 | 模型行数 | 矩阵系数（`model` 读出的最小/最大非零，比值） | 抬到 20000 行之后 |
@@ -232,12 +234,14 @@ _build/native/release/build/cmd/parse/parse.exe bench/data/instances/<name> `
   逐实例给出状态、目标值与枢轴迭代数；非最优结果逐条如实列出，包含内核自检测得的残差与负值。
   **枢轴上限是基准口径的一部分**（报告头部写明，且 `pivots` 列等于上限的实例就是在那里停下的）：
   上限不同的两份报告是两场实验，不能互相比较—— 这条以前只靠人记，现在写在报告里。
-  当前这份由 `-Relax -MaxRows 2200 -MaxIterations 20000 -Presolve` 生成（**两个上限现在都是实测定的**：
+  当前这份由 `-Relax -MaxRows 2500 -MaxIterations 20000 -Presolve` 生成（**两个上限现在都是实测定的**：
   枢轴上限 20 000 与同一份清单里 MIP 报告给每个松弛的上限一致——早先那个 1200 的口径下同一清单只有
   18 个最优、3 个到上限；行上限 2200 是"最小覆盖已测最大可解模型"的值——稀疏 LU 之后内核不再分配稠密基逆，
   实测 `cap6000`（**2176 行**）能在枢轴上限内解完，而它挡住的四个实例抬到 20 000 行之后**没有一个达到最优**
-  （逐条实测见上文「行上限挡住的四个实例」，失败原因是数值尺度与 Phase I/枢轴成本，不是行数本身）。
-  三场实验的数字都留在 `docs/history.md` 里）：
+  （逐条实测见上文「行上限挡住的四个实例」，失败原因是数值尺度与 Phase I/枢轴成本，不是行数本身）；
+  等式 doubleton 代入落地后，行上限的检查挪到了 presolve **之后**（量的是内核真正拿到的问题），
+  `mod011` 归约后 **2402 行**、在 20 000 枢轴内解到最优，按同一条定标逻辑口径升到 **2500**——
+  归约后 2504 行的 `core2536-691` 恰在它之外。三场实验的数字都留在 `docs/history.md` 里）：
   **32 个实例全覆盖、27 最优、4 因行数上限跳过、`refused` 归零、1 到上限（`fast0507`）**，
   28 个实例经过化简、27 个重建解全部通过三项检查、0 次需要 Bland 恢复；总枢轴 **25 918**、
   最大已解模型 **2176 行**。从"上限挡住的"变成"解完的"一共 9 个实例：`danoint`（1907 枢轴）与
