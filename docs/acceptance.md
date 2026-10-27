@@ -105,6 +105,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File bench/report.ps1
 每条命令与其口径（行数上限、枢轴上限、节点预算）都记录在 [`../bench/report.md`](../bench/report.md)
 与各报告头部；**上限是结果的一部分**，不同上限下的计数不能互相比较。
 
+上面 ② ③ 六条命令的**期望输出**（本轮逐条跑过，退出码均为 0）：
+
+| 命令 | 期望的一行 |
+| --- | --- |
+| `moon run examples/production_plan` | `objective = 21.00000000002238`（2 次枢轴） |
+| `moon run examples/transportation` | `objective = 11` |
+| `moon run examples/schedule_bound` | `LP bound (relaxation) : optimal 7.500000000008999`、`proven optimum : 11`、`gap of that plan : 4.499999999991001` |
+| `moon run cmd/main` | 首行 `moonopt 0.4.0`，随后三段模型状态报告（含一个诚实的失败案例） |
+| `moon run cmd/parse -- …/22433 --mip --max-nodes 2000` | `mip=optimal nodes=39 verified=39 cuts=20 obj=21477.000000017408`，并有 `point: worst row violation …/bound violation 0/integrality violation 0` |
+| `moon run cmd/parse -- verify …/22433 --relax` | `solve=optimal obj=21240.526170816112 iters=1035`，随后打印 `certificate={…}` 与独立复核的结论 |
+
+最后一条就是"求解 + 独立校验"的样子：证书由内核给出，复核由 `verify` 包做，而 `verify/moon.pkg`
+**不 import `simplex`**——这条边界是本项目"校验器不复用求解器中间量"的可核对证据。
+
 ## 3. 发布物验收
 
 ```bash
