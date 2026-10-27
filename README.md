@@ -14,7 +14,7 @@ MoonBit 的线性与整数规划求解器：读标准模型文件，用稀疏修
 - **目标平台**：native / wasm / wasm-gc / js
 
 已发布版本 `0.4.0` 在 [mooncakes.io](https://mooncakes.io/docs/Freon793/moonopt)。
-仓库当前 **211 个测试**在 native / wasm-gc / js 三个目标上全绿；CI 在 Linux / macOS / Windows 上跑检查、构建与测试。
+仓库当前 **224 个测试**在 native / wasm-gc / js 三个目标上全绿；CI 在 Linux / macOS / Windows 上跑检查、构建与测试。
 
 ## 安装
 
@@ -106,7 +106,7 @@ moon run cmd/parse -- bench --manifest instances.txt --mip --max-nodes 300
 | 报告 | 口径 | 结果 |
 | --- | --- | --- |
 | [`bench/parse-report.md`](bench/parse-report.md) | 全清单解析 | 32 个实例全部解析成功 |
-| [`bench/solve-report.md`](bench/solve-report.md) | 32 个实例、2200 行上限、20000 枢轴上限、presolve | 27 个求到最优、4 个超行数上限跳过、1 个到枢轴上限（被跳过的 4 个抬到 20000 行后实测都解不完；撞上限的那个抬到 60000 枢轴也仍未收敛，见 [`bench/README.md`](bench/README.md)） |
+| [`bench/solve-report.md`](bench/solve-report.md) | 32 个实例、2500 行上限、20000 枢轴上限、presolve | 28 个求到最优、3 个超行数上限跳过（`2club200v15p5scn`、`core2536-691`、`dano3_3`）、1 个到枢轴上限（`fast0507`：被挡住的三个抬到 20000 行后实测仍解不完；撞上限的那个抬到 150 000 枢轴仍未收敛且增益超线性衰减，见 [`bench/README.md`](bench/README.md)） |
 | [`bench/mip-report.md`](bench/mip-report.md) | 32 个实例、600 节点 | 5 个证到最优、10 个到节点预算、17 个跳过 |
 | [`bench/mip-report-small.md`](bench/mip-report-small.md) | 10 个实例、30000 节点 | 6 个证到公开已知最优值、4 个到节点预算 |
 
