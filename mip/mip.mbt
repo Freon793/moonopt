@@ -112,6 +112,17 @@ pub struct MipResult {
   /// whether a reduction fired at all is otherwise invisible to a caller, and a reduction that
   /// fires on nothing while being documented as firing is a claim with no evidence.
   strengthening : @presolve.StrengthenStats
+  /// What the column-dominance reduction removed before the search started, as counted by
+  /// `@presolve.remove_dominated_columns`, with the original indices of the removed columns.
+  ///
+  /// The reduction is exact for 0/1 set-covering models — the columns it fixes to zero are
+  /// dominated by a cheaper column on every row they cover — so the optimal value does not
+  /// move and the point reported is mapped back into the caller's own variable space. What it
+  /// changes is the work: on the one set-covering instance of the corpus it removes more than
+  /// half the columns, and the kernel's per-pivot cost follows the column space it prices over.
+  /// A model outside that class reports `columns_compared: 0`, which is the measurement that
+  /// says nothing was looked at rather than nothing was found.
+  domination : @presolve.DominationStats
   /// Recession direction of an `Unbounded` claim: an integral direction along which the
   /// objective improves without limit from `values`, so `values[j] + k·ray[j]` stays
   /// integral and feasible for every integer `k ≥ 0`. Empty unless the run proved the
@@ -180,6 +191,20 @@ pub(all) struct MipOptions {
   /// (`MipResult::strengthening`), so "it did nothing here" is a measurement rather than an
   /// assumption.
   row_strengthening : Bool
+  /// Whether columns a cheaper column's cover dominates are removed before the search starts
+  /// (`@presolve.remove_dominated_columns`). On by default.
+  ///
+  /// It fires only on 0/1 set-covering models — every row a `>=` row with all-positive
+  /// coefficients, every variable a 0/1 integer, no negative cost — and it is a reduction
+  /// rather than a heuristic: a dominated column can always be replaced by its dominator at no
+  /// greater objective, so the integer optimum is unchanged and the removed slots come back as
+  /// zeros in the result. Outside that class it does nothing, and the result says so
+  /// (`MipResult::domination` reports zero columns compared rather than an empty win).
+  ///
+  /// A caller measuring the search *itself* turns it off for the same reason
+  /// `row_strengthening` has a switch: a run on a different model is not a run of the same
+  /// experiment.
+  column_dominance : Bool
   /// How many relaxations one launch of the primal heuristic may spend walking a node's
   /// relaxation down to a whole point, or `0` to switch the heuristic off.
   ///
@@ -285,6 +310,7 @@ pub fn MipOptions::default() -> MipOptions {
     neighbourhood_passes: 1,
     primal_rounding: true,
     row_strengthening: true,
+    column_dominance: true,
     node_solver: None,
     cut_hook: None,
   }
@@ -305,6 +331,7 @@ pub fn MipOptions::with_max_nodes(max_nodes : Int32) -> MipOptions {
     neighbourhood_passes: base.neighbourhood_passes,
     primal_rounding: base.primal_rounding,
     row_strengthening: base.row_strengthening,
+    column_dominance: base.column_dominance,
     node_solver: base.node_solver,
     cut_hook: base.cut_hook,
   }
@@ -325,6 +352,7 @@ pub fn MipOptions::without_cuts(self : MipOptions) -> MipOptions {
     neighbourhood_passes: self.neighbourhood_passes,
     primal_rounding: self.primal_rounding,
     row_strengthening: self.row_strengthening,
+    column_dominance: self.column_dominance,
     node_solver: self.node_solver,
     cut_hook: self.cut_hook,
   }
@@ -349,6 +377,7 @@ pub fn MipOptions::with_cut_hook(
     neighbourhood_passes: self.neighbourhood_passes,
     primal_rounding: self.primal_rounding,
     row_strengthening: self.row_strengthening,
+    column_dominance: self.column_dominance,
     node_solver: self.node_solver,
     cut_hook: Some(hook),
   }
@@ -369,6 +398,7 @@ pub fn MipOptions::without_verification(self : MipOptions) -> MipOptions {
     neighbourhood_passes: self.neighbourhood_passes,
     primal_rounding: self.primal_rounding,
     row_strengthening: self.row_strengthening,
+    column_dominance: self.column_dominance,
     node_solver: self.node_solver,
     cut_hook: self.cut_hook,
   }
@@ -389,6 +419,7 @@ pub fn MipOptions::without_primal_dive(self : MipOptions) -> MipOptions {
     neighbourhood_passes: self.neighbourhood_passes,
     primal_rounding: self.primal_rounding,
     row_strengthening: self.row_strengthening,
+    column_dominance: self.column_dominance,
     node_solver: self.node_solver,
     cut_hook: self.cut_hook,
   }
@@ -409,6 +440,7 @@ pub fn MipOptions::without_primal_rounding(self : MipOptions) -> MipOptions {
     neighbourhood_passes: self.neighbourhood_passes,
     primal_rounding: false,
     row_strengthening: self.row_strengthening,
+    column_dominance: self.column_dominance,
     node_solver: self.node_solver,
     cut_hook: self.cut_hook,
   }
@@ -429,6 +461,28 @@ pub fn MipOptions::without_row_strengthening(self : MipOptions) -> MipOptions {
     neighbourhood_passes: self.neighbourhood_passes,
     primal_rounding: self.primal_rounding,
     row_strengthening: false,
+    column_dominance: self.column_dominance,
+    node_solver: self.node_solver,
+    cut_hook: self.cut_hook,
+  }
+}
+
+///|
+/// The same options with the column-dominance reduction switched off, so a measurement can
+/// run the model it wrote and say what the reduction itself was worth.
+pub fn MipOptions::without_column_dominance(self : MipOptions) -> MipOptions {
+  {
+    max_nodes: self.max_nodes,
+    max_iterations: self.max_iterations,
+    tolerance: self.tolerance,
+    verify_nodes: self.verify_nodes,
+    dive_steps: self.dive_steps,
+    dive_attempts: self.dive_attempts,
+    cut_rounds: self.cut_rounds,
+    neighbourhood_passes: self.neighbourhood_passes,
+    primal_rounding: self.primal_rounding,
+    row_strengthening: self.row_strengthening,
+    column_dominance: false,
     node_solver: self.node_solver,
     cut_hook: self.cut_hook,
   }
@@ -449,6 +503,7 @@ pub fn MipOptions::without_neighbourhood(self : MipOptions) -> MipOptions {
     neighbourhood_passes: 0,
     primal_rounding: self.primal_rounding,
     row_strengthening: self.row_strengthening,
+    column_dominance: self.column_dominance,
     node_solver: self.node_solver,
     cut_hook: self.cut_hook,
   }
@@ -472,6 +527,7 @@ pub fn MipOptions::with_node_solver(
     neighbourhood_passes: self.neighbourhood_passes,
     primal_rounding: self.primal_rounding,
     row_strengthening: self.row_strengthening,
+    column_dominance: self.column_dominance,
     node_solver: Some(solver),
     cut_hook: self.cut_hook,
   }

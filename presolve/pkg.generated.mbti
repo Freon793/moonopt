@@ -15,11 +15,18 @@ pub fn objective_value(@model.Model, Array[Double]) -> Double
 
 pub fn presolve(@model.Model) -> ReducedModel
 
+pub fn remove_dominated_columns(@model.Model) -> (@model.Model, Array[Int32], DominationStats)
+
 pub fn strengthen_integer_rows(@model.Model) -> (@model.Model, StrengthenStats)
 
 // Errors
 
 // Types and methods
+pub(all) struct DominationStats {
+  columns_removed : Int32
+  columns_compared : Int32
+} derive(Eq, @debug.Debug)
+
 pub(all) struct PresolveStats {
   rows_removed_empty : Int32
   rows_removed_redundant : Int32

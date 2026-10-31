@@ -87,6 +87,20 @@ You can browse and install extra skills here:
     fires is invisible in the answer — it preserves the integer feasible set exactly, so
     a run that rewrote everything looks like a run that rewrote nothing, and "it did
     nothing here" has to be a measurement rather than an assumption.
+    `remove_dominated_columns` is the second integer-path reduction and the only one
+    that **removes columns**: on a 0/1 set-covering model (`>=` rows, all-positive
+    coefficients, 0/1 integers, no negative cost) a column can be fixed to zero when a
+    cheaper column covers each of its rows with at least as much of the row *and
+    settles that row on its own* (`a_rA >= b_r`). The last condition is not optional —
+    without it, `x_A = x_B = 1` loses `a_rB` from the row with nothing to put it back,
+    and a screen that omitted it measured `markshare1` as infeasible and `pk1` as
+    `optimal 726` on instances whose answers are `1` and `11`. The optimum is unchanged
+    (the rewrite moves any feasible point to one of no greater objective), so this is
+    exact, but the indices *do* move: the reduced model's columns are not the caller's,
+    and the caller maps the point back with the returned original indices, zero in the
+    removed slots, then checks it against the **original** model. `DominationStats`
+    reports both halves — `columns_removed` and `columns_compared`, where the second
+    being zero means the model was never of this class.
   - `verify/`: the **independent** checker for a claimed answer. Primal feasibility,
     dual feasibility, complementary slackness and the duality gap for an optimality
     claim; a Farkas ray for an infeasibility claim; a feasible point plus a recession

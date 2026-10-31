@@ -105,11 +105,13 @@ pub fn SimplexOptions::with_pricing(self, pricing) -> SimplexOptions
 ```moonbit
 pub fn presolve(model) -> ReducedModel
 pub fn strengthen_integer_rows(model) -> (Model, StrengthenStats)
+pub fn remove_dominated_columns(model) -> (Model, Array[Int32], DominationStats)
 pub fn max_row_violation(model, x)   -> Double
 pub fn max_bound_violation(model, x) -> Double
 pub fn objective_value(model, x)     -> Double
 
 pub(all) struct StrengthenStats { rows_rewritten : Int, bounds_tightened : Int }
+pub(all) struct DominationStats { columns_removed : Int, columns_compared : Int }
 ```
 
 - 每条归约**先证明再触发**；`ReducedModel::verdict()` 为 `Reduced` / `Infeasible` / `Unbounded`，
@@ -124,6 +126,12 @@ pub(all) struct StrengthenStats { rows_rewritten : Int, bounds_tightened : Int }
 - **还原必须被独立复核**：`reconstruct` 把化简解映回原变量，调用方**必须**用上面三个函数在**原模型**上
   量行违反、界违反与目标值——不能拿化简自己的记账当证据（`cmd/parse` 的 `reconstructed:` 一行就是这么
   做的）。
+- `remove_dominated_columns` 是**第二条整数路径归约**，只在 0/1 集覆盖模型上触发（每行都是 `≥` 行、系数
+  全正、每个变量是 0/1 整数、没有负成本）；它返回**删列后**的模型、被删列的**原下标**（升序）以及计数。
+  最优值不变（被删的列总有一条更便宜的列覆盖它的每一行，所以任何最优解都能改写成让该列为 0），但**下标
+  变了**：调用方必须用返回的下标把解映回原变量空间，被删处为 0。`columns_compared` 为 0 表示"模型不在
+  这一类，一眼没看"，与"看了但没删"是两句话。`mip::solve_mip` 就是那个调用方，它在返回前把点映回去并
+  用上面三个函数在**原模型**上复核。
 
 ## `verify`：独立校验器
 
@@ -153,7 +161,7 @@ pub fn solve_mip(model, options) -> MipResult
 
 pub(all) enum MipStatus { Optimal, Infeasible, NodeLimit, UnboundedRelaxation, Unbounded, Unverified, Invalid }
 pub(all) struct MipOptions { max_nodes, max_iterations, tolerance, verify_nodes,
-                             row_strengthening, dive_steps, dive_attempts, cut_rounds,
+                             row_strengthening, column_dominance, dive_steps, dive_attempts, cut_rounds,
                              primal_rounding, node_solver, cut_hook }
 ```
 
@@ -161,6 +169,13 @@ pub(all) struct MipOptions { max_nodes, max_iterations, tolerance, verify_nodes,
   搜索拿到的就是调用方写的那个模型。`MipResult::strengthening` 如实报告它改了什么——两样都没改时
   全为零，于是"这条归约在这里到底有没有触发"是测量而不是假设（`--json` 的 `strengthened_rows` /
   `strengthened_bounds` 两个字段就是它）。
+- `MipOptions::column_dominance`（默认开）决定是否先调用 `remove_dominated_columns`。它是**等价变换**
+  而不是启发式：被删列在最优解里可以取 0，所以最优值、状态与界都不该动，动的只是矩阵大小。调用方看到的
+  `values` 仍是**它自己那张模型**的点（长度 = `num_vars()`，被删处为 0），因为 `solve_mip` 会映回去并在
+  原模型上复核；映回去的点若通不过复核就报 `Unverified` 而不是当成答案。`MipResult::domination` 报告删了
+  多少列、看了多少列。
+- `MipOptions::without_row_strengthening()` 与 `without_column_dominance()`：两条归约各有自己的开关，
+  因为"在搜我自己写的那个模型"和"在一个被改写过的模型上搜"是两场实验。
 
 | 规则 | 说明 |
 | --- | --- |

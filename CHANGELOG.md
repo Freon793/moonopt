@@ -7,7 +7,27 @@
 
 ## [Unreleased]
 
-（下一轮开发时在此累积。）
+### Added
+
+- **列支配归约（`presolve::remove_dominated_columns`）**：0/1 集覆盖模型里，若存在一条更便宜的列覆盖
+  另一条列的每一行、在那些行上的系数不小于它、且**自己就足以满足每一行**，那么后者可以固定为 0。这是
+  **等价变换**（最优值不变），不是启发式：任何 `x_B = 1` 的可行点都能改写成 `x_B = 0`、`x_A = 1` 而目标
+  不升。它返回删列后的模型、被删列的**原下标**（升序）与 `DominationStats`。
+  - `MipOptions::column_dominance`（**默认开**）让 `solve_mip` 在搜索前调用它；`MipOptions::without_column_dominance()`
+    关掉。`MipResult::domination` 报告删了多少列、看了多少列（后者为 0 表示模型不在这一类，一眼没看）。
+  - 调用方拿到的 `values` 仍是**自己那张模型**的点（长度 = `num_vars()`，被删处为 0），因为 `solve_mip`
+    会映回去并用 `max_row_violation` / `max_bound_violation` 在**原模型**上复核；映回去的点若通不过
+    复核就报 `Unverified` 而不是当成答案。
+  - 实测：两份清单 32 个实例里只有 `fast0507` 属于这一类，它删掉 **36 670/63 009 列（58.2%）**。
+    **本版的报告数字不变**——`solve-report` 跑的是 LP 松弛（删列会改 LP 最优值），`mip-report` 的宽口径
+    按 300 行上限把 507 行的它记为 skipped，小规模清单里没有它。这条规则的服务对象是使用者手上的集覆盖
+    模型：列数减半时同一实例的 LP 墙钟 327 s → 263.6 s（同 20 000 枢轴上限）。
+
+### Changed
+
+- **文档**：[`docs/algorithms.md`](docs/algorithms.md) 的 presolve 一节新增列支配小节（四个条件、为什么
+  第四条不能省、两处被它救回来的错误结论、限度），[`docs/api.md`](docs/api.md) 补 `presolve` 与 `mip`
+  两个包的契约。
 
 ## [0.5.0] — 2026-10-29
 

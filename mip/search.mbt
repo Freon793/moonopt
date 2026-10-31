@@ -1113,6 +1113,11 @@ fn neighbourhood_pass(
     neighbourhood_passes: 0,
     primal_rounding: options.primal_rounding,
     row_strengthening: options.row_strengthening,
+    // Not on the neighbourhood model: it is already a restriction of the caller's model with
+    // most of its integers pinned at the incumbent, so a second reduction pass would be a
+    // different experiment than the one the caller asked for. The pass exists to walk *around*
+    // a point, and a smaller model is not what it is looking for.
+    column_dominance: false,
     node_solver: options.node_solver,
     cut_hook: options.cut_hook,
   })
@@ -1179,22 +1184,126 @@ fn kernel_node(
 /// A model whose rows give it nothing to strengthen is searched unchanged (the reduction
 /// returns the model it was given).
 pub fn solve_mip(model : @model.Model, options : MipOptions) -> MipResult {
-  if !options.row_strengthening {
-    // The caller asked for the model as written, and the counters then report the truth about
-    // this run: the search saw exactly the rows it was handed.
-    let untouched : @presolve.StrengthenStats = {
-      rows_rewritten: 0,
-      bounds_tightened: 0,
-    }
-    return solve_mip_unchanged(model, options, untouched)
+  let untouched_strengthening : @presolve.StrengthenStats = {
+    rows_rewritten: 0,
+    bounds_tightened: 0,
   }
-  let (strengthened, stats) = @presolve.strengthen_integer_rows(model)
-  solve_mip_unchanged(strengthened, options, stats)
+  let untouched_domination : @presolve.DominationStats = {
+    columns_removed: 0,
+    columns_compared: 0,
+  }
+  // Column dominance first, because it removes whole columns and every later step then works
+  // on a smaller matrix. The class test lives in the reduction, so a model that is not a 0/1
+  // set-covering model comes back unchanged and reports `columns_compared: 0` — the
+  // measurement that says nothing was looked at, which is not the same statement as "this
+  // model is a set-covering model with nothing to give".
+  let (on_columns, removed, domination) = if options.column_dominance {
+    @presolve.remove_dominated_columns(model)
+  } else {
+    (model, [], untouched_domination)
+  }
+  let (prepared, strengthening) = if options.row_strengthening {
+    @presolve.strengthen_integer_rows(on_columns)
+  } else {
+    (on_columns, untouched_strengthening)
+  }
+  let result = solve_mip_unchanged(prepared, options, strengthening, domination)
+  restore_removed_columns(result, model, removed, options.tolerance)
 }
 
 ///|
-/// Branch and bound over the model exactly as it was handed in, with `stats` describing the
-/// rewriting that produced it (all zeroes when there was none).
+/// Map a solution of the reduced model back into the caller's own variable space, and check it
+/// against the model the caller wrote.
+///
+/// The reduction is exact, so the mapped point has to be feasible for the original model. This
+/// check exists because the mapping is the one step here where an index bug would come out as a
+/// plausible-looking wrong answer instead of as a failure, and because this package's rule is
+/// that a solution a reduction produced is checked against the **original** model rather than
+/// against the reduction's own bookkeeping (`presolve/postsolve.mbt`). A point that fails it is
+/// reported `Unverified` — it is not an answer, and saying so is the only honest option.
+fn restore_removed_columns(
+  result : MipResult,
+  model : @model.Model,
+  removed : Array[Int32],
+  tolerance : Double,
+) -> MipResult {
+  if removed.length() == 0 {
+    return result
+  }
+  let n = model.num_vars()
+  let is_removed : Array[Bool] = []
+  for j = 0; j < n; j = j + 1 {
+    is_removed.push(false)
+  }
+  for j in removed {
+    is_removed[j] = true
+  }
+  // The kept columns in their own order: the reduced model's column `k` is original column
+  // `keep[k]`, which is the map both directions of the restore use.
+  let keep : Array[Int32] = []
+  for j = 0; j < n; j = j + 1 {
+    if !is_removed[j] {
+      keep.push(j)
+    }
+  }
+  let values : Array[Double] = []
+  let ray : Array[Double] = []
+  for j = 0; j < n; j = j + 1 {
+    values.push(0.0)
+    ray.push(0.0)
+  }
+  let mut k = 0
+  while k < keep.length() && k < result.values.length() {
+    values[keep[k]] = result.values[k]
+    k = k + 1
+  }
+  k = 0
+  while k < keep.length() && k < result.ray.length() {
+    ray[keep[k]] = result.ray[k]
+    k = k + 1
+  }
+  if result.values.length() > 0 {
+    let row_violation = @presolve.max_row_violation(model, values)
+    let bound_violation = @presolve.max_bound_violation(model, values)
+    if row_violation > tolerance || bound_violation > tolerance {
+      return {
+        status: MipStatus::Unverified,
+        values: [],
+        objective: 0.0,
+        bound: 0.0,
+        gap: 0.0,
+        nodes: result.nodes,
+        verified: result.verified,
+        cuts: result.cuts,
+        strengthening: result.strengthening,
+        domination: result.domination,
+        ray: [],
+        message: "the dominated-column reduction produced a point the original model refuses: row violation " +
+        row_violation.to_string() +
+        ", bound violation " +
+        bound_violation.to_string(),
+      }
+    }
+  }
+  {
+    status: result.status,
+    values,
+    objective: result.objective,
+    bound: result.bound,
+    gap: result.gap,
+    nodes: result.nodes,
+    verified: result.verified,
+    cuts: result.cuts,
+    strengthening: result.strengthening,
+    domination: result.domination,
+    ray,
+    message: result.message,
+  }
+}
+
+///|
+/// Branch and bound over the model exactly as it was handed in, with `stats` and `domination`
+/// describing the reductions that produced it (all zeroes when there were none).
 ///
 /// See the package doc for what the statuses mean: in particular, only `Optimal` claims an
 /// answer, and an unbounded relaxation is reported as such rather than as an unbounded
@@ -1203,6 +1312,7 @@ fn solve_mip_unchanged(
   model : @model.Model,
   options : MipOptions,
   stats : @presolve.StrengthenStats,
+  domination : @presolve.DominationStats,
 ) -> MipResult {
   let issues = model.validate()
   if issues.length() > 0 {
@@ -1216,6 +1326,7 @@ fn solve_mip_unchanged(
       verified: 0,
       cuts: 0,
       strengthening: stats,
+      domination,
       ray: [],
       message: "model is not well formed: " + issues[0],
     }
@@ -1315,7 +1426,7 @@ fn solve_mip_unchanged(
     if solved >= options.max_nodes {
       return limit_result(
         nodes, queue, unjudged, incumbent, incumbent_objective, has_incumbent, solved,
-        verified, unfinished_nodes, cuts_added, sign, options, stats,
+        verified, unfinished_nodes, cuts_added, sign, options, stats, domination,
       )
     }
     // The neighbourhood pass, taken once at the tail of the budget. Every primal
@@ -1352,6 +1463,7 @@ fn solve_mip_unchanged(
           verified,
           cuts: cuts_added,
           strengthening: stats,
+          domination,
           ray: [],
           message: "a certificate was refused inside the neighbourhood pass: " +
           inner.message,
@@ -1409,6 +1521,7 @@ fn solve_mip_unchanged(
           verified,
           cuts: cuts_added,
           strengthening: stats,
+          domination,
           ray: [],
           message: "a relaxation's certificate was refused at node " +
           index.to_string() +
@@ -1462,6 +1575,7 @@ fn solve_mip_unchanged(
                   verified,
                   cuts: cuts_added,
                   strengthening: stats,
+                  domination,
                   ray: [],
                   message: reason,
                 }
@@ -1518,6 +1632,7 @@ fn solve_mip_unchanged(
                   verified,
                   cuts: cuts_added,
                   strengthening: stats,
+                  domination,
                   ray: [],
                   message: "the relaxation of the cut root was refused: " +
                   refused,
@@ -1559,7 +1674,7 @@ fn solve_mip_unchanged(
                 return limit_result(
                   nodes, queue, unjudged, incumbent, incumbent_objective, has_incumbent,
                   solved, verified, unfinished_nodes, cuts_added, sign, options,
-                  stats,
+                  stats, domination,
                 )
               }
               // Either the tightened relaxation is whole (the round has done its job and
@@ -1595,6 +1710,7 @@ fn solve_mip_unchanged(
               verified,
               cuts: cuts_added,
               strengthening: stats,
+              domination,
               ray,
               message: "the relaxation is unbounded and its point and improving ray are integral on the integer variables, so the integer model is unbounded",
             }
@@ -1614,6 +1730,7 @@ fn solve_mip_unchanged(
           verified,
           cuts: cuts_added,
           strengthening: stats,
+          domination,
           ray: [],
           message: "a relaxation is unbounded, which does not prove the integer problem is",
         }
@@ -1741,6 +1858,7 @@ fn solve_mip_unchanged(
                 verified,
                 cuts: cuts_added,
                 strengthening: stats,
+                domination,
                 ray: [],
                 message: "a certificate was refused while the primal heuristic repaired a rounding of node " +
                 index.to_string() +
@@ -1814,6 +1932,7 @@ fn solve_mip_unchanged(
                 verified,
                 cuts: cuts_added,
                 strengthening: stats,
+                domination,
                 ray: [],
                 message: "a certificate was refused while the primal heuristic pumped node " +
                 index.to_string() +
@@ -1980,6 +2099,7 @@ fn solve_mip_unchanged(
                   verified,
                   cuts: cuts_added,
                   strengthening: stats,
+                  domination,
                   ray: [],
                   message: "a certificate was refused while the primal heuristic walked node " +
                   index.to_string() +
@@ -2001,7 +2121,7 @@ fn solve_mip_unchanged(
                 return limit_result(
                   nodes, queue, unjudged, incumbent, incumbent_objective, has_incumbent,
                   solved, verified, unfinished_nodes, cuts_added, sign, options,
-                  stats,
+                  stats, domination,
                 )
               }
             }
@@ -2063,6 +2183,7 @@ fn solve_mip_unchanged(
       verified,
       cuts: cuts_added,
       strengthening: stats,
+      domination,
       ray: [],
       message: unfinished_nodes.to_string() +
       " node relaxation(s) did not finish, so the tree is not exhausted",
@@ -2079,6 +2200,7 @@ fn solve_mip_unchanged(
       verified,
       cuts: cuts_added,
       strengthening: stats,
+      domination,
       ray: [],
       message: "every node was pruned without an integer point, so none exists",
     }
@@ -2093,6 +2215,7 @@ fn solve_mip_unchanged(
     verified,
     cuts: cuts_added,
     strengthening: stats,
+    domination,
     ray: [],
     message: "",
   }
@@ -2115,6 +2238,7 @@ fn limit_result(
   sign : Double,
   options : MipOptions,
   stats : @presolve.StrengthenStats,
+  domination : @presolve.DominationStats,
 ) -> MipResult {
   // The nodes still in the queue, and the regions whose node reached no verdict, are the
   // uncertainty: the best of their bounds is what the incumbent is measured against.
@@ -2133,6 +2257,7 @@ fn limit_result(
     verified,
     cuts: cuts_added,
     strengthening: stats,
+    domination,
     ray: [],
     message: "relaxation budget of " +
     options.max_nodes.to_string() +

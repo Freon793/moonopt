@@ -431,6 +431,7 @@ pub fn solve_with(model : @model.Model, options : SolveOptions) -> Solution {
       primal_rounding: base.primal_rounding,
       neighbourhood_passes: base.neighbourhood_passes,
       row_strengthening: base.row_strengthening,
+      column_dominance: base.column_dominance,
       node_solver: base.node_solver,
       cut_hook: base.cut_hook,
     }

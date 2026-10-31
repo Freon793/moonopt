@@ -20,6 +20,7 @@ pub(all) struct MipOptions {
   tolerance : Double
   verify_nodes : Bool
   row_strengthening : Bool
+  column_dominance : Bool
   dive_steps : Int32
   dive_attempts : Int32
   cut_rounds : Int32
@@ -32,6 +33,7 @@ pub fn MipOptions::default() -> Self
 pub fn MipOptions::with_cut_hook(Self, (@verify.CutRow) -> @verify.CutRow) -> Self
 pub fn MipOptions::with_max_nodes(Int32) -> Self
 pub fn MipOptions::with_node_solver(Self, (@model.Model) -> NodeSolution) -> Self
+pub fn MipOptions::without_column_dominance(Self) -> Self
 pub fn MipOptions::without_cuts(Self) -> Self
 pub fn MipOptions::without_neighbourhood(Self) -> Self
 pub fn MipOptions::without_primal_dive(Self) -> Self
@@ -49,6 +51,7 @@ pub struct MipResult {
   verified : Int32
   cuts : Int32
   strengthening : @presolve.StrengthenStats
+  domination : @presolve.DominationStats
   ray : Array[Double]
   message : String
 } derive(@debug.Debug)
