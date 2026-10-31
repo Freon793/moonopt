@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+（下一轮开发时在此累积。）
+
+## [0.6.0] — 2026-10-31
+
+自 `0.5.0` 起的变化。`0.5.0` 是一次纯文档发布，这一版是**能力**：整数路径新增一条精确的列支配归约，
+公开面因此增长（`MipOptions::column_dominance`、`MipResult::domination`、`presolve::remove_dominated_columns`、
+`presolve::DominationStats`）。四份基准报告的数字与 `0.5.0` 逐字相同，原因写在下面对应条目里。
+
 ### Added
 
 - **列支配归约（`presolve::remove_dominated_columns`）**：0/1 集覆盖模型里，若存在一条更便宜的列覆盖
