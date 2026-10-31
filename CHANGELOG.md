@@ -37,6 +37,14 @@
   第四条不能省、两处被它救回来的错误结论、限度），[`docs/api.md`](docs/api.md) 补 `presolve` 与 `mip`
   两个包的契约。
 
+### Release
+
+`moon publish` 返回 `Server status: 200 OK`；注册表 `latest_version = 0.6.0`、`build_status = success`、
+未 yanked，八个版本都在。归档 136 条目 / 解压 1 729 211 字节、不含实例数据；空白工程
+`moon add Freon793/moonopt@0.6.0` + `moon check --deny-warn` 通过，**十项公开契约
+`10 checked, 10 passed, FAILURES: 0`**（新增的两项是列支配的删列与解映射，以及"不在这一类时报
+`columns_compared: 0`"）。
+
 ## [0.5.0] — 2026-10-29
 
 **本版没有行为变化**：发布的是文档与三份实测记录。`.mbti` 一行未动，四份基准报告的数字与 `0.4.0` 逐字
