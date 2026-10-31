@@ -52,7 +52,7 @@ $reports = @(
     Scope = "continuous kernel (LP relaxation, presolve, certificates), 2200-row budget over the whole manifest"
     Metrics = @("instances in manifest", "solved to optimality", "skipped (row count over the limit)", "other outcomes")
     Paths = @("simplex", "presolve", "verify", "core", "model", "format", "cmd/parse")
-    Command = "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 2200 -MaxIterations 20000 -Presolve"
+    Command = "powershell -NoProfile -ExecutionPolicy Bypass -File bench/report-solve.ps1 -Relax -MaxRows 2500 -MaxIterations 20000 -Presolve"
     Backs = "the kernel's answer quality on real models: optima found, size refusals, numerical failures"
   },
   @{

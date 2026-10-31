@@ -9,12 +9,12 @@ MoonBit 的线性与整数规划求解器：读标准模型文件，用稀疏修
 - **线性求解**：稀疏 CSC + 稀疏 LU 基分解的修正单纯形，增益定价，Harris 两遍比值检验，有界变量枢轴，
   对偶单纯形热启动，presolve / postsolve
 - **整数求解**：best-bound 分支定界，节点热启动，根割（混合整数舍入，附推导证明），
-  取整 / 下潜 / 可行性泵三种原始启发式
+  取整 / 下潜 / 可行性泵三种原始启发式，0/1 集覆盖模型上的**列支配**归约（默认开，精确变换）
 - **证书**：最优性、Farkas 不可行性、无界射线，可序列化为 JSON；`verify` 包独立复核，不依赖 `simplex`
 - **目标平台**：native / wasm / wasm-gc / js
 
-已发布版本 `0.5.0` 在 [mooncakes.io](https://mooncakes.io/docs/Freon793/moonopt)。
-仓库当前 **224 个测试**在 native / wasm-gc / js 三个目标上全绿；CI 在 Linux / macOS / Windows 上跑检查、构建与测试。
+已发布版本 `0.6.0` 在 [mooncakes.io](https://mooncakes.io/docs/Freon793/moonopt)。
+仓库当前 **240 个测试**在 native / wasm-gc / js 三个目标上全绿；CI 在 Linux / macOS / Windows 上跑检查、构建与测试。
 
 ## 安装
 
@@ -89,9 +89,9 @@ moon run cmd/parse -- bench --manifest instances.txt --mip --max-nodes 300
 | 支持 | 暂不支持 |
 | --- | --- |
 | `min` / `max`；`≤` / `≥` / `=` 任意混合（含负右端项） | MPS 的 `SC` / `SI` 半连续界、完整的 `SOS` / `MARKER` 语义 |
-| 任意有限上下界、自由变量 | 行 / 列的支配检测、更强的整体 presolve 归约（现有：空行空列、冗余行、singleton 转界、隐式界收紧、对偶固定、固定变量消元 + 解还原） |
+| 任意有限上下界、自由变量 | 行支配检测、更强的整体 presolve 归约（现有：空行空列、冗余行、singleton 转界、隐式界收紧、对偶固定、固定变量消元 + 解还原） |
 | 三种定价规则：Dantzig、实测增益（默认）、**Devex**（`SimplexOptions::with_pricing`，CLI `--pricing`） | 精确 steepest-edge（只做 Devex 近似） |
-| 整数与 0-1 变量（分支定界；整点松弛上的**系数强化**、cutoff 收紧节点盒子；松弛无界且点 / 射线（或其最小整数倍）整数时证 `Unbounded`） | **节点上的割**；点本身是分数时的整数可行点（仍报 `UnboundedRelaxation`） |
+| 整数与 0-1 变量（分支定界；整点松弛上的**系数强化**、0/1 集覆盖模型上的**列支配**（`MipOptions::column_dominance`，默认开，删列后把解映回原变量）、cutoff 收紧节点盒子；松弛无界且点 / 射线（或其最小整数倍）整数时证 `Unbounded`） | **节点上的割**；点本身是分数时的整数可行点（仍报 `UnboundedRelaxation`） |
 | 证书复核（最优性 / Farkas / 无界射线） | 化简模型的乘子回映（证书只对内核收到的模型成立，故校验路径不化简） |
 | 内核行数上限 200 000（稀疏 LU，内存 `O(nnz + fill)`） | 非线性 / 半定规划、并行、网络单纯形专用路径、Python / JS 绑定 |
 
