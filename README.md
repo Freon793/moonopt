@@ -22,11 +22,16 @@ MoonBit 的线性与整数规划求解器：读标准模型文件，用稀疏修
 moon add Freon793/moonopt
 ```
 
-需要 **moonc v0.10.16** 或更新版本（`moon version --all`），CI 的每一条日志里都记着它实际用的那一套。
-源码按当前工具链的写法书写：类型标注用 `Int32`，默认参数用 `name~`（`moon fmt` 会把旧的 `Int` /
-`name?` 改写过来）——所以更低版本只会得到一棵需要改写的树：v0.10.14 直接报 `The type Int32 is undefined`，
-v0.10.15 能构建，但它的 `moon fmt` / `moon info` 会把接口文件里的 `Int32` 写回 `Int`，于是这两个命令会
-显示一份 `.mbti` 差异。`.mbti` 由 v0.10.16 生成。
+需要 **moonc v0.10.20** 或更新版本（`moon version --all`），CI 的每一条日志里都记着它实际用的那一套。
+源码按当前工具链的写法书写：类型标注用 `Int32`，默认参数用 `name~`，trait 派生用写在类型声明之前的
+`#derive(...)` 属性——这三处正是 `moon fmt` 会改写的地方，所以更低版本只会得到一棵需要改写的树：
+v0.10.14 直接报 `The type Int32 is undefined`；v0.10.15 的 `moon fmt` / `moon info` 会把接口文件里的
+`Int32` 写回 `Int`；v0.10.16 不认 `#derive`（实测报 `unknown attribute derive`，派生不生效，于是紧接着
+"给该类型实现 `Debug` / `Eq`"的那几处扩展编译失败）。
+
+注册表里的 `0.6.0` 仍是 `} derive(...)` 旧写法，在 v0.10.16 与 v0.10.20 上都能构建（后者会给一条
+`deprecated_syntax` 警告，不阻断构建），所以**只有从源码构建本仓库**才需要 0.10.20。`.mbti` 由
+v0.10.20 生成。
 
 ## 快速开始
 

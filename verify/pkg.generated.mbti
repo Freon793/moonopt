@@ -16,57 +16,64 @@ pub fn verify_cut(@model.Model, CutRow, CutCertificate, tolerance? : Double) -> 
 // Errors
 
 // Types and methods
+#derive(@debug.Debug)
 pub(all) struct Certificate {
   claim : Claim
   values : Array[Double]
   duals : Array[Double]
   ray : Array[Double]
   objective : Double
-} derive(@debug.Debug)
+}
 pub fn Certificate::empty(Claim) -> Self
 pub fn Certificate::from_json(String) -> Self?
 pub fn Certificate::to_json(Self) -> String
 
+#derive(@debug.Debug)
 pub(all) struct Check {
   name : String
   ok : Bool
   measured : Double
   tolerance : Double
-} derive(@debug.Debug)
+}
 
+#derive(Eq, @debug.Debug)
 pub(all) enum Claim {
   Optimal
   Infeasible
   Unbounded
-} derive(Eq, @debug.Debug)
+}
 
+#derive(@debug.Debug)
 pub(all) struct CutCertificate {
   basic : Int32
   multipliers : Array[Double]
   rhs : Double
   from_lower : Array[Bool]
-} derive(@debug.Debug)
+}
 
+#derive(@debug.Debug)
 pub(all) struct CutRow {
   terms : Array[(Int32, Double)]
   rel : @model.Rel
   rhs : Double
-} derive(@debug.Debug)
+}
 
+#derive(@debug.Debug)
 pub(all) struct CutVerdict {
   accepted : Bool
   checks : Array[Check]
   reason : String
   derived : CutRow?
-} derive(@debug.Debug)
+}
 pub fn CutVerdict::to_text(Self) -> String
 
+#derive(@debug.Debug)
 pub(all) struct Verdict {
   accepted : Bool
   claim : Claim
   checks : Array[Check]
   reason : String
-} derive(@debug.Debug)
+}
 pub fn Verdict::to_text(Self) -> String
 
 // Type aliases

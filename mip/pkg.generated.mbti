@@ -41,6 +41,7 @@ pub fn MipOptions::without_primal_rounding(Self) -> Self
 pub fn MipOptions::without_row_strengthening(Self) -> Self
 pub fn MipOptions::without_verification(Self) -> Self
 
+#derive(@debug.Debug)
 pub struct MipResult {
   status : MipStatus
   values : Array[Double]
@@ -54,8 +55,9 @@ pub struct MipResult {
   domination : @presolve.DominationStats
   ray : Array[Double]
   message : String
-} derive(@debug.Debug)
+}
 
+#derive(Eq, @debug.Debug)
 pub(all) enum MipStatus {
   Optimal
   Infeasible
@@ -64,7 +66,7 @@ pub(all) enum MipStatus {
   Unbounded
   Unverified
   Invalid
-} derive(Eq, @debug.Debug)
+}
 
 pub(all) struct NodeSolution {
   status : NodeStatus
@@ -74,12 +76,13 @@ pub(all) struct NodeSolution {
   ray : Array[Double]
 }
 
+#derive(Eq, @debug.Debug)
 pub(all) enum NodeStatus {
   Optimal
   Infeasible
   Unbounded
   Unfinished
-} derive(Eq, @debug.Debug)
+}
 
 // Type aliases
 

@@ -16,36 +16,40 @@
 ///
 /// `pub(all)` on purpose: other packages (the parsers, the solver, user code)
 /// must be able to build and match these values.
+#derive(Debug, Eq)
 pub(all) enum Sense {
   Minimize
   Maximize
-} derive(Debug, Eq)
+}
 
 ///|
 /// Relation of a constraint row.
+#derive(Debug, Eq)
 pub(all) enum Rel {
   LessEqual
   GreaterEqual
   Equal
-} derive(Debug, Eq)
+}
 
 ///|
 /// One decision variable.
+#derive(Debug)
 pub struct Var {
   name : String
   lb : Double
   ub : Double
   is_int : Bool
-} derive(Debug)
+}
 
 ///|
 /// One constraint row: `terms relation rhs`.
+#derive(Debug)
 pub struct Constraint {
   name : String
   rel : Rel
   rhs : Double
   terms : Array[(Int32, Double)]
-} derive(Debug)
+}
 
 ///|
 /// Parses an objective sense keyword as used by MPS (`MAX` / `MIN`, also the
@@ -82,12 +86,13 @@ pub let infinite_bound : Double = 1.0e30
 
 ///|
 /// An optimisation model under construction.
+#derive(Debug)
 pub struct Model {
   mut sense : Sense
   mut objective_terms : Array[(Int32, Double)]
   vars : Array[Var]
   constraints : Array[Constraint]
-} derive(Debug)
+}
 
 ///|
 /// Creates an empty model with the given optimisation direction.

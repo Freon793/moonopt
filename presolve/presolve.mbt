@@ -25,16 +25,18 @@
 ///|
 /// One entry of the reconstruction: how an original variable is recovered from
 /// the reduced model.
+#derive(Debug)
 pub(all) enum VarForm {
   /// The variable was eliminated at a proved value.
   Fixed(Double)
   /// The variable is a linear form of the reduced model's variables:
   /// `x = constant + Σ coefficient · y_k`.
   Linear(Double, Array[(Int32, Double)])
-} derive(Debug)
+}
 
 ///|
 /// What the reduction proved about the model.
+#derive(Debug, Eq)
 pub(all) enum PresolveVerdict {
   /// The model was reduced (possibly to zero rows and zero variables).
   Reduced
@@ -42,12 +44,13 @@ pub(all) enum PresolveVerdict {
   Infeasible
   /// The objective is unbounded on the feasible set.
   Unbounded
-} derive(Debug, Eq)
+}
 
 ///|
 /// Counters for one run. They are what makes the reduction observable: a caller
 /// can see which of the reductions fired instead of taking "presolve helped" on
 /// faith.
+#derive(Debug)
 pub(all) struct PresolveStats {
   rows_removed_empty : Int32
   rows_removed_redundant : Int32
@@ -67,7 +70,7 @@ pub(all) struct PresolveStats {
   rows_strengthened : Int32
   columns_removed_empty : Int32
   rounds : Int32
-} derive(Debug)
+}
 
 ///|
 /// A model ready for the kernel, plus the map back to the original variables.
@@ -1260,12 +1263,13 @@ pub fn presolve(model : @model.Model) -> ReducedModel {
 /// The two halves are counted apart because different arithmetic licenses them and they fire
 /// on different rows: raising a coefficient needs *both* extremes of a row's other terms to be
 /// finite, while the integer bound a row implies needs only their minimum.
+#derive(Debug, Eq)
 pub(all) struct StrengthenStats {
   /// Rows whose coefficients were raised.
   rows_rewritten : Int32
   /// Variable bounds an integer row implied that were tighter than the model's own.
   bounds_tightened : Int32
-} derive(Debug, Eq)
+}
 
 ///|
 /// How much of a row's magnitude a computed capacity may be wrong by, per term of the row.

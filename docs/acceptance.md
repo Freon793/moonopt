@@ -14,7 +14,7 @@
 
 | # | 验收要求 | 证据 | 复核方式 |
 | --- | --- | --- | --- |
-| 1 | 以 MoonBit 为主要实现语言（`moonc` 不低于 **0.10.16**） | 非测试 MoonBit 实现 **48 个文件 / 18 761 行**（测试另 30 文件 / 8 493 行，合计 78 文件 / 27 254 行）；仓库里**没有**任何非 MoonBit 的实现文件；零 FFI、零第三方运行期依赖（库包不引任何第三方包，仅 `cmd/parse` 引官方 `moonbitlang/x` 的 `fs`/`sys`）；工具链 **moonc v0.10.16+b1a0e846e**（本机 `moon version --all` 与 CI 当次日志逐字一致） | `moon check --deny-warn`；`moon version --all`；`git ls-files '*.mbt'` 后按 `_(wb)?test\.mbt$` 分流、用 `[IO.File]::ReadAllLines` 计行（**不能用 `Measure-Object -Line`：它不数空行**，会少算约 800 行；本行数字随每次代码改动重算）；`simplex/moon.pkg` 等包配置 |
+| 1 | 以 MoonBit 为主要实现语言（`moonc` 不低于 **0.10.16**） | 非测试 MoonBit 实现 **48 个文件 / 18 795 行**（测试另 30 文件 / 8 493 行，合计 78 文件 / 27 288 行）；仓库里**没有**任何非 MoonBit 的实现文件；零 FFI、零第三方运行期依赖（库包不引任何第三方包，仅 `cmd/parse` 引官方 `moonbitlang/x` 的 `fs`/`sys`）；工具链 **moonc v0.10.20+65efd5b93**（`moon 0.1.20261104`；本机 `moon version --all` 与 CI 当次注解逐字一致）。**下限是 0.10.20 而不是 0.10.16**：`moonc v0.10.20` 把 `} derive(...)` 判为 `deprecated_syntax`（在 `--deny-warn` 下即错误），源码因此用 `#derive(...)` 写法，而 v0.10.16 实测报 `unknown attribute derive`、派生不生效 ⇒ 这棵树在 0.10.16 上构建不了；注册表里的 `0.6.0` 仍是旧写法，在 0.10.16 与 0.10.20 上都能构建 | `moon check --deny-warn`；`moon version --all`；`git ls-files '*.mbt'` 后按 `_(wb)?test\.mbt$` 分流、用 `[IO.File]::ReadAllLines` 计行（**不能用 `Measure-Object -Line`：它不数空行**，会少算约 800 行；本行数字随每次代码改动重算）；`simplex/moon.pkg` 等包配置 |
 | 2 | GitHub 仓库公开可访问、提交记录清晰 | 公开仓库 `Freon793/moonopt`（默认分支 `main`，Apache-2.0 被 GitHub 识别）；**209 个提交**（复核时 HEAD 为 `4e48746`，2026-10-27；项目自 2026-09-14 起），唯一作者与仓库所有者一致；其中 **192 个提交信息带正文**（写明"做了什么 / 为什么 / 证据"） | `git log --oneline`；GitHub 仓库页；`git rev-list --count HEAD`；"带正文"的口径是 `git log -1 --format=%b <rev>` 非空，逐条数（`%b` 为空的只有一句话提交） |
 | 3 | 源代码结构清晰，能完成声明的核心功能 | **15 个 `moon.pkg`**：库 8 个包（`core`/`model`/`format`/`simplex`/`presolve`/`verify`/`mip`/`oracle`）+ 2 个 CLI（`cmd/parse`、`cmd/main`）+ 4 个示例（`production_plan`/`transportation`/`schedule_bound`/`unbounded`）+ 根包，包边界与依赖规则写在 [`design.md`](design.md)；核心功能有基准报告 | [`design.md`](design.md)；`bench/parse-report.md`、`bench/solve-report.md`、`bench/mip-report.md`、`bench/mip-report-small.md` |
 | 4 | 提供 README，说明目标 / 安装 / 使用 / 示例，且可复现 | [`../README.md`](../README.md) 的四要素齐备（定位与"为什么需要它"、`moon add` 安装、CLI 与 API 用法、可运行示例）；本文件第 2 节给出评审可执行的最短复现路径 | 见下方"五分钟复现" |
@@ -80,13 +80,13 @@ docs-only 提交之后 HEAD 的提交总数见第 1 节第 2 行）。分三批�
 ## 2. 五分钟复现（评审可执行）
 
 ```bash
-moon version --all                    # 本仓库验证于 moonc v0.10.16（要求不低于 0.10.16）
+moon version --all                    # 本仓库验证于 moonc v0.10.20（要求不低于 0.10.20，见第 1 节第 1 行）
 git clone https://github.com/Freon793/moonopt && cd moonopt
 
 # ① 检查 / 构建 / 测试（与 CI 相同的三步）
 moon check --deny-warn
 moon build
-moon test                             # 224 个测试
+moon test                             # 240 个测试
 
 # ② 可运行示例
 moon run examples/production_plan     # 最优 21 at (3, 1.5)

@@ -12,13 +12,14 @@
 
 ///|
 /// A sparse matrix in compressed sparse column form.
+#derive(Debug)
 pub struct SparseMatrix {
   nrows : Int32
   ncols : Int32
   col_ptr : Array[Int32]
   row_idx : Array[Int32]
   values : Array[Double]
-} derive(Debug)
+}
 
 ///|
 /// Builds a matrix from per-column `(row, value)` pairs.

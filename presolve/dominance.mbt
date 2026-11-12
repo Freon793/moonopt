@@ -6,12 +6,13 @@
 /// not of the class the reduction is proved for (so nothing was looked at), while zero
 /// compared and zero removed with a non-zero comparison count says the class matched and the
 /// model had nothing to give.
+#derive(Debug, Eq)
 pub(all) struct DominationStats {
   /// Columns removed because a cheaper column's cover contains this one's.
   columns_removed : Int32
   /// Columns examined for domination; zero when the model is not a 0/1 set-covering model.
   columns_compared : Int32
-} derive(Debug, Eq)
+}
 
 ///|
 /// The model class column dominance is proved on: every row is a `>=` row with all-positive

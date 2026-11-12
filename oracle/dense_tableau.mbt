@@ -20,21 +20,23 @@
 
 ///|
 /// Outcome of the reference solver.
+#derive(Debug, Eq)
 pub(all) enum OracleStatus {
   Optimal
   Infeasible
   Unbounded
   IterationLimit
-} derive(Debug, Eq)
+}
 
 ///|
 /// Reference solver result. `values` is empty unless the status is `Optimal`.
+#derive(Debug)
 pub struct OracleResult {
   status : OracleStatus
   values : Array[Double]
   objective : Double
   iterations : Int32
-} derive(Debug)
+}
 
 ///|
 /// Reduced cost above which a column counts as improving.

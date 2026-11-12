@@ -29,6 +29,7 @@
 
 ///|
 /// One tableau row, as the combination of model rows that produced it.
+#derive(Debug)
 pub(all) struct TableauRow {
   /// The model variable the row is basic in: the variable the row solves for. Its
   /// coefficient in the combination comes out as one.
@@ -39,7 +40,7 @@ pub(all) struct TableauRow {
   value : Double
   /// One entry per model row: the coefficient of that row in the combination.
   multipliers : Array[Double]
-} derive(Debug)
+}
 
 ///|
 /// The tableau rows of a solved problem, one per basic model variable.

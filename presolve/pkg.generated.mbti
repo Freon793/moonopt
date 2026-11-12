@@ -22,11 +22,13 @@ pub fn strengthen_integer_rows(@model.Model) -> (@model.Model, StrengthenStats)
 // Errors
 
 // Types and methods
+#derive(Eq, @debug.Debug)
 pub(all) struct DominationStats {
   columns_removed : Int32
   columns_compared : Int32
-} derive(Eq, @debug.Debug)
+}
 
+#derive(@debug.Debug)
 pub(all) struct PresolveStats {
   rows_removed_empty : Int32
   rows_removed_redundant : Int32
@@ -38,13 +40,14 @@ pub(all) struct PresolveStats {
   rows_strengthened : Int32
   columns_removed_empty : Int32
   rounds : Int32
-} derive(@debug.Debug)
+}
 
+#derive(Eq, @debug.Debug)
 pub(all) enum PresolveVerdict {
   Reduced
   Infeasible
   Unbounded
-} derive(Eq, @debug.Debug)
+}
 
 pub struct ReducedModel {
   model : @model.Model
@@ -63,15 +66,17 @@ pub fn ReducedModel::reduced(Self) -> @model.Model
 pub fn ReducedModel::stats(Self) -> PresolveStats
 pub fn ReducedModel::verdict(Self) -> PresolveVerdict
 
+#derive(Eq, @debug.Debug)
 pub(all) struct StrengthenStats {
   rows_rewritten : Int32
   bounds_tightened : Int32
-} derive(Eq, @debug.Debug)
+}
 
+#derive(@debug.Debug)
 pub(all) enum VarForm {
   Fixed(Double)
   Linear(Double, Array[(Int32, Double)])
-} derive(@debug.Debug)
+}
 
 // Type aliases
 

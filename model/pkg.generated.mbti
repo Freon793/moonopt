@@ -13,19 +13,21 @@ pub fn normalize_terms(Array[(Int32, Double)]) -> Array[(Int32, Double)]
 // Errors
 
 // Types and methods
+#derive(@debug.Debug)
 pub struct Constraint {
   name : String
   rel : Rel
   rhs : Double
   terms : Array[(Int32, Double)]
-} derive(@debug.Debug)
+}
 
+#derive(@debug.Debug)
 pub struct Model {
   mut sense : Sense
   mut objective_terms : Array[(Int32, Double)]
   vars : Array[Var]
   constraints : Array[Constraint]
-} derive(@debug.Debug)
+}
 pub fn Model::add_constraint(Self, Array[(Int32, Double)], Rel, Double) -> Unit
 pub fn Model::add_named_constraint(Self, Array[(Int32, Double)], Rel, Double, String) -> Unit
 pub fn Model::add_var(Self, String, lb? : Double, ub? : Double, is_int? : Bool) -> Int32
@@ -44,25 +46,28 @@ pub fn Model::set_var_bounds(Self, Int32, Double, Double) -> Unit
 pub fn Model::set_var_integer(Self, Int32) -> Unit
 pub fn Model::validate(Self) -> Array[String]
 
+#derive(Eq, @debug.Debug)
 pub(all) enum Rel {
   LessEqual
   GreaterEqual
   Equal
-} derive(Eq, @debug.Debug)
+}
 pub fn Rel::from_symbol(String) -> Self?
 
+#derive(Eq, @debug.Debug)
 pub(all) enum Sense {
   Minimize
   Maximize
-} derive(Eq, @debug.Debug)
+}
 pub fn Sense::from_symbol(String) -> Self?
 
+#derive(@debug.Debug)
 pub struct Var {
   name : String
   lb : Double
   ub : Double
   is_int : Bool
-} derive(@debug.Debug)
+}
 
 // Type aliases
 

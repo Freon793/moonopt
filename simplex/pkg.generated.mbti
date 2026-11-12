@@ -27,6 +27,7 @@ pub fn tableau_rows(@model.Model, SimplexOptions, SimplexBasis) -> Result[Array[
 // Errors
 
 // Types and methods
+#derive(@debug.Debug)
 pub struct KernelProblem {
   nrows : Int32
   ncols : Int32
@@ -49,26 +50,29 @@ pub struct KernelProblem {
   model_lower : Array[Double]
   model_upper : Array[Double]
   model_rhs : Array[Double]
-} derive(@debug.Debug)
+}
 pub fn KernelProblem::from_model(@model.Model) -> Result[Self, String]
 pub fn KernelProblem::from_standard(Int32, Array[Double], Array[(Array[Double], @model.Rel, Double)]) -> Self
 pub fn KernelProblem::slack_row_map(Self) -> Array[Int32]
 pub fn KernelProblem::solution(Self, Array[Double]) -> Array[Double]
 
+#derive(Eq, @debug.Debug)
 pub(all) enum Pricing {
   Dantzig
   Gain
   Devex
-} derive(Eq, @debug.Debug)
+}
 
+#derive(@debug.Debug)
 pub struct SimplexBasis {
   nrows : Int32
   ncols : Int32
   basis : Array[Int32]
   at_upper : Array[Bool]
   layout : String
-} derive(@debug.Debug)
+}
 
+#derive(@debug.Debug)
 pub(all) struct SimplexOptions {
   max_iterations : Int32
   refactorize_every : Int32
@@ -84,7 +88,7 @@ pub(all) struct SimplexOptions {
   reduced_cost_tolerance : Double
   relax_integrality : Bool
   max_kernel_rows : Int32
-} derive(@debug.Debug)
+}
 pub fn SimplexOptions::default() -> Self
 pub fn SimplexOptions::limit_iterations(Self, Int32) -> Self
 pub fn SimplexOptions::relaxed() -> Self
@@ -94,6 +98,7 @@ pub fn SimplexOptions::with_max_kernel_rows(Int32) -> Self
 pub fn SimplexOptions::with_pricing(Self, Pricing) -> Self
 pub fn SimplexOptions::with_stall_window(Int32) -> Self
 
+#derive(@debug.Debug)
 pub struct SimplexResult {
   status : SimplexStatus
   values : Array[Double]
@@ -103,8 +108,9 @@ pub struct SimplexResult {
   duals : Array[Double]
   ray : Array[Double]
   basis : SimplexBasis?
-} derive(@debug.Debug)
+}
 
+#derive(Eq, @debug.Debug)
 pub(all) enum SimplexStatus {
   Optimal
   Infeasible
@@ -112,13 +118,14 @@ pub(all) enum SimplexStatus {
   IterationLimit
   NumericalFailure
   TooLarge
-} derive(Eq, @debug.Debug)
+}
 
+#derive(@debug.Debug)
 pub(all) struct TableauRow {
   basic : Int32
   value : Double
   multipliers : Array[Double]
-} derive(@debug.Debug)
+}
 
 // Type aliases
 

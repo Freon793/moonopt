@@ -80,11 +80,12 @@
 
 ///|
 /// A cut: one inequality, in the model's variables.
+#derive(Debug)
 pub(all) struct CutRow {
   terms : Array[(Int32, Double)]
   rel : @model.Rel
   rhs : Double
-} derive(Debug)
+}
 
 ///|
 /// Where a cut comes from: the relaxation row it was rounded from, as a combination of
@@ -92,6 +93,7 @@ pub(all) struct CutRow {
 ///
 /// Plain data, so that a producer can build one and this package can re-derive the cut
 /// from it without knowing anything about the producer.
+#derive(Debug)
 pub(all) struct CutCertificate {
   /// The variable that is basic in the row: the one the row solves for. It has to be an
   /// integer variable, and its coefficient in the combination has to come out as one.
@@ -107,7 +109,7 @@ pub(all) struct CutCertificate {
   /// bound gives that — but the choice does change the cut, so the checker is told which
   /// one was made rather than guessing.
   from_lower : Array[Bool]
-} derive(Debug)
+}
 
 ///|
 /// The fractionality a right hand side must have before it is worth rounding, and the
@@ -528,6 +530,7 @@ pub fn derive_cut(
 /// infeasibility or a ray. A cut is a different kind of statement — about *every*
 /// integer point — and folding it into the same type would put a claim in the
 /// certificate path that `verify` cannot answer.
+#derive(Debug)
 pub(all) struct CutVerdict {
   accepted : Bool
   checks : Array[Check]
@@ -536,7 +539,7 @@ pub(all) struct CutVerdict {
   /// The cut the witness derives, whether or not it is the one that was offered. A
   /// refusal says how far the offered row was from the row the argument actually gives.
   derived : CutRow?
-} derive(Debug)
+}
 
 ///|
 /// Renders a cut verdict as one line, for CLI output and test messages.

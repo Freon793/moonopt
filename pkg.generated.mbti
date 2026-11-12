@@ -16,6 +16,7 @@ pub fn solve_with(@model.Model, SolveOptions) -> Solution
 // Errors
 
 // Types and methods
+#derive(@debug.Debug)
 pub struct Solution {
   status : SolveStatus
   values : Array[Double]
@@ -25,25 +26,27 @@ pub struct Solution {
   bound : Double
   gap : Double
   message : String
-} derive(@debug.Debug)
+}
 
+#derive(@debug.Debug)
 pub(all) struct SolveOptions {
   max_iterations : Int32
   presolve : Bool
   max_nodes : Int32
   cut_rounds : Int32
-} derive(@debug.Debug)
+}
 pub fn SolveOptions::default() -> Self
 pub fn SolveOptions::new(Int32) -> Self
 pub fn SolveOptions::with_max_nodes(Int32) -> Self
 
+#derive(Eq, @debug.Debug)
 pub(all) enum SolveStatus {
   Optimal
   Infeasible
   Unbounded
   NodeLimit
   NotSolved
-} derive(Eq, @debug.Debug)
+}
 
 // Type aliases
 

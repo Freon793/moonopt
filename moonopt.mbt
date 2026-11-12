@@ -39,6 +39,7 @@ let reconstruction_tolerance : Double = 1.0e-7
 
 ///|
 /// Outcome of a solve call.
+#derive(Debug, Eq)
 pub(all) enum SolveStatus {
   /// The answer is proven: for a linear model the kernel's own residual and dual checks
   /// stand behind it, and for a model with integer variables every relaxation the
@@ -64,7 +65,7 @@ pub(all) enum SolveStatus {
   /// unbounded relaxation says nothing about the integer model, or a certificate was
   /// refused by the independent checker.
   NotSolved
-} derive(Debug, Eq)
+}
 
 ///|
 /// What a solve call produced.
@@ -74,6 +75,7 @@ pub(all) enum SolveStatus {
 /// optimal. `message` carries the reason otherwise, and also the kernel's or the
 /// search's own note when a run needed its recovery attempt or reached no verdict on a
 /// relaxation.
+#derive(Debug)
 pub struct Solution {
   status : SolveStatus
   values : Array[Double]
@@ -98,13 +100,14 @@ pub struct Solution {
   /// whose sense the caller has to know is how that decision goes wrong.
   gap : Double
   message : String
-} derive(Debug)
+}
 
 ///|
 /// Tunables for a solve call.
 ///
 /// `pub(all)` so callers can write `{ max_iterations: 1000, presolve: false }`
 /// directly; `SolveOptions::new` is the readable alternative.
+#derive(Debug)
 pub(all) struct SolveOptions {
   max_iterations : Int32
   /// Reduce the model before the kernel sees it and reconstruct the solution
@@ -125,7 +128,7 @@ pub(all) struct SolveOptions {
   /// unchecked cut would remove integer points from every node below it without anything
   /// downstream noticing. Ignored by a linear solve, which has nothing to round.
   cut_rounds : Int32
-} derive(Debug)
+}
 
 ///|
 /// Default solve options: a generous iteration budget and node budget, presolve on, cuts

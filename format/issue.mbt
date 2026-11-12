@@ -4,12 +4,13 @@
 /// Positions are 1-based: `line` counts from the start of the file, `column`
 /// counts characters from the start of that line, and `token` is the exact text
 /// the parser rejected (empty when the problem is not tied to a single token).
+#derive(Debug, Eq)
 pub(all) struct ParseIssue {
   line : Int32
   column : Int32
   token : String
   message : String
-} derive(Debug, Eq)
+}
 
 ///|
 /// Builds an issue record.

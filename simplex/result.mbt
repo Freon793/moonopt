@@ -1,5 +1,6 @@
 ///|
 /// Outcome of a kernel run.
+#derive(Debug, Eq)
 pub(all) enum SimplexStatus {
   Optimal
   Infeasible
@@ -10,7 +11,7 @@ pub(all) enum SimplexStatus {
   /// stops before allocating, so this is a boundary of the current milestone
   /// rather than a failed attempt at a solve.
   TooLarge
-} derive(Debug, Eq)
+}
 
 ///|
 /// A basis, in the form a later run can start from.
@@ -35,13 +36,14 @@ pub(all) enum SimplexStatus {
 /// from everything that decides the layout (the starting column of each row, each
 /// variable's column split, the rows' relations and normalisation signs) and a mismatch
 /// refuses the warm start exactly as a shape mismatch does.
+#derive(Debug)
 pub struct SimplexBasis {
   nrows : Int32
   ncols : Int32
   basis : Array[Int32]
   at_upper : Array[Bool]
   layout : String
-} derive(Debug)
+}
 
 ///|
 /// What a kernel run produced.
@@ -64,6 +66,7 @@ pub struct SimplexBasis {
 /// Both arrays are in the convention `verify` documents, are stated against the
 /// **model the kernel was handed** (not the kernel's internal normal form), and are
 /// empty when the run has nothing to prove.
+#derive(Debug)
 pub struct SimplexResult {
   status : SimplexStatus
   values : Array[Double]
@@ -77,7 +80,7 @@ pub struct SimplexResult {
   /// when the run reached a verdict, because only then is the basis a statement about
   /// the model rather than about where the run gave up.
   basis : SimplexBasis?
-} derive(Debug)
+}
 
 ///|
 /// Which rule picks the entering column.
@@ -87,6 +90,7 @@ pub struct SimplexResult {
 /// What changes is the cost per iteration and the number of pivots — which is
 /// exactly why the default is the rule that measured best on the corpus rather than
 /// the one that sounds most modern, and why the others stay reachable.
+#derive(Eq, Debug)
 pub(all) enum Pricing {
   /// Largest reduced cost: the classical rule. Cheap per iteration, and easily
   /// fooled by a column whose improvement *rate* is large while the step it can
@@ -101,7 +105,7 @@ pub(all) enum Pricing {
   /// updated after every pivot. The weights are re-derived periodically so they
   /// cannot drift; a column's weight is the only thing this rule adds to the state.
   Devex
-} derive(Eq, Debug)
+}
 
 ///|
 /// Tuning knobs for a kernel run.
@@ -116,6 +120,7 @@ pub(all) enum Pricing {
 /// not a slow solve but a dead process. A refused run is a fact the caller can act
 /// on; a crash is not. Bounds are bounds now, so the ceiling mostly guards against
 /// runs that cannot be honoured rather than against allocation.
+#derive(Debug)
 pub(all) struct SimplexOptions {
   max_iterations : Int32
   refactorize_every : Int32
@@ -216,7 +221,7 @@ pub(all) struct SimplexOptions {
   /// and on `fast0507` that turned 489 rows into 63 490; the pivot count follows the
   /// row count, so it was also the reason the instance did not finish.
   max_kernel_rows : Int32
-} derive(Debug)
+}
 
 ///|
 /// Defaults: generous iteration budget, refactorization every 500 pivots (the

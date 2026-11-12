@@ -1,5 +1,6 @@
 ///|
 /// What a certificate claims about a model.
+#derive(Debug, Eq)
 pub(all) enum Claim {
   /// The values are optimal: no feasible point beats them.
   Optimal
@@ -7,7 +8,7 @@ pub(all) enum Claim {
   Infeasible
   /// The values are feasible and `ray` improves the objective forever from them.
   Unbounded
-} derive(Debug, Eq)
+}
 
 ///|
 /// A claim plus the numbers that are supposed to prove it.
@@ -16,6 +17,7 @@ pub(all) enum Claim {
 /// these arrays alone, so whichever code produced it is irrelevant to the verdict.
 /// All multipliers follow the convention in the package doc. `pub(all)` so a caller
 /// can build one field by field, and so a test can read a verdict apart.
+#derive(Debug)
 pub(all) struct Certificate {
   claim : Claim
   /// Primal point, one entry per model variable: the optimum, or the feasible point
@@ -30,7 +32,7 @@ pub(all) struct Certificate {
   /// Objective value in the model's own sense: `max` stays `max`. Only an optimal
   /// claim carries one.
   objective : Double
-} derive(Debug)
+}
 
 ///|
 /// A certificate that claims nothing yet, for callers that fill the arrays in.
@@ -42,22 +44,24 @@ pub fn Certificate::empty(claim : Claim) -> Certificate {
 /// One named measurement, with the number it measured and the tolerance it was
 /// judged against — a refusal should say how far off the claim was, not only that
 /// it was refused.
+#derive(Debug)
 pub(all) struct Check {
   name : String
   ok : Bool
   measured : Double
   tolerance : Double
-} derive(Debug)
+}
 
 ///|
 /// What the verifier concluded, and every measurement behind it.
+#derive(Debug)
 pub(all) struct Verdict {
   accepted : Bool
   claim : Claim
   checks : Array[Check]
   /// The first failing check, in words; empty when the claim is accepted.
   reason : String
-} derive(Debug)
+}
 
 ///|
 /// Renders a verdict as one line, for CLI output and test messages.

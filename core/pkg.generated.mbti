@@ -47,13 +47,14 @@ pub fn CompensatedSum::add(Self, Double) -> Unit
 pub fn CompensatedSum::new() -> Self
 pub fn CompensatedSum::value(Self) -> Double
 
+#derive(@debug.Debug)
 pub struct SparseMatrix {
   nrows : Int32
   ncols : Int32
   col_ptr : Array[Int32]
   row_idx : Array[Int32]
   values : Array[Double]
-} derive(@debug.Debug)
+}
 pub fn SparseMatrix::col_nnz(Self, Int32) -> Int32
 pub fn SparseMatrix::col_pointers(Self) -> ArrayView[Int32]
 pub fn SparseMatrix::column(Self, Int32) -> Array[(Int32, Double)]

@@ -25,6 +25,7 @@
 
 ///|
 /// The standard-form problem handed to the kernel.
+#derive(Debug)
 pub struct KernelProblem {
   nrows : Int32
   ncols : Int32
@@ -121,7 +122,7 @@ pub struct KernelProblem {
   /// variable offset folded into it, so the model's `bᵢ` cannot be read back out of it without
   /// re-summing `Σⱼ aᵢⱼ·lⱼ` in an order the model layer did not use.
   model_rhs : Array[Double]
-} derive(Debug)
+}
 
 ///|
 /// Convenience view of the kernel solution for the first `structural` columns.

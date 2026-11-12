@@ -227,6 +227,18 @@ You can browse and install extra skills here:
   is the same type under both names): confirm it by normalising the removed and
   added lines before believing a re-export happened.
 
+  The release after that moved the **derivation syntax**: `moonc v0.10.20`
+  reports `} derive(...)` as `deprecated_syntax`, which `moon check --deny-warn`
+  turns into an error, and it accepts the attribute form `#derive(...)` written
+  before the type declaration. `moon fmt` performs the rewrite (22 files here,
+  plus the `.mbti` files), so the answer to that release is again "the newest
+  toolchain's own `moon fmt` output is the answer" - but this rewrite **moves the
+  floor** in one direction only: v0.10.16 reports `unknown attribute derive` and
+  the derivation silently does not happen, so a tree written the new way does not
+  build there, while the old spelling still builds on v0.10.20 (with the
+  deprecation warning). That asymmetry is why the published `0.6.0` keeps the old
+  spelling and only the repository raises its documented minimum.
+
 - `moon ide` provides project navigation helpers like `peek-def`, `outline`, and
   `find-references`. See $moonbit-agent-guide for details.
 

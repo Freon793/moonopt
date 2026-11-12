@@ -48,6 +48,7 @@
 
 ///|
 /// How a branch and bound run ended.
+#derive(Debug, Eq)
 pub(all) enum MipStatus {
   /// The incumbent is optimal: the tree is exhausted, or every open node's bound is
   /// closed against it.
@@ -72,10 +73,11 @@ pub(all) enum MipStatus {
   /// `Infeasible`: "this model has a contradictory bound" and "no integer point satisfies
   /// this model" are different statements, and only the second one is a proof.
   Invalid
-} derive(Debug, Eq)
+}
 
 ///|
 /// What a branch and bound run produced.
+#derive(Debug)
 pub struct MipResult {
   status : MipStatus
   /// Best integer point found, empty when the run proved infeasibility or found none. For
@@ -132,7 +134,7 @@ pub struct MipResult {
   /// reason a run ended otherwise (an invalid model, a limit, an unbounded relaxation), or
   /// the note that the run proved the model unbounded.
   message : String
-} derive(Debug)
+}
 
 ///|
 /// One node's relaxation, as the branch and bound needs it.
@@ -154,13 +156,14 @@ pub(all) struct NodeSolution {
 
 ///|
 /// How one node's relaxation ended, in the terms the branch and bound works in.
+#derive(Debug, Eq)
 pub(all) enum NodeStatus {
   Optimal
   Infeasible
   Unbounded
   /// The relaxation did not finish (iteration limit, numerical failure).
   Unfinished
-} derive(Debug, Eq)
+}
 
 ///|
 /// Knobs for a branch and bound run.

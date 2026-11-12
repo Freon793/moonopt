@@ -12,19 +12,21 @@ pub fn solve_standard(Int32, Array[Double], Array[(Array[Double], @model.Rel, Do
 // Errors
 
 // Types and methods
+#derive(@debug.Debug)
 pub struct OracleResult {
   status : OracleStatus
   values : Array[Double]
   objective : Double
   iterations : Int32
-} derive(@debug.Debug)
+}
 
+#derive(Eq, @debug.Debug)
 pub(all) enum OracleStatus {
   Optimal
   Infeasible
   Unbounded
   IterationLimit
-} derive(Eq, @debug.Debug)
+}
 
 // Type aliases
 
